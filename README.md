@@ -5,7 +5,7 @@ Each airport's real runways, taxiways, aprons and terminals are drawn as a 3D di
 
 **Live: [atc.badcodes.dev](https://atc.badcodes.dev)**
 
-<!-- demo-video -->
+https://github.com/user-attachments/assets/7eec05ea-d3fb-420a-b132-29508b34eba6
 
 The airport layouts come from OpenStreetMap, the aircraft from [adsb.lol](https://adsb.lol) (with [adsb.fi](https://adsb.fi) as a fallback), the weather from each airport's own METAR, and the light from the sun's real position at that airport. Follow one flight and the camera carries it gate to gate: out of its origin's diorama, across the map and into its destination's.
 
