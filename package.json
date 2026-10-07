@@ -1,0 +1,48 @@
+{
+  "name": "atc",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/BadCodesGG/atc"
+  },
+  "homepage": "https://atc.badcodes.dev",
+  "engines": {
+    "node": "^22.18.0 || 24.x"
+  },
+  "scripts": {
+    "dev": "next dev",
+    "prebuild": "node scripts/maplibre-worker.mjs",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint",
+    "typecheck": "next typegen && tsc --noEmit",
+    "test": "vitest run",
+    "test:smoke": "node scripts/smoke.mjs",
+    "airports": "node scripts/airports.mjs",
+    "procedures": "node scripts/procedures.mjs",
+    "postinstall": "node scripts/maplibre-worker.mjs"
+  },
+  "dependencies": {
+    "maplibre-gl": "^6.11.2",
+    "next": "16.3.8",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "three": "^0.186.1"
+  },
+  "devDependencies": {
+    "@maplibre/maplibre-gl-style-spec": "^26.4.4",
+    "@tailwindcss/postcss": "^4",
+    "@types/node": "^22.20.5",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "@types/three": "^0.186.0",
+    "eslint": "^9",
+    "eslint-config-next": "16.3.8",
+    "playwright": "1.62",
+    "tailwindcss": "^4",
+    "typescript": "^5",
+    "vitest": "^4.1.11"
+  }
+}

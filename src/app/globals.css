@@ -1,0 +1,318 @@
+@import "tailwindcss";
+
+/* A short window (a phone held sideways, a small laptop): the stacked layout drops what will not fit. */
+@custom-variant short (@media (max-height: 40rem));
+/* The stacked layout too short to show the open movements list and the flight card together. */
+@custom-variant cramped (@media (width < 80rem) and (height < 50rem));
+/* The wide layout with the height for the full flight card; a shorter wide window gets a compact one. */
+@custom-variant roomy (@media (width >= 80rem) and (height > 47.5rem));
+
+@theme inline {
+  --font-sans: var(--font-instrument-sans), system-ui, sans-serif;
+}
+
+/* Light: toy diorama, a bright paper-and-pastel look. Not inline: the scene overlay and the
+   chrome's hairline rings read these as CSS variables, and the dark theme below swaps them by
+   redefining the variables. */
+@theme {
+  --color-paper: #f4f3ef;
+  --color-surface: #ffffff;
+  --color-ink: #1d1f24;
+  --color-ink-2: #3b3e45;
+  --color-muted: #5d6068;
+  --color-note: #4a4d54;
+  --color-label: #6b6e75;
+  /* Only the runway designators on the scene use it, as text on the paper: 4.9:1 (the old #9a9ca1 was 2.5:1). */
+  --color-label-faint: #666970;
+  --color-hairline: #e6e3dc;
+  --color-well: #f4f3ef;
+  --color-selected: #f0efe9;
+  --color-selected-ring: #cfccc4;
+  --color-chip: #f0efe9;
+  --color-chip-ink: #1d1f24;
+  --color-accent: #1d1f24;
+  --color-on-accent: #ffffff;
+  --color-arriving: #2f7fd6;
+  --color-departing: #d6336c;
+  --color-taxiing: #e8762c;
+  --color-parked: #a2a6ad;
+  --color-live: #2f9e5a;
+  /* The LIVE dot once the feed is late, and once it is offline. */
+  --color-feed-stale: #d9730d;
+  --color-feed-offline: #d0342c;
+  --color-badge-arriving: #e1edfa;
+  --color-badge-arriving-ink: #1f5a9e;
+  --color-badge-departing: #fbe4ec;
+  --color-badge-departing-ink: #9e1f4c;
+  --color-badge-taxiing: #fcebdc;
+  --color-badge-taxiing-ink: #94420f;
+  --color-badge-parked: #eeeff1;
+  --color-badge-parked-ink: #4a4d54;
+}
+
+/* Dark: night ops, a near-black control-room look. */
+[data-theme="dark"] {
+  --color-paper: #060a10;
+  --color-surface: #0a121d;
+  --color-ink: #f2f6fb;
+  --color-ink-2: #9fb3cc;
+  --color-muted: #6f86a6;
+  --color-note: #9fb3cc;
+  --color-label: #7f97b8;
+  --color-label-faint: #a8925c;
+  --color-hairline: #1e2d45;
+  --color-well: #060a10;
+  --color-selected: #0c1522;
+  --color-selected-ring: #2a4468;
+  --color-chip: #0f2a1d;
+  --color-chip-ink: #6ff0a6;
+  /* Lifted from the mock's #16304f, which all but vanished on the card (1.4:1); 3.3:1 now, white text 4.9:1. */
+  --color-accent: #2f6aa8;
+  --color-on-accent: #e8f1fc;
+  --color-arriving: #5cb8ff;
+  --color-departing: #ff5c8a;
+  --color-taxiing: #ffb347;
+  --color-parked: #5f7390;
+  --color-live: #6ff0a6;
+  --color-feed-stale: #ffb347;
+  --color-feed-offline: #ff6b5e;
+  --color-badge-arriving: rgba(92, 184, 255, 0.14);
+  --color-badge-arriving-ink: #8fcfff;
+  --color-badge-departing: rgba(255, 92, 138, 0.14);
+  --color-badge-departing-ink: #ff8fb0;
+  --color-badge-taxiing: rgba(255, 179, 71, 0.14);
+  --color-badge-taxiing-ink: #ffc987;
+  --color-badge-parked: rgba(159, 179, 204, 0.12);
+  --color-badge-parked-ink: #9fb3cc;
+  /* Unlayered, so these win over the font-sans utility on the same element. */
+  font-family: var(--font-plex-condensed), system-ui, sans-serif;
+  color-scheme: dark;
+}
+
+/* The mock sets data and controls in mono: callsigns, figures, the clock, every button and field. */
+[data-theme="dark"] :is(h1, h2, button, input, time, .tabular-nums, .movements) {
+  font-family: var(--font-plex-mono), ui-monospace, monospace;
+}
+
+/* Night ops lists its movements in capitals, as a flight strip would. */
+[data-theme="dark"] .movements {
+  text-transform: uppercase;
+}
+
+/* Satellite: realistic daylight, with frosted white panels floating over the aerial view. */
+[data-theme="satellite"] {
+  --color-paper: #6d8b4c;
+  --color-surface: rgba(255, 255, 255, 0.86);
+  --color-ink: #16181c;
+  --color-ink-2: #2c2f35;
+  --color-muted: #4a4e55;
+  --color-note: #4a4e55;
+  --color-label: #4a4e55;
+  --color-label-faint: #4a4e55;
+  --color-hairline: rgba(0, 0, 0, 0.07);
+  --color-well: rgba(0, 0, 0, 0.05);
+  --color-selected: rgba(255, 255, 255, 0.97);
+  --color-selected-ring: #16181c;
+  --color-chip: #16181c;
+  --color-chip-ink: #ffffff;
+  --color-accent: #16181c;
+  --color-on-accent: #ffffff;
+  --color-arriving: #2f7fd6;
+  --color-departing: #d6336c;
+  --color-taxiing: #f08a2c;
+  --color-parked: #a2a6ad;
+  --color-live: #6ff0a6;
+  --color-feed-stale: #d9730d;
+  --color-feed-offline: #d0342c;
+  --color-badge-arriving: #e1edfa;
+  --color-badge-arriving-ink: #1f5a9e;
+  --color-badge-departing: #fbe4ec;
+  --color-badge-departing-ink: #a0224f;
+  --color-badge-taxiing: #fcebdc;
+  --color-badge-taxiing-ink: #94420f;
+  --color-badge-parked: #eeeff1;
+  --color-badge-parked-ink: #4a4e55;
+  /* Halo of the model's labels, which are white on the aerial view. */
+  --scene-halo: rgba(0, 0, 0, 0.45);
+  font-family: var(--font-albert-sans), system-ui, sans-serif;
+}
+
+[data-theme="satellite"] .bg-surface {
+  -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: blur(14px);
+}
+
+[data-theme="satellite"] .bg-surface:not(:focus-visible) {
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.12);
+}
+
+/* A panel that opens over the page (the share panel out of the time bar, the airport list, the alerts, the filters) is opaque: frosted at 0.86 it lets
+   the text under it (the title, the search box, the map's labels) show through the words on it, and one inside a frosted bar cannot see what is behind it. */
+[data-theme="satellite"] .popover-panel {
+  background: #ffffff;
+}
+
+/* White on an aerial photograph is 1.2:1 over a concrete apron and 3.6:1 over grass, whatever the halo, so the labels carry a backing of
+   their own: a dark pill that keeps the text at 6:1 or better even over pure white ground (the label's offsetWidth, which the scene
+   reads for keeping the selected flight's tag clear, includes the padding). */
+[data-theme="satellite"] .scene-label {
+  color: #ffffff;
+  background: rgba(10, 14, 20, 0.66);
+  padding: 1px 6px;
+  border-radius: 999px;
+}
+
+/* The title sits on its own panel, as the map under it is a photograph rather than paper. */
+[data-theme="satellite"] .atc-title {
+  padding: 6px 6px 6px 14px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.82);
+  -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: blur(14px);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.12);
+}
+
+/* Phones: the airport switch is the panel's right end, so the panel is no taller than it and keeps 8px above the search. */
+@media (width < 80rem) {
+  [data-theme="satellite"] .atc-title {
+    padding: 0 0 0 14px;
+    border-radius: 26px;
+  }
+}
+
+@media (width >= 80rem) {
+  [data-theme="satellite"] .atc-title {
+    padding: 10px 12px 10px 18px;
+  }
+}
+
+/* A short landscape window (a phone on its side, a small laptop's browser): the stacked layout spends its rows on chrome (title, search,
+   counts, wind and map style, tabs, the flight card, the time bar) and leaves the model a strip. The diorama takes the wide layout's
+   column at the right for the card and the tabs, the counts join the title row (where the radar toggle sits on the map), and the wind and
+   map style take the row under the search, so the model has the left of the window from there down to the view controls. Unlayered, so these
+   win over the utilities they replace; the map's own layout keeps the stacked one. chrome.tsx COLUMN_BESIDE tells the scene where its edge is. */
+@media (48rem <= width < 80rem) and (max-height: 40rem) {
+  /* Over the title row, which satellite gives a panel of its own (z-index 40). */
+  main:not([data-on-map]) .counts {
+    left: 260px;
+    top: 16px;
+    z-index: 45;
+  }
+  /* The title's text gives way to the counts, which start at 260px: a long airport name (BWI's, MSP's) wraps in its 220px, to two lines, with its
+     tooltip (the title attribute) carrying the rest, rather than running on beneath them. */
+  main:not([data-on-map]) .atc-title > div:first-child {
+    max-width: 220px;
+  }
+  main:not([data-on-map]) [data-weather] {
+    top: 132px;
+  }
+  main:not([data-on-map]) .theme-switch {
+    right: 332px;
+    top: 132px;
+  }
+  main:not([data-on-map]) .view-controls {
+    top: auto;
+    bottom: 76px;
+    left: 16px;
+    right: auto;
+  }
+  main:not([data-on-map]) .side-column {
+    top: 132px;
+    bottom: 76px;
+    left: auto;
+    right: 16px;
+    width: 300px;
+  }
+}
+
+/* The colour the frame clears to, behind the chrome's scrims: the page colour until the diorama's frame
+   loop sets the lit one (atc-app.tsx), which at night in the day themes is far from the page's. */
+main {
+  --scene-clear: var(--color-paper);
+}
+
+/* Labels pinned to the model: a halo in the colour behind them keeps them readable over aircraft. */
+.scene-label {
+  text-shadow:
+    0 0 2px var(--scene-halo, var(--scene-clear)),
+    0 0 2px var(--scene-halo, var(--scene-clear)),
+    0 0 4px var(--scene-halo, var(--scene-clear));
+}
+
+/* The world map's credit line, in the theme's panel colours rather than MapLibre's white. */
+main .maplibregl-ctrl.maplibregl-ctrl-attrib {
+  background: var(--color-surface);
+  color: var(--color-label);
+}
+
+main .maplibregl-ctrl-attrib a {
+  color: inherit;
+}
+
+/* Kept where the map shows it whichever view leads, so it is never at the page's own corner: while the diorama leads (and fades in over the map
+   on a handover) the map is under it, and its credit line there would overprint the flight data credit along the foot (chrome.tsx DataCredit).
+   The stacked layout on the map has the time bar and a row of controls along its foot (chrome.tsx MAP_FOOT): the credit sits above them. */
+@media (width < 80rem) {
+  main .maplibregl-ctrl-bottom-right {
+    bottom: 132px;
+  }
+}
+
+/* On a phone the map style has a row of its own above the controls (chrome.tsx MAP_STYLE_ROW), so the credit sits above that. */
+@media (width < 28rem) {
+  main .maplibregl-ctrl-bottom-right {
+    bottom: 192px;
+  }
+}
+
+/* Wide, it sits above the map style at the bottom right. */
+@media (width >= 80rem) {
+  main .maplibregl-ctrl-bottom-right {
+    bottom: 88px;
+    right: 24px;
+  }
+}
+
+[data-theme="dark"] .maplibregl-ctrl-attrib-button {
+  filter: invert(1);
+}
+
+body {
+  background: var(--color-paper);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+}
+
+/* The LIVE dot in the time bar (chrome.tsx LiveLabel): its colour and pulse carry the feed's state. */
+.live-dot {
+  background: var(--color-parked);
+  color: var(--color-parked);
+}
+[data-live="fresh"] .live-dot {
+  background: var(--color-live);
+  color: var(--color-live);
+  animation: live-pulse 2.4s ease-out infinite;
+}
+[data-live="stale"] .live-dot {
+  background: var(--color-feed-stale);
+  color: var(--color-feed-stale);
+  animation: live-pulse 1.2s ease-out infinite;
+}
+[data-live="offline"] .live-dot {
+  background: var(--color-feed-offline);
+  color: var(--color-feed-offline);
+}
+@keyframes live-pulse {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, currentColor 70%, transparent);
+  }
+  70%,
+  100% {
+    box-shadow: 0 0 0 6px color-mix(in srgb, currentColor 0%, transparent);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .live-dot {
+    animation: none !important;
+  }
+}

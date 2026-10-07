@@ -1,0 +1,117 @@
+HDR01FAACIFP18      001P013203969192610  09-SEP-202612:03:55  U.S.A. DOT FAA                                                113023A4
+SUSAP KATLK7AATL     0     123YHN33381212W084254031W005001026         1800018000C    MNAR    HARTSFIELD/JACKSON ATLANTA INT248262410
+SUSAP KATLK7GRW08L   0090000950 N33385832W084262049         +0279801015000050150IIHFW3                                     267551612
+SUSAP KATLK7GRW08R   0099990950 N33384843W084261810         +0282601024000053150IIATL1                                     267561612
+SUSAP KATLK7GRW09L   0123900950 N33380494W084265268         +0281101019000056150IIHZK1                                     267571612
+SUSAP KATLK7GRW09R   0090000950 N33375453W084265268         +0283301026000055150IIFUN3                                     267581612
+SUSAP KATLK7GRW26R   0090002750 N33385835W084243403         +0272300990000055150IIGXZ2                                     267611711
+SUSAP KATLK7FH26RZ ABROOX 010BROOXK7PC0E  A    IF                                   08000     18000                 A FS   263571711
+SUSAP KATLK7FH26RZ ABROOX 020OLEGGK7PC0E    010TF                                 + 06000          210              A-FS   263581711
+SUSAP KATLK7FH26RZ ABROOX 030BAMBUK7PC0EE BR010RF       0025000950    27510079    + 04000                 CFZJB K7PCA FS   263591711
+SUSAP KATLK7FH26RZ AHAINZ 010HAINZK7PC0E  A    IF                                 + 05000     18000                 A FS   263602512
+SUSAP KATLK7FH26RZ AHAINZ 020BAMBUK7PC0EE B 010TF                                 + 04000                           A FS   263611711
+SUSAP KATLK7FH26RZ H      010BAMBUK7PC0E  I    IF                                 + 04000     18000                 A FS   263621410
+SUSAP KATLK7FH26RZ H      020AJAAYK7PC1E  F 010TF                                 + 02700                 RW26R K7PGA FS   263631410
+SUSAP KATLK7FH26RZ H      020AJAAYK7PC2W                                                A031                          FS   263641410
+SUSAP KATLK7FH26RZ H      030RW26RK7PG0GY M 031TF                                   01045             -300          A FS   263651410
+SUSAP KATLK7FH26RZ H      040         0  M     CA                     2751        + 01500                           A FS   263661410
+SUSAP KATLK7FH26RZ H      050TROYSK7PC0EY  R010DF                                 + 03500                           A FS   263671711
+SUSAP KATLK7FH26RZ H      060TROYSK7PC0EE  R   HM                     18500040    + 03500                           A FS   263681410
+SUSAP KATLK7FI08L  AJAAJJ 010JAAJJK7PC0E  B    IF                                 + 05000     18000                 0 NS   263811410
+SUSAP KATLK7FI08L  AJAAJJ 020BAZARK7PC0EE      CF IHFWK7      2750011809500035PI  + 04000                           0 NS   263821410
+SUSAP KATLK7FI08L  ALARII 010LARIIK7PC0E  A    IF                                 + 05000     18000                 0 NS   263831310
+SUSAP KATLK7FI08L  ALARII 020JAAJJK7PC0E  B    TF                                 + 05000                           0 NS   263841310
+SUSAP KATLK7FI08L  ALARII 030BAZARK7PC0EE      CF IHFWK7      2750011809500035PI  + 04000                           0 NS   263851310
+SUSAP KATLK7FI08L  I      010BAZARK7PC0E  I    IF IHFWK7      27500118        PI  J 040000290018000                 0 NS   263861310
+SUSAP KATLK7FI08L  I      020SCHELK7PC0E  F    CF IHFWK7      2750007409500044PI  H 0290002900            KATL  K7PA0 NS   263872104
+SUSAP KATLK7FI08L  I      030RW08LK7PG0GY M    CF IHFWK7      2750001609500058PI    01065             -300          0 NS   263881410
+SUSAP KATLK7FI08L  I      040         0  M     CA                     0950        + 01500                           0 NS   263891212
+SUSAP KATLK7FI08L  I      050         0    L   VIY                    3600                                          0 NS   263902104
+SUSAP KATLK7FI08L  I      060TROYSK7PC0EY      CF RMG K7      1152038129520001D   + 03500                           0 NS   263912104
+SUSAP KATLK7FI08L  I      070TROYSK7PC0EE  L   HM                     1152T010    + 03500                           0 NS   263922104
+SUSAP KATLK7FI09R  AANDIY 010ANDIYK7PC0E  A    IF                                 + 07000     18000                 0 DS   264182104
+SUSAP KATLK7FI09R  AANDIY 020DFINSK7PC0E       TF                                 + 06000                           0 DS   264192104
+SUSAP KATLK7FI09R  AANDIY 030GGUYYK7PC0EE B    CF IFUNK7      2750015209500038PI  + 05000                           0 DS   264202104
+SUSAP KATLK7FI09R  ADFINS 010DFINSK7PC0E       IF                                 + 06000     18000                 0 DS   264212104
+SUSAP KATLK7FI09R  ADFINS 020GGUYYK7PC0E  B    TF                                 + 05000                           0 DS   264222104
+SUSAP KATLK7FI09R  ADFINS 030EEASYK7PC0EE      CF IFUNK7      2750011809500035PI  + 04000                           0 DS   264232104
+SUSAP KATLK7FI09R  I      010GGUYYK7PC0E  I    IF IFUNK7      27500152        PI  J 050000270018000                 0 DS   264242104
+SUSAP KATLK7FI09R  I      011EEASYK7PC0E       CF IFUNK7      2750011809500035PI  + 04000                           0 DS   264252104
+SUSAP KATLK7FI09R  I      020BURNYK7PC0E  F    CF IFUNK7      2750006809500050PI  H 0270002700            KATL  K7PA0 DS   264262104
+SUSAP KATLK7FI09R  I      030RW09RK7PG0GY M    CF IFUNK7      2750001709500050PI    01082             -300          0 DS   264272104
+SUSAP KATLK7FI09R  I      040         0  M     VI                     1000                                          0 DS   264282104
+SUSAP KATLK7FI09R  I      050CONNIK7PC0EY      CF AHN K7      2346030205460056D   + 04000                           0 DS   264292104
+SUSAP KATLK7FI09R  I      060CONNIK7PC0EE  R   HM                     0546T010    + 04000                           0 DS   264302104
+SUSAP KATLK7FR08LY AJAAJJ 010JAAJJK7PC0E  B    IF                                 + 05000     18000                 A JS   266291410
+SUSAP KATLK7FR08LY AJAAJJ 020BAZARK7PC0EE   010TF                                 + 04000                           A JS   266302309
+SUSAP KATLK7FR08LY ALARII 010LARIIK7PC0E  A    IF                                 + 05000     18000                 A JS   266311310
+SUSAP KATLK7FR08LY ALARII 020JAAJJK7PC0E  B 010TF                                 + 05000                           A JS   266322309
+SUSAP KATLK7FR08LY ALARII 030BAZARK7PC0EE   010TF                                 + 04000                           A JS   266332309
+SUSAP KATLK7FR08LY R      010BAZARK7PC0E  I    IF                                 + 04000     18000                 A JS   266341410
+SUSAP KATLK7FR08LY R      020SCHELK7PC1E  F 010TF                                 + 02900                 RW08L K7PGA JS   266352309
+SUSAP KATLK7FR08LY R      020SCHELK7PC2WALPV       ALNAV/VNAV ALNAV                                                   JS   266361310
+SUSAP KATLK7FR08LY R      030RW08LK7PG0GY M 031TF                                   01065             -300          A JS   266372309
+SUSAP KATLK7FR08LY R      040         0  M     CA                     0949        + 01500                           A JS   266381307
+SUSAP KATLK7FR08LY R      050TROYSK7PC0EY  L010DF                                 + 03500                           A JS   266392309
+SUSAP KATLK7FR08LY R      060TROYSK7PC0EE  R   HM                     18500040    + 03500                           A JS   266401310
+SUSAP KATLK7DATL2  TRW08R 010         0        VA                     0950        + 01500     18000                        250902401
+SUSAP KATLK7DATL2  TRW08R 020         0 E      VM                     0950                                                 250912401
+SUSAP KATLK7DBANNG34RW08B 010         0        VA                     0950        + 01527     18000                        251002205
+SUSAP KATLK7DBANNG34RW08B 020SKNNRK7PC0E       DF                                                                          251012205
+SUSAP KATLK7DBANNG34RW08B 030GRITZK7PC0E       TF                                                                          251022205
+SUSAP KATLK7DBANNG34RW08B 040HYZMNK7PC0E       TF                                                  250                     251032205
+SUSAP KATLK7DBANNG34RW08B 050BANNGK7PC0EE      TF                                                                          251042205
+SUSAP KATLK7DCUTTN24RW08R 010         0        VI                     0950                    18000                        251451612
+SUSAP KATLK7DCUTTN24RW08R 020HRSHLK7PC0E       CF DBN K7      3179099107240056D                                            251462304
+SUSAP KATLK7DCUTTN24RW08R 030KLEGGK7PC0E       TF                                                  250                     251471612
+SUSAP KATLK7DCUTTN24RW08R 040COBBBK7PC0E       TF                                                                          251481612
+SUSAP KATLK7DCUTTN24RW08R 050CUTTNK7PC0EE      TF                                                                          251491612
+SUSAP KATLK7DCUTTN24RW09L 010         0        VI                     0950                    18000                        251501612
+SUSAP KATLK7DCUTTN24RW09L 020GRITZK7PC0E       CF DBN K7      3159095811460058D                                            251512304
+SUSAP KATLK7DCUTTN24RW09L 030HYZMNK7PC0E       TF                                                  250                     251521612
+SUSAP KATLK7DCUTTN24RW09L 040TYRNNK7PC0E       TF                                                                          251531612
+SUSAP KATLK7DCUTTN24RW09L 050CUTTNK7PC0EE      TF                                                                          251541612
+SUSAP KATLK7DCUTTN26HANKO 010CUTTNK7PC0E       IF                                             18000                        251811612
+SUSAP KATLK7DCUTTN26HANKO 020HANKOK7PC0EE      TF                                                                          251821612
+SUSAP KATLK7CAJAAY K70    C     N33385825W084182043                       W0056     NAR           AJAAY                    248312403
+SUSAP KATLK7CANDIY K70    C     N33375137W084514662                       W0053     NAR           ANDIY                    248332605
+SUSAP KATLK7CBAMBU K70    C     N33385785W084122012                       W0057     NAR           BAMBU                    248372605
+SUSAP KATLK7CBANNG K70    W     N32574049W084251698                       W0055     NAR           BANNG                    248382605
+SUSAP KATLK7CBAZAR K70    C     N33385741W084382863                       W0054     NAR           BAZAR                    248392504
+SUSAP KATLK7CBROOX K70    W     N33435858W084195212                       W0056     NAR           BROOX                    248502504
+SUSAP KATLK7CBURNY K70    C     N33375422W084325788                       W0055     NAR           BURNY                    248532605
+SUSAP KATLK7CCOBBB K70    W     N33485335W084313221                       W0055     NAR           COBBB                    248642504
+SUSAP KATLK7CCONNI K70    C     N33391632W083490093                       W0060     NAR           CONNI                    248662605
+SUSAP KATLK7CCUTTN K70    W     N33490715W085120642                       W0051     NAR           CUTTN                    248712605
+SUSAP KATLK7CDFINS K70    C     N33375224W084473799                       W0053     NAR           DFINS                    248782504
+SUSAP KATLK7CEEASY K70    C     N33375362W084385917                       W0054     NAR           EEASY                    248872504
+SUSAP KATLK7CGGUYY K70    C     N33375303W084430781                       W0054     NAR           GGUYY                    249082605
+SUSAP KATLK7CGRITZ K70    W     N33360772W084163481                       W0057     NAR           GRITZ                    249172605
+SUSAP KATLK7CHAINZ K70    C     N33385736W084074923                       W0058     NAR           HAINZ                    249212605
+SUSAP KATLK7CHANKO K70    W     N33501808W085385471                       W0048     NAR           HANKO                    249232605
+SUSAP KATLK7CHRSHL K70    W     N33405797W084164644                       W0057     NAR           HRSHL                    249332605
+SUSAP KATLK7CHYZMN K70    W     N33272515W084163500                       W0056     NAR           HYZMN                    249352403
+SUSAP KATLK7CJAAJJ K70    C     N33385682W084423653                       W0054     NAR           JAAJJ                    249392605
+SUSAP KATLK7CKLEGG K70    W     N33484503W084164802                       W0057     NAR           KLEGG                    249542605
+SUSAP KATLK7CLARII K70    C     N33385511W084512767                       W0053     NAR           LARII                    249602605
+SUSAP KATLK7COLEGG K70    W     N33435840W084121960                       W0057     NAR           OLEGG                    249892504
+SUSAP KATLK7CSCHEL K70    C     N33385795W084331474                       W0055     NAR           SCHEL                    250272605
+SUSAP KATLK7CSKNNR K70    W     N33380443W084203319                       W0056     NAR           SKNNR                    250342504
+SUSAP KATLK7CTROYS K70    C     N33524630W084260626                       W0056     NAR           TROYS                    250612605
+SUSAP KATLK7CTYRNN K70    W     N33272446W084304576                       W0055     NAR           TYRNN                    250632605
+SUSAP KATLK7CCFZJB K70    A     N33412812W084121979                       W0057     NAR           CFZJB(CNF)               248592504
+SUSAD        DBN   K7011310VTL  N32334846W082494816    N32334846W082494816W0050003061     NARDUBLIN                        251531605
+SUSAP KLASK2ALAS     0     148YHN36044923W115090882E011002183         1800018000C    MNAR    HARRY REID INTL               349132508
+SUSAP KLAXK2ALAX     0     129YHN33563299W118242898E012000128         1800018000C    MNAR    LOS ANGELES INTL              360791906
+SUSAP KLASK2GRW26L   0105262590 N36042517W115073297         +0596202048000060150IIRLE1                                     360302102
+SUSAP KLASK2GRW26R   0148352590 N36043505W115073294         +0594702044139960150IILAS1                                     360312508
+SUSAP KLAXK2GRW24L   0108852510 N33570070W118240601         -0001400113080159150IIHQB1                                     384771804
+SUSAP KLAXK2GRW24R   0089262510 N33570757W118240702         +0000300119000055150IIOSS3                                     384781612
+SUSAP KLASK2DHOOVR81RW26B 010         0        VD LAS K2              25900030D               18000                        351692209
+SUSAP KLASK2DHOOVR81RW26B 020         0 E      VM                     1900                                                 351702209
+SUSAP KLAXK2DGMN7  1RW24B 010         0        VR SMO K2      1540    2510    D   - 03000     18000                        364611709
+SUSAP KLAXK2DGMN7  1RW24B 020         0        VM                     2510                                                 364621709
+SUSAP KLAXK2DGMN7  1RW24B 030GMN  K2D 0VE      CF GMN K2      0000000032200550D                    250               -     364631709
+SUSAD        GMN   K2011610VTLW N34481450W118514090    N34481450W118514090E0160049201     NARGORMAN                        253362609
+SUSAD        LAS   K2011690VTHW N36044693W115093527    N36044693W115093527E0150021362     NARLAS VEGAS                     254811605
+SUSAD        SMO   K2011080VDLW N34003688W118272418    N34003753W118272297E0150001141     NARSANTA MONICA                  258522110

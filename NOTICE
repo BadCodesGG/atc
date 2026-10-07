@@ -1,0 +1,20 @@
+This project's code is licensed under the MIT licence in LICENSE. The
+following are not covered by it.
+
+The data files below are not covered by the MIT licence:
+
+- src/data/airports/*.json are (c) OpenStreetMap contributors, available
+under
+  the Open Database Licence (ODbL), https://www.openstreetmap.org/copyright.
+- src/data/procedures/*.json are derived from the FAA's Coded Instrument
+Flight
+  Procedures (CIFP), a US government work in the public domain.
+- src/lib/__fixtures__/ and public/fixtures/ are captured responses from
+  adsb.lol (ODbL, https://adsb.lol), adsbdb.com (routes), aviationweather.gov
+  (METAR, US government work, public domain), the FAA's NAS status feed
+  (US government work, public domain) and OpenStreetMap (ODbL), kept for
+  tests and the ?fixture= demo modes. Each remains under its source's terms.
+
+The BadCodes name, logo and wordmark are not licensed under the MIT
+licence. A fork keeps the copyright notice in LICENSE but should not
+present itself as BadCodes or use the logo as its own brand.

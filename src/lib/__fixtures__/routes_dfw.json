@@ -1,0 +1,146 @@
+{
+  "AAL972": {
+    "origin": {
+      "code": "DFW",
+      "city": "Dallas-Fort Worth",
+      "country": "US",
+      "latitude": 32.896801,
+      "longitude": -97.038002
+    },
+    "destination": {
+      "code": "AUS",
+      "city": "Austin",
+      "country": "US",
+      "latitude": 30.197535,
+      "longitude": -97.662015
+    }
+  },
+  "AAL1832": {
+    "origin": {
+      "code": "DEN",
+      "city": "Denver",
+      "country": "US",
+      "latitude": 39.861698150635,
+      "longitude": -104.672996521
+    },
+    "destination": {
+      "code": "DFW",
+      "city": "Dallas-Fort Worth",
+      "country": "US",
+      "latitude": 32.896801,
+      "longitude": -97.038002
+    }
+  },
+  "AAL2635": {
+    "origin": {
+      "code": "ONT",
+      "city": "Ontario",
+      "country": "US",
+      "latitude": 34.055999755859375,
+      "longitude": -117.60099792480467
+    },
+    "destination": {
+      "code": "DFW",
+      "city": "Dallas-Fort Worth",
+      "country": "US",
+      "latitude": 32.896801,
+      "longitude": -97.038002
+    }
+  },
+  "AAL2387": {
+    "origin": {
+      "code": "EWR",
+      "city": "New York",
+      "country": "US",
+      "latitude": 40.692501,
+      "longitude": -74.168701
+    },
+    "destination": {
+      "code": "DFW",
+      "city": "Dallas-Fort Worth",
+      "country": "US",
+      "latitude": 32.896801,
+      "longitude": -97.038002
+    }
+  },
+  "FFT4192": {
+    "origin": {
+      "code": "DFW",
+      "city": "Dallas-Fort Worth",
+      "country": "US",
+      "latitude": 32.896801,
+      "longitude": -97.038002
+    },
+    "destination": {
+      "code": "MCO",
+      "city": "Orlando",
+      "country": "US",
+      "latitude": 28.429399490356445,
+      "longitude": -81.30899810791016
+    }
+  },
+  "FFT1961": {
+    "origin": {
+      "code": "DFW",
+      "city": "Dallas-Fort Worth",
+      "country": "US",
+      "latitude": 32.896801,
+      "longitude": -97.038002
+    },
+    "destination": {
+      "code": "LAS",
+      "city": "Las Vegas",
+      "country": "US",
+      "latitude": 36.08010101,
+      "longitude": -115.1520004
+    }
+  },
+  "ASA542": {
+    "origin": {
+      "code": "SEA",
+      "city": "Seattle",
+      "country": "US",
+      "latitude": 47.449001,
+      "longitude": -122.308998
+    },
+    "destination": {
+      "code": "DFW",
+      "city": "Dallas-Fort Worth",
+      "country": "US",
+      "latitude": 32.896801,
+      "longitude": -97.038002
+    }
+  },
+  "FFT1406": {
+    "origin": {
+      "code": "ONT",
+      "city": "Ontario",
+      "country": "US",
+      "latitude": 34.055999755859375,
+      "longitude": -117.60099792480467
+    },
+    "destination": {
+      "code": "DFW",
+      "city": "Dallas-Fort Worth",
+      "country": "US",
+      "latitude": 32.896801,
+      "longitude": -97.038002
+    }
+  },
+  "AAL1758": {
+    "origin": {
+      "code": "DFW",
+      "city": "Dallas-Fort Worth",
+      "country": "US",
+      "latitude": 32.896801,
+      "longitude": -97.038002
+    },
+    "destination": {
+      "code": "MEM",
+      "city": "Memphis",
+      "country": "US",
+      "latitude": 35.04240036010742,
+      "longitude": -89.97669982910156
+    }
+  }
+}

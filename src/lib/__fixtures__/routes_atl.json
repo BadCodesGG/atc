@@ -1,0 +1,130 @@
+{
+  "DAL193": {
+    "origin": {
+      "code": "VCE",
+      "city": "Venice",
+      "country": "IT",
+      "latitude": 45.505299,
+      "longitude": 12.3519
+    },
+    "destination": {
+      "code": "ATL",
+      "city": "Atlanta",
+      "country": "US",
+      "latitude": 33.6367,
+      "longitude": -84.428101
+    }
+  },
+  "VIR103M": {
+    "origin": {
+      "code": "LHR",
+      "city": "London",
+      "country": "GB",
+      "latitude": 51.4706,
+      "longitude": -0.461941
+    },
+    "destination": {
+      "code": "ATL",
+      "city": "Atlanta",
+      "country": "US",
+      "latitude": 33.6367,
+      "longitude": -84.428101
+    }
+  },
+  "DAL3104": {
+    "origin": {
+      "code": "SRQ",
+      "city": "Sarasota/Bradenton",
+      "country": "US",
+      "latitude": 27.395399,
+      "longitude": -82.554398
+    },
+    "destination": {
+      "code": "ATL",
+      "city": "Atlanta",
+      "country": "US",
+      "latitude": 33.6367,
+      "longitude": -84.428101
+    }
+  },
+  "DAL2973": {
+    "origin": {
+      "code": "BTV",
+      "city": "Burlington",
+      "country": "US",
+      "latitude": 44.471901,
+      "longitude": -73.153297
+    },
+    "destination": {
+      "code": "ATL",
+      "city": "Atlanta",
+      "country": "US",
+      "latitude": 33.6367,
+      "longitude": -84.428101
+    }
+  },
+  "DAL753": {
+    "origin": {
+      "code": "ATL",
+      "city": "Atlanta",
+      "country": "US",
+      "latitude": 33.6367,
+      "longitude": -84.428101
+    },
+    "destination": {
+      "code": "SFO",
+      "city": "San Francisco",
+      "country": "US",
+      "latitude": 37.618999,
+      "longitude": -122.375
+    }
+  },
+  "DAL2825": {
+    "origin": {
+      "code": "ATL",
+      "city": "Atlanta",
+      "country": "US",
+      "latitude": 33.6367,
+      "longitude": -84.428101
+    },
+    "destination": {
+      "code": "MSP",
+      "city": "Minneapolis",
+      "country": "US",
+      "latitude": 44.882,
+      "longitude": -93.221802
+    }
+  },
+  "EDV4970": {
+    "origin": {
+      "code": "XNA",
+      "city": "Fayetteville/Springdale/Rogers",
+      "country": "US",
+      "latitude": 36.281898,
+      "longitude": -94.306801
+    },
+    "destination": {
+      "code": "ATL",
+      "city": "Atlanta",
+      "country": "US",
+      "latitude": 33.6367,
+      "longitude": -84.428101
+    }
+  },
+  "DAL1512": {
+    "origin": {
+      "code": "ATL",
+      "city": "Atlanta",
+      "country": "US",
+      "latitude": 33.6367,
+      "longitude": -84.428101
+    },
+    "destination": {
+      "code": "FLL",
+      "city": "Fort Lauderdale",
+      "country": "US",
+      "latitude": 26.072599,
+      "longitude": -80.152702
+    }
+  }
+}
