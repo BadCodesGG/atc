@@ -12,7 +12,7 @@ import { AIRCRAFT_GLYPH, BEACON_RADIUS_PX, GLYPH_BOX, GLYPH_PX } from "@/lib/glo
 import { groundView, liftView, mapHashCamera, orbitToMap, withoutBadMapHash } from "@/lib/globe/camera";
 import { journeyIconSize, PALETTES } from "@/lib/globe/map-style";
 import { fogReach } from "@/lib/journey";
-import { type Band, landingAirport, reveal, revealMask } from "@/lib/globe/handover";
+import { type Band, landingAirport, overAirport, reveal, revealMask } from "@/lib/globe/handover";
 import { type Filters, filterOptions, type FilterOptions, filtersActive, Ghosts, GHOST_MS, matches, NO_OPTIONS, rememberSeen, snapshotSubject, type Subject, subjectOfEntry, withFilters } from "@/lib/filters";
 import { toGeo, toLocal } from "@/lib/geo";
 import type { JourneyFix } from "@/lib/journey-follow";
@@ -1369,7 +1369,8 @@ function Viewer({ airport, theme, onTheme, onAirport, filters, onFilters, focusP
             shownNow = 0;
             return false;
           }
-          let shown = reveal(v.distance, band);
+          // Zoomed in somewhere other than this airport, the diorama stays hidden: it would otherwise take the lead far from its field.
+          let shown = journeying || overAirport(v, scene.homeView, band) ? reveal(v.distance, band) : 0;
           if (shown < 0.98) lead.armed = true;
           globe.setGuide({ home: scene.homeView, band });
           // journey

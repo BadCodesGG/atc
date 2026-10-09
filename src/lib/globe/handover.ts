@@ -45,8 +45,17 @@ export function revealMask(anchor: { x: number; y: number }, radiusPx: number, s
  */
 export function guide(entry: OrbitView, next: OrbitView, home: OrbitView, band: Band): OrbitView {
   if (progress(next.distance, band) <= 0) return next;
-  if (Math.hypot(entry.target[0] - home.target[0], entry.target[1] - home.target[1]) > band.far) return next;
+  if (!overAirport(entry, home, band)) return next;
   return { ...ease(entry, home, reveal(next.distance, band)), distance: next.distance };
+}
+
+/**
+ * Whether a camera looks at the airport: at a point within the band's outer distance of the framed
+ * view's. Zoomed in anywhere else (a lake, a city with no built airport) the map goes on alone, and the
+ * diorama stays hidden rather than rising far from its field.
+ */
+export function overAirport(view: OrbitView, home: OrbitView, band: Band): boolean {
+  return Math.hypot(view.target[0] - home.target[0], view.target[1] - home.target[1]) <= band.far;
 }
 
 /**
