@@ -6,7 +6,7 @@ import { type KeyboardEvent, type RefObject, useCallback, useEffect, useRef, use
 import { countTraffic, pickFeatured, type TrafficCounts } from "@/lib/aircraft-state";
 import type { AirportMap, Point } from "@/lib/airport-map";
 import type { NasStatus } from "@/lib/faa-status";
-import { AIRPORTS, type Airport, airportByCode } from "@/lib/airports";
+import { AIRPORTS, type Airport, airportByCode, zoneAbbreviation } from "@/lib/airports";
 import type { GlobeMap } from "@/lib/globe/globe-map";
 import { AIRCRAFT_GLYPH, BEACON_RADIUS_PX, GLYPH_BOX, GLYPH_PX } from "@/lib/globe/aircraft-glyph";
 import { groundView, liftView, mapHashCamera, orbitToMap, withoutBadMapHash } from "@/lib/globe/camera";
@@ -256,6 +256,8 @@ interface ChromeState {
   procedure: string | null;
   movements: MovementsData | null;
   clock: string;
+  /** The clock's time zone, "EDT": it shows the airport's own time, not the reader's. */
+  zone: string;
   following: boolean;
   /** Whether the reader has moved the view off the framed one. */
   moved: boolean;
@@ -592,7 +594,7 @@ function Viewer({ airport, theme, onTheme, onAirport, filters, onFilters, focusP
   /** Set when the selection changes outside the frame loop, so the chrome catches up on the next frame. */
   const refreshRef = useRef(false);
   const [status, setStatus] = useState<"loading" | "ready" | "failed">("loading");
-  const [chrome, setChrome] = useState<ChromeState>({ counts: null, total: null, options: NO_OPTIONS, card: null, procedure: null, movements: null, clock: "--:--", following: false, moved: false, camera: "orbit", cameras: ["orbit"], replay: null, inView: null });
+  const [chrome, setChrome] = useState<ChromeState>({ counts: null, total: null, options: NO_OPTIONS, card: null, procedure: null, movements: null, clock: "--:--", zone: "", following: false, moved: false, camera: "orbit", cameras: ["orbit"], replay: null, inView: null });
   /** The filters, read by the frame loop; a change of them has the chrome catch up on the next frame. */
   const filtersRef = useRef(filters);
   useEffect(() => {
@@ -1749,6 +1751,8 @@ function Viewer({ airport, theme, onTheme, onAirport, filters, onFilters, focusP
             .filter((r) => r.width > 0 && r.height > 0)
             .map((r) => ({ left: r.left - origin.left, top: r.top - origin.top, right: r.right - origin.left, bottom: r.bottom - origin.top }));
           if (selected) leader.style.stroke = `var(--color-${selected.card.state})`;
+          // weather: the drawn time; replay: the moment the picture is of
+          const drawn = drawnTime(weatherRef.current, picture, airport);
           const next: ChromeState = {
             counts,
             total: entries.length,
@@ -1758,8 +1762,8 @@ function Viewer({ airport, theme, onTheme, onAirport, filters, onFilters, focusP
             procedure: selected && pulse && replay.isLive ? pulse.citationOf(selected.aircraft.id) : null,
             // Every moving aircraft: the list folds to its first rows until it is expanded.
             movements: activeMovements(kept, selected?.aircraft.id ?? null),
-            // weather: the drawn time; replay: the moment the picture is of
-            clock: clockFormat.format(new Date(drawnTime(weatherRef.current, picture, airport))),
+            clock: clockFormat.format(new Date(drawn)),
+            zone: zoneAbbreviation(drawn, airport.timeZone),
             // A journey is followed even while the map has the camera.
             following: followRef.current !== null || (!!selected && journeyRef.current?.hex === selected.aircraft.id),
             moved: viewRef.current !== null || goalRef.current !== null || rig.active,
@@ -2096,7 +2100,7 @@ function Viewer({ airport, theme, onTheme, onAirport, filters, onFilters, focusP
       {onMap && <RadarToggle radar={radar} />}
       {stacked ? [...mapCards, phoneTheme, viewControls, dioramaColumn] : [phoneTheme, dioramaColumn, ...mapCards, viewControls]}
       {!onMap && <Legend />}
-      <TimeBar clock={chrome.clock} replay={chrome.replay} onLive={replayLive} onRate={replayRate} onSeek={replaySeek} liveOnly={onMap} share={<ShareControl getLink={shareThisView} replaying={!onMap && !!chrome.replay && !chrome.replay.live} />} />
+      <TimeBar clock={chrome.clock} zone={chrome.zone} replay={chrome.replay} onLive={replayLive} onRate={replayRate} onSeek={replaySeek} liveOnly={onMap} share={<ShareControl getLink={shareThisView} replaying={!onMap && !!chrome.replay && !chrome.replay.live} />} />
       <ThemeSwitch theme={theme} onChange={onTheme} className="max-xl:hidden" />
       <DataCredit />
     </>
