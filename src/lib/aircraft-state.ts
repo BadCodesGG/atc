@@ -181,7 +181,8 @@ function assessVehicle(m: Motion, ctx: AirsideContext, moving: boolean): Situati
   const kind = m.category?.toUpperCase() === "C1" || m.typeCode?.toUpperCase() === "EMER" ? "Emergency vehicle" : "Ground vehicle";
   const f = onRunway(ctx.runways, m.x, m.y);
   const activity = f ? `${kind} on runway ${designator(f.runway.ref ?? `${f.runway.ends[0].ref}/${f.runway.ends[1].ref}`)}` : kind;
-  return { state: moving ? "taxiing" : "parked", activity, runway: null, aglFt: 0, moving, vehicle: true };
+  // Ground traffic whether moving or not: "parked" would count it at a gate and log its next move as a pushback.
+  return { state: "taxiing", activity, runway: null, aglFt: 0, moving, vehicle: true };
 }
 
 /**
