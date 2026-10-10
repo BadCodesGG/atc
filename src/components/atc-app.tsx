@@ -1018,6 +1018,7 @@ function Viewer({ airport, theme, onTheme, onAirport, filters, onFilters, focusP
     if (!hasWebGL2) return;
     let stopped = false;
     let stopPoll = () => {};
+    let heardTimer: number | undefined;
     (async () => {
       const [{ TrafficView, fixtureTime }, { Tracker }, { parseTraffic }, { loadAirportMap }, { Replay }, { GroundPaths }, { recordedTraffic }] = await Promise.all([
         import("@/lib/traffic-view"),
@@ -1105,7 +1106,11 @@ function Viewer({ airport, theme, onTheme, onAirport, filters, onFilters, focusP
             recordFeedAnswer(snapshot, Date.now());
             // /feed-health
             tracker.add(snapshot);
-            setHeard(true);
+            // The picture plays PLAYBACK_DELAY behind the feed: until it reaches the first answer the tracker has
+            // nothing to draw, and the counts would read a false "0 tracked" rather than that traffic is on its way.
+            heardTimer ??= window.setTimeout(() => {
+              if (!stopped) setHeard(true);
+            }, Math.max(0, snapshot.time + PLAYBACK_DELAY - clock()) * 1000);
             replay.add(snapshot); // replay
             addRoutes(snapshot.routes);
             // alerts: from the poll, not the drawn frame, so a tab the browser has stopped drawing still alerts
@@ -1139,6 +1144,7 @@ function Viewer({ airport, theme, onTheme, onAirport, filters, onFilters, focusP
     return () => {
       stopped = true;
       stopPoll();
+      window.clearTimeout(heardTimer);
     };
   }, [hasWebGL2, airport, globeRef, leadRef, source, journeyRef, feedAlerts, viewAlerts]);
 
