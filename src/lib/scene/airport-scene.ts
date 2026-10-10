@@ -53,7 +53,7 @@ import type { AirportMap, Point } from "../airport-map";
 import { type AirfieldLight, airfieldLights, type AirfieldLightKind } from "./airfield-lights";
 import { type AircraftModel, MODEL_LENGTH } from "../aircraft-class";
 import { type JetLightKind, MODELS, modelGeometry, modelLights } from "./aircraft-model";
-import { type Area, centreOf, fitView, fitViewToArea, NEAR_RUNWAY_M, pixelsPerMetre, placeCamera, runwayClearance, type ViewSpec } from "./camera";
+import { type Area, bandOffsetY, centreOf, fitView, fitViewToArea, NEAR_RUNWAY_M, pixelsPerMetre, placeCamera, runwayClearance, type ViewSpec } from "./camera";
 import { drawnScale, fogRange, nearPlane } from "./cameras";
 import { ORBIT_FOV, type OrbitBounds, type OrbitView } from "./orbit";
 import { extrude, fill, type MeshData, ribbons, runwayMarkings, taxiwayRuns } from "./ground";
@@ -1138,9 +1138,7 @@ export class AirportScene {
    */
   setFreeArea(area: Area): void {
     if (this.width >= this.height) return;
-    // A band too short to centre anything in (the chrome not laid out yet) centres in the frame.
-    const y = area.bottom - area.top >= 80 ? this.height / 2 - (area.top + area.bottom) / 2 : 0;
-    const offset = { x: 0, y };
+    const offset = { x: 0, y: bandOffsetY(this.height, area) };
     this.offsets = { orbit: offset, eye: offset };
     this.applyView(this.view ?? this.home);
   }

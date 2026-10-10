@@ -108,6 +108,16 @@ export interface Area {
 }
 
 /**
+ * The vertical view offset that draws a frame's centre in the middle of `band` instead: what a portrait
+ * frame looks at then sits between its control rows and the flight card. However short the band (a phone
+ * with the card open leaves 48 px), its middle is the one place not covered; a band with no height (the
+ * chrome not laid out yet) centres in the frame.
+ */
+export function bandOffsetY(height: number, band: Area): number {
+  return band.bottom > band.top ? height / 2 - (band.top + band.bottom) / 2 : 0;
+}
+
+/**
  * Places the camera so the ground points fill `area` of a `width` x `height` frame, and no more:
  * the nearest fit, then a view offset that centres the points' bounds in the area. The rest of the
  * frame (a side panel, the header) is left clear of them. Needs the camera's aspect set and no view
