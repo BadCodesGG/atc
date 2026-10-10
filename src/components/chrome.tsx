@@ -4,7 +4,7 @@ import { type Airport, AIRPORTS } from "@/lib/airports";
 import { currentFeedStatus, type FeedChannel, type FeedStatus, liveDot, type LiveState, type TrafficReadout, trafficReadout, watchFeed } from "@/lib/feed-health";
 import { type NasStatus, programsFor } from "@/lib/faa-status";
 import { describeWeather, describeWind, formatVisibility, type Metar } from "@/lib/metar";
-import { type Movements as MovementsData, movementsFoot } from "@/lib/movements";
+import { cutMovements, MOVEMENT_ROWS, type Movements as MovementsData, movementsFoot } from "@/lib/movements";
 import type { OpsBoardRow, OpsView } from "@/lib/path-pulse";
 import type { CameraMode } from "@/lib/scene/cameras";
 import type { ReplayRate } from "@/lib/replay";
@@ -668,12 +668,15 @@ export const STATE_INK: Record<FlightState, string> = {
 
 /**
  * The aircraft moving now, as in the night ops mock's ACTIVE MOVEMENTS: callsign, type, what it is
- * doing, a state tag and speed, each row selecting its flight. The list only: the column's tabbed
- * panel places it and folds it, and `onChosen` lets it fold again on phones, to show the flight.
+ * doing, a state tag and speed, each row selecting its flight. `movements` is every moving aircraft:
+ * the first few rows show until the footer's "+ N more moving" expands the list to all of them. The list
+ * only: the column's tabbed panel places it and folds it, and `onChosen` lets it fold again on phones,
+ * to show the flight.
  */
 export function Movements({ movements, onSelect, onChosen, filtered = false, readout = "ready" }: { movements: MovementsData | null; onSelect: (id: string) => void; onChosen: () => void; filtered?: boolean; readout?: TrafficReadout }) {
+  const [expanded, setExpanded] = useState(false);
   if (!movements) return null;
-  const { rows, more, atGates } = movements;
+  const { rows, more, atGates } = cutMovements(movements, expanded ? Infinity : MOVEMENT_ROWS);
   // No traffic at all (a fixture asked for at another airport, or an empty sky): one plain line, not a "0 at gates" pill.
   if (rows.length === 0 && more === 0 && atGates === 0) {
     return (
@@ -684,11 +687,11 @@ export function Movements({ movements, onSelect, onChosen, filtered = false, rea
       </section>
     );
   }
-  const foot = movementsFoot(movements);
+  const foot = movementsFoot(movements, expanded);
   return (
     <section aria-label="Active movements" className="movements flex min-h-0 flex-col">
       <div id="movements-list" className="flex min-h-0 w-full flex-col gap-1.5">
-        <ul className="flex min-h-0 flex-col gap-1.5 overflow-y-auto">
+        <ul id="movements-rows" className="flex min-h-0 flex-col gap-1.5 overflow-y-auto">
           {rows.map((r) => (
             <li key={r.id}>
               <button
@@ -720,7 +723,22 @@ export function Movements({ movements, onSelect, onChosen, filtered = false, rea
             </li>
           ))}
         </ul>
-        {foot && <p className={`w-fit shrink-0 rounded-md bg-surface px-2.5 py-1 text-xs text-muted ${RING}`}>{foot}</p>}
+        {(foot.toggle || foot.atGates) && (
+          <p className="flex shrink-0 flex-wrap items-center gap-1.5 text-xs text-muted">
+            {foot.toggle && (
+              <button
+                type="button"
+                aria-expanded={expanded}
+                aria-controls="movements-rows"
+                onClick={() => setExpanded(!expanded)}
+                className={`min-h-11 rounded-md bg-surface px-2.5 font-semibold text-ink-2 hover:text-ink xl:min-h-7 ${RING}`}
+              >
+                {foot.toggle}
+              </button>
+            )}
+            {foot.atGates && <span className={`rounded-md bg-surface px-2.5 py-1 ${RING}`}>{foot.atGates}</span>}
+          </p>
+        )}
       </div>
     </section>
   );

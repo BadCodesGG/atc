@@ -83,24 +83,44 @@ function row(e: Entry, selected: boolean): MovementRow {
   };
 }
 
+/** Rows the list shows until it is expanded. */
+export const MOVEMENT_ROWS = 5;
+
 /**
- * Up to `limit` rows of the moving aircraft, the selected one marked. A selected aircraft that would
- * fall below the cut takes the last row, so the list always shows which flight the card is about.
+ * Up to `limit` rows of the moving aircraft, the selected one marked (every one by default, for the
+ * list to cut as it is folded or expanded).
  */
-export function activeMovements(entries: Entry[], selectedId: string | null, limit: number): Movements {
+export function activeMovements(entries: Entry[], selectedId: string | null, limit = Infinity): Movements {
   const moving = entries.filter((e) => e.situation.moving).sort(order);
-  const shown = moving.slice(0, limit);
-  const selected = moving.findIndex((e) => e.aircraft.id === selectedId);
-  if (limit > 0 && selected >= limit) shown[limit - 1] = moving[selected];
-  return {
-    rows: shown.map((e) => row(e, e.aircraft.id === selectedId)),
-    more: moving.length - shown.length,
+  const all: Movements = {
+    rows: moving.map((e) => row(e, e.aircraft.id === selectedId)),
+    more: 0,
     atGates: entries.filter((e) => e.situation.state === "parked" && !e.situation.vehicle).length,
   };
+  return cutMovements(all, limit);
 }
 
-/** The footer under the rows, "+ 18 more moving · 3 at gates", without a part that would read zero; null when both would. */
-export function movementsFoot({ more, atGates }: Pick<Movements, "more" | "atGates">): string | null {
-  const parts = [more > 0 ? `+ ${more} more moving` : "", atGates > 0 ? `${atGates} at gates` : ""].filter(Boolean);
-  return parts.length ? parts.join(" · ") : null;
+/**
+ * The first `limit` rows, the rest counted in `more`. A selected aircraft that would fall below the cut
+ * takes the last row, so the list always shows which flight the card is about.
+ */
+export function cutMovements(m: Movements, limit: number): Movements {
+  if (m.rows.length <= limit) return m;
+  const shown = m.rows.slice(0, limit);
+  const selected = m.rows.findIndex((r) => r.selected);
+  if (limit > 0 && selected >= limit) shown[limit - 1] = m.rows[selected];
+  return { rows: shown, more: m.more + m.rows.length - shown.length, atGates: m.atGates };
+}
+
+/**
+ * The footer under the rows, without a part that would read zero: the control that expands the list
+ * ("+ 18 more moving") or folds it back ("Show fewer"), and the aircraft at gates ("3 at gates").
+ * `all` is the whole list; `expanded`, whether every row of it is showing.
+ */
+export function movementsFoot(all: Movements, expanded: boolean, limit = MOVEMENT_ROWS): { toggle: string | null; atGates: string | null } {
+  const hidden = all.more + Math.max(0, all.rows.length - limit);
+  return {
+    toggle: hidden === 0 ? null : expanded ? "Show fewer" : `+ ${hidden} more moving`,
+    atGates: all.atGates > 0 ? `${all.atGates} at gates` : null,
+  };
 }
