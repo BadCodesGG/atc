@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { Point } from "../airport-map";
 import atl from "../../data/airports/atl.json";
 import type { AirportMap } from "../airport-map";
-import { type Area, fitView, fitViewToArea, NEAR_RUNWAY_M, pixelsPerMetre, runwayClearance, type ViewSpec } from "./camera";
+import { type Area, bandOffsetY, fitView, fitViewToArea, NEAR_RUNWAY_M, pixelsPerMetre, runwayClearance, type ViewSpec } from "./camera";
 
 const spec: ViewSpec = { azimuthDeg: 28, elevationDeg: 38, fovDeg: 24 };
 const square: Point[] = [
@@ -118,5 +118,23 @@ describe("runwayClearance", () => {
     expect(runwayClearance({ ref: "x", width: 45, surface: null, centerline: [], ends: [{ ref: "a", x: -50, y: 50 }, { ref: "b", x: 150, y: 50 }] }, box)).toBe(0);
     expect(runwayClearance({ ref: "x", width: 45, surface: null, centerline: [], ends: [{ ref: "a", x: 0, y: 300 }] }, box)).toBe(Infinity);
     expect(runwayClearance({ ref: "x", width: 45, surface: null, centerline: [], ends: [{ ref: "a", x: 0, y: 300 }, { ref: "b", x: 100, y: 300 }] }, box)).toBeCloseTo(200, 6);
+  });
+});
+
+describe("bandOffsetY", () => {
+  const band = (top: number, bottom: number): Area => ({ left: 0, top, right: 375, bottom });
+
+  it("draws the frame's centre in the middle of the band", () => {
+    // 375x667 with the card folded: tabs at 296, card at 416, so the middle is 356 and the picture moves down 22.5 px.
+    expect(bandOffsetY(667, band(296, 416))).toBe(-22.5);
+  });
+
+  it("centres in a short band too, the one place a phone with the card open leaves uncovered", () => {
+    expect(bandOffsetY(667, band(292, 340))).toBe(17.5);
+  });
+
+  it("centres in the frame while the chrome has no height yet", () => {
+    expect(bandOffsetY(667, band(0, 0))).toBe(0);
+    expect(bandOffsetY(667, band(300, 280))).toBe(0);
   });
 });
