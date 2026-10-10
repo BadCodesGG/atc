@@ -251,7 +251,7 @@ export function FlightCard({ card, procedure = null, here, status, following, on
   return (
     <section
       aria-label={`Selected flight ${card.callsign}`}
-      className="pointer-events-auto relative flex shrink-0 flex-col gap-2 rounded-2xl bg-surface px-4 py-3.5 shadow-[0_8px_24px_rgba(20,20,20,0.08),0_0_0_1px_var(--color-hairline)] max-xl:order-last max-xl:mt-auto cramped:group-has-[[data-open=true]]/side:hidden xl:p-4 roomy:gap-3 roomy:p-5"
+      className="pointer-events-auto relative flex shrink-0 flex-col gap-2 rounded-2xl bg-surface px-4 py-3.5 shadow-[0_8px_24px_rgba(20,20,20,0.08),0_0_0_1px_var(--color-hairline)] max-xl:order-last max-xl:mt-auto cramped:group-has-[[data-open=true]]/side:hidden max-xl:group-has-[[data-open=true]_[data-expanded]]/side:hidden xl:p-4 roomy:gap-3 roomy:p-5"
     >
       {open && <CardPhoto key={card.id} hex={card.id} />}
       <div className="flex items-start justify-between gap-3">
@@ -680,8 +680,8 @@ export function CameraMenu({ camera, available, onChange, className = "" }: Came
  * above the panel, the panel taking what height is left above the map-style switch. On phones and
  * tablets, the band between the traffic tabs and the legend: the tabs at its top (the camera picker
  * beside them), the flight at its foot, and the open panel only ever in the space between, so the two
- * can never overlap; where that space is too short for a useful list, the card steps aside while the
- * panel is open. On the world map the foot holds the view buttons with the map style, and the map's
+ * can never overlap; where that space is too short for a useful list, or the movements list is expanded
+ * to every moving aircraft, the card steps aside while the panel is open. On the world map the foot holds the view buttons with the map style, and the map's
  * credit above those, so the band ends above all of it. The scene
  * measures the wide column (`ref`) to frame the airport in what it leaves free; only the children take
  * clicks, so the empty part of the band never blocks the map. On a tablet the band is no wider than a
@@ -727,8 +727,9 @@ export function Movements({ movements, onSelect, onChosen, filtered = false, rea
     );
   }
   const foot = movementsFoot(movements, expanded);
+  // Expanded, the list asks for every moving aircraft: on phones and tablets the card steps aside for it (FlightCard).
   return (
-    <section aria-label="Active movements" className="movements flex min-h-0 flex-col">
+    <section aria-label="Active movements" data-expanded={expanded || undefined} className="movements flex min-h-0 flex-col">
       <div id="movements-list" className="flex min-h-0 w-full flex-col gap-1.5">
         <ul id="movements-rows" className="flex min-h-0 flex-col gap-1.5 overflow-y-auto">
           {rows.map((r) => (
