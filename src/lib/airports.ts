@@ -93,3 +93,15 @@ export const DEFAULT_AIRPORT = AIRPORTS[0];
 export function airportByCode(code: string): Airport | undefined {
   return AIRPORTS.find((a) => a.code === code);
 }
+
+const zoneFormats = new Map<string, Intl.DateTimeFormat>();
+
+/** The time zone's short name at a moment, "EDT" or "MST", for the clock that shows the airport's own time. */
+export function zoneAbbreviation(timeMs: number, timeZone: string): string {
+  let format = zoneFormats.get(timeZone);
+  if (!format) {
+    format = new Intl.DateTimeFormat("en-US", { timeZone, timeZoneName: "short" });
+    zoneFormats.set(timeZone, format);
+  }
+  return format.formatToParts(new Date(timeMs)).find((p) => p.type === "timeZoneName")?.value ?? "";
+}

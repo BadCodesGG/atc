@@ -1018,6 +1018,7 @@ const IDLE = "Replay builds up while the page is open";
  */
 export function TimeBar({
   clock,
+  zone = "",
   replay,
   onLive,
   onRate,
@@ -1026,6 +1027,8 @@ export function TimeBar({
   share,
 }: {
   clock: string;
+  /** The clock's time zone, "EDT": the airport's own, which need not be the reader's. */
+  zone?: string;
   replay?: TimeBarReplay | null;
   /** On the world map: the replay is the diorama's, so only LIVE and the clock are shown. */
   liveOnly?: boolean;
@@ -1081,7 +1084,12 @@ export function TimeBar({
         />
       </span>
       <div aria-hidden className={`h-6 w-px shrink-0 bg-hairline max-[26rem]:hidden ${liveOnly ? "ml-1" : ""}`} />
-      <time className="shrink-0 px-3 text-sm font-semibold tabular-nums max-[26rem]:px-2 xl:px-3.5">{clock}</time>
+      <time title={zone ? `Local time at the airport (${zone})` : undefined} className="shrink-0 px-3 text-sm font-semibold tabular-nums max-[26rem]:px-2 xl:px-3.5">
+        {clock}
+        {/* Under 22rem the chips leave no room for it, and it is only read out. */}
+        {zone && " "}
+        {zone && <span className="text-[11px] font-medium text-muted max-[22rem]:sr-only">{zone}</span>}
+      </time>
       {share}
     </div>
   );
