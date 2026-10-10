@@ -75,8 +75,9 @@ describe("worldFloor", () => {
     expect(worldFloor({ lng: 0, lat: 0, zoom: 0, bearing: 0, pitch: 0 }, frame, true).zoom).toBeCloseTo(2.744, 3);
   });
 
-  it("keeps the flat map's world at least the short side across", () => {
-    expect(worldFloor({ lng: 0, lat: 0, zoom: -1, bearing: 0, pitch: 0 }, { width: 390, height: 844, fovDeg: 22 }, false).zoom).toBeCloseTo(Math.log2(390 / 512), 6);
+  it("keeps the flat map's world at least the long side across, so it never repeats nor leaves empty bands", () => {
+    expect(worldFloor({ lng: 0, lat: 0, zoom: -1, bearing: 0, pitch: 0 }, { width: 390, height: 844, fovDeg: 22 }, false).zoom).toBeCloseTo(Math.log2(844 / 512), 6);
+    expect(worldFloor({ lng: 0, lat: 0, zoom: -1, bearing: 0, pitch: 0 }, frame, false).zoom).toBeCloseTo(Math.log2(1440 / 512), 6);
   });
 
   it("leaves a camera already inside the floor alone", () => {
