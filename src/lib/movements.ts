@@ -13,7 +13,7 @@ export interface MovementRow {
   type: string;
   /** What it is doing, "Takeoff roll", "Final 500 ft", "Southbound". */
   phrase: string;
-  /** Short state and runway, "DEP 9R", "ARR 8L", "TAXI". */
+  /** Short state and runway, "DEP 9R", "ARR 8L", "TAXI"; "VEH" for a ground vehicle. */
   tag: string;
   state: FlightState;
   speed: string;
@@ -58,7 +58,7 @@ const feet = (ft: number) => `${(Math.round(ft / 100) * 100).toLocaleString("en-
 function phrase({ aircraft: a, situation: s }: Entry): string {
   if (s.activity.startsWith("Crossing runway ")) return s.activity.replace("Crossing runway ", "Crossing ");
   if (s.activity === "Taxiing") return a.headingKnown ? COMPASS[Math.round(a.headingDeg / 45) % 8] : "Taxiing";
-  if (a.onGround || s.activity === "Landing") return s.activity;
+  if (a.onGround || s.vehicle || s.activity === "Landing") return s.activity;
   if (s.activity === "Final approach") return `Final ${feet(s.aglFt)}`;
   return `${s.activity} ${feet(s.aglFt)}`;
 }
@@ -75,7 +75,7 @@ function row(e: Entry, selected: boolean): MovementRow {
     callsign: callsign(e),
     type: a.typeCode ?? "",
     phrase: phrase(e),
-    tag: s.runway && s.state !== "taxiing" ? `${TAG[s.state]} ${s.runway}` : TAG[s.state],
+    tag: s.vehicle ? "VEH" : s.runway && s.state !== "taxiing" ? `${TAG[s.state]} ${s.runway}` : TAG[s.state],
     state: s.state,
     speed: a.groundSpeedKt === null ? "" : `${Math.round(a.groundSpeedKt)} kt`,
     route: routeWords(e),
@@ -95,7 +95,7 @@ export function activeMovements(entries: Entry[], selectedId: string | null, lim
   return {
     rows: shown.map((e) => row(e, e.aircraft.id === selectedId)),
     more: moving.length - shown.length,
-    atGates: entries.filter((e) => e.situation.state === "parked").length,
+    atGates: entries.filter((e) => e.situation.state === "parked" && !e.situation.vehicle).length,
   };
 }
 

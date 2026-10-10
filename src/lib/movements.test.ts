@@ -75,6 +75,21 @@ describe("activeMovements selection", () => {
   });
 });
 
+describe("activeMovements with ground vehicles", () => {
+  it("lists a moving vehicle after every aircraft, tagged VEH, and does not count a parked one as at a gate", () => {
+    const entries = fixtureFrame().entries.map((e) =>
+      e.aircraft.callsign === "EDV5051"
+        ? { ...e, aircraft: { ...e.aircraft, callsign: "OPS1", typeCode: "SERV" }, situation: { ...e.situation, activity: "Ground vehicle", vehicle: true as const } }
+        : e.situation.state === "parked"
+          ? { ...e, situation: { ...e.situation, vehicle: true as const } }
+          : e,
+    );
+    const { rows, atGates } = activeMovements(entries, null, 30);
+    expect(rows.at(-1)).toMatchObject({ callsign: "OPS1", phrase: "Ground vehicle", tag: "VEH" });
+    expect(atGates).toBe(0);
+  });
+});
+
 describe("movementsFoot", () => {
   it("says what is left over, leaving out a part that would read zero", () => {
     expect(movementsFoot({ more: 18, atGates: 3 })).toBe("+ 18 more moving · 3 at gates");

@@ -10,7 +10,8 @@ import type { TrackedAircraft } from "./tracker";
 
 export type FlightState = "arriving" | "departing" | "taxiing" | "parked";
 
-export type Motion = Pick<TrackedAircraft, "x" | "y" | "altitudeFt" | "headingDeg" | "headingKnown" | "groundSpeedKt" | "onGround" | "verticalRateFpm">;
+export type Motion = Pick<TrackedAircraft, "x" | "y" | "altitudeFt" | "headingDeg" | "headingKnown" | "groundSpeedKt" | "onGround" | "verticalRateFpm"> &
+  Partial<Pick<TrackedAircraft, "category" | "typeCode">>;
 
 export type AirsideContext = Pick<AirportMap, "runways" | "gates" | "stands"> & { elevationFt: number };
 
@@ -25,6 +26,8 @@ export interface Situation {
   moving: boolean;
   /** The gate or stand a parked aircraft is at, when the map names it. */
   place?: Place;
+  /** A ground vehicle broadcasting a transponder (a tug, a fire truck): never a flight, never featured. */
+  vehicle?: true;
 }
 
 export interface Place {
@@ -159,6 +162,29 @@ function assessGround(m: Motion, ctx: AirsideContext, speedKt: number, previous:
 }
 
 /**
+ * The ADS-B emitter categories for surface vehicles (emergency, service) and fixed obstacles, and the
+ * type designators the aircraft databases give vehicles; any of these on the feed is not an aircraft.
+ */
+const VEHICLE_CATEGORIES = new Set(["C1", "C2", "C3"]);
+const VEHICLE_TYPES = new Set(["SERV", "GRND", "EMER", "TWR"]);
+
+/** Whether a transponder on the feed is a ground vehicle or obstacle rather than an aircraft. */
+export function isVehicle({ category, typeCode }: Partial<Pick<TrackedAircraft, "category" | "typeCode">>): boolean {
+  return (!!category && VEHICLE_CATEGORIES.has(category.toUpperCase())) || (!!typeCode && VEHICLE_TYPES.has(typeCode.toUpperCase()));
+}
+
+/**
+ * A vehicle reads as what it is, with the runway it is on, since that is what a watcher wants to know of
+ * one: never "Lined up" or "Takeoff roll" for a van that stopped on the centreline.
+ */
+function assessVehicle(m: Motion, ctx: AirsideContext, moving: boolean): Situation {
+  const kind = m.category?.toUpperCase() === "C1" || m.typeCode?.toUpperCase() === "EMER" ? "Emergency vehicle" : "Ground vehicle";
+  const f = onRunway(ctx.runways, m.x, m.y);
+  const activity = f ? `${kind} on runway ${designator(f.runway.ref ?? `${f.runway.ends[0].ref}/${f.runway.ends[1].ref}`)}` : kind;
+  return { state: moving ? "taxiing" : "parked", activity, runway: null, aglFt: 0, moving, vehicle: true };
+}
+
+/**
  * Read one aircraft's situation. `previous` is the state it was given a moment ago, when known: it
  * settles the one case a single moment cannot, a fast aircraft on a runway that could be taking off
  * or have just landed.
@@ -166,6 +192,7 @@ function assessGround(m: Motion, ctx: AirsideContext, speedKt: number, previous:
 export function assess(m: Motion, ctx: AirsideContext, previous?: FlightState): Situation {
   const speedKt = m.groundSpeedKt ?? 0;
   const moving = speedKt >= MOVING_KT;
+  if (isVehicle(m)) return assessVehicle(m, ctx, moving);
   if (m.onGround) return { ...assessGround(m, ctx, speedKt, previous), aglFt: 0, moving };
   const aglFt = Math.max(0, m.altitudeFt - ctx.elevationFt);
   return { ...assessAir(m, ctx, aglFt), aglFt, moving };
@@ -225,19 +252,21 @@ export function countTraffic(list: { onGround: boolean; situation: Situation }[]
   return { tracked: list.length, onGround, moving };
 }
 
-/** Lower is more worth showing: using a runway, then on final or climbing out, then taxiing, then the rest. */
+/** Lower is more worth showing: using a runway, then on final or climbing out, then taxiing, then the rest, vehicles last. */
 export function interest(s: Situation): number {
+  if (s.vehicle) return 5;
   if (s.state === "parked") return 4;
   if (s.state === "taxiing") return s.moving ? 2 : 3;
   if (s.runway === null) return 3;
   return s.aglFt < 500 ? 0 : 1;
 }
 
-/** The aircraft the view opens on: the most interesting one, and of those the nearest the reference point. */
+/** The aircraft the view opens on: the most interesting one, and of those the nearest the reference point. Never a vehicle. */
 export function pickFeatured<T extends { x: number; y: number; situation: Situation }>(list: T[]): T | null {
   let best: T | null = null;
   let bestKey = Infinity;
   for (const a of list) {
+    if (a.situation.vehicle) continue;
     const key = interest(a.situation) * 1e9 + Math.hypot(a.x, a.y);
     if (key < bestKey) {
       best = a;
