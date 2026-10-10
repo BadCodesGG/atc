@@ -71,6 +71,10 @@ describe("the feed's health", () => {
     const late = feedStatus(10_000 + (FIRST_ANSWER_MAX_S + 1) * 1000);
     expect(late).toEqual({ ageS: FIRST_ANSWER_MAX_S + 1, failed: true });
     expect(liveDot(late, false)).toEqual({ state: "offline", label: "Offline" });
+    // A rate-limited poll is no answer: the client keeps polling every 5 s, and with none by then it is Offline.
+    startFeed(0);
+    recordFeedFailure(429);
+    expect(liveDot(feedStatus(30_000), false).state).toBe("offline");
     // One answer, however late, brings it back.
     recordFeedAnswer({}, 60_000);
     expect(liveDot(feedStatus(61_000), false).state).toBe("fresh");

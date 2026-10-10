@@ -1108,9 +1108,10 @@ function Viewer({ airport, theme, onTheme, onAirport, filters, onFilters, focusP
             tracker.add(snapshot);
             // The picture plays PLAYBACK_DELAY behind the feed: until it reaches the first answer the tracker has
             // nothing to draw, and the counts would read a false "0 tracked" rather than that traffic is on its way.
+            // Half a second past it, as an aircraft fades in from nothing at its first sample.
             heardTimer ??= window.setTimeout(() => {
               if (!stopped) setHeard(true);
-            }, Math.max(0, snapshot.time + PLAYBACK_DELAY - clock()) * 1000);
+            }, Math.max(0, snapshot.time + PLAYBACK_DELAY + 0.5 - clock()) * 1000);
             replay.add(snapshot); // replay
             addRoutes(snapshot.routes);
             // alerts: from the poll, not the drawn frame, so a tab the browser has stopped drawing still alerts
