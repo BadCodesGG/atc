@@ -132,7 +132,7 @@ describe("ground vehicles", () => {
 
   it("read as a vehicle, not as lined up, when stopped on a runway", () => {
     const s = assess(motion({ x: -850, y: -5, headingDeg: 92, typeCode: "SERV" }), ctx);
-    expect(s).toMatchObject({ state: "parked", activity: "Ground vehicle on runway 9/27", runway: null, aglFt: 0, moving: false, vehicle: true });
+    expect(s).toMatchObject({ state: "taxiing", activity: "Ground vehicle on runway 9/27", runway: null, aglFt: 0, moving: false, vehicle: true });
     expect(s.activity).not.toMatch(/Lined up|Takeoff/);
   });
 

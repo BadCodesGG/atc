@@ -1,4 +1,4 @@
-import { type KeyboardEvent, type ReactNode, type Ref, useCallback, useState, useSyncExternalStore } from "react";
+import { type KeyboardEvent, type ReactNode, type Ref, useCallback, useId, useState, useSyncExternalStore } from "react";
 import type { FlightState, TrafficCounts } from "@/lib/aircraft-state";
 import { type Airport, AIRPORTS } from "@/lib/airports";
 import { currentFeedStatus, type FeedChannel, type FeedStatus, liveDot, type LiveState, type TrafficReadout, trafficReadout, watchFeed } from "@/lib/feed-health";
@@ -64,8 +64,8 @@ export const STACKED = "(width < 80rem) and (not ((width >= 48rem) and (height <
 /** A phone, upright: narrower than a tablet's 48rem. */
 export const PHONE = "(width < 48rem)";
 
-/** Whether a media query matches now, as React state; false on the server, which has no window to ask. */
-export function useMedia(query: string): boolean {
+/** Whether a media query matches now, as React state; `server` (false unless said) on the server, which has no window to ask. */
+export function useMedia(query: string, server = false): boolean {
   const subscribe = useCallback(
     (onChange: () => void) => {
       const list = window.matchMedia(query);
@@ -74,7 +74,7 @@ export function useMedia(query: string): boolean {
     },
     [query],
   );
-  return useSyncExternalStore(subscribe, () => window.matchMedia(query).matches, () => false);
+  return useSyncExternalStore(subscribe, () => window.matchMedia(query).matches, () => server);
 }
 
 interface HeaderProps {
@@ -228,6 +228,8 @@ const CHECK = (
 export function FlightCard({ card, procedure = null, here, status, following, onFollow, journey = null, phase, note = null, unavailable = false, compact = false }: FlightCardProps) {
   // Which flight the compact card was opened for: picking another one starts it folded again.
   const [openFor, setOpenFor] = useState<string | null>(null);
+  // The diorama's card and the map's can both be on the page: each names its own details.
+  const details = useId();
   if (!card) return null;
   const open = !compact || openFor === card.id;
   const { route, direction, gate } = card;
@@ -281,7 +283,7 @@ export function FlightCard({ card, procedure = null, here, status, following, on
         <button
           type="button"
           aria-expanded={open}
-          aria-controls="flight-details"
+          aria-controls={details}
           onClick={() => setOpenFor(open ? null : card.id)}
           className="group/more -mx-1 -my-1.5 flex min-h-11 items-center justify-between gap-2 rounded-lg px-1 text-left text-sm font-semibold"
         >
@@ -293,7 +295,7 @@ export function FlightCard({ card, procedure = null, here, status, following, on
         </button>
       )}
       {open && (
-        <div id="flight-details" className="contents">
+        <div id={details} className="contents">
           {journey ? (
             <JourneyPanel journey={journey} />
           ) : route ? (
@@ -1118,8 +1120,12 @@ export function TimeBar({
       <time title={zone ? `Local time at the airport (${zone})` : undefined} className="shrink-0 px-3 text-sm font-semibold tabular-nums max-[26rem]:px-2 xl:px-3.5">
         {clock}
         {/* Under 22rem the chips leave no room for it, and it is only read out. */}
-        {zone && " "}
-        {zone && <span className="text-[11px] font-medium text-muted max-[22rem]:sr-only">{zone}</span>}
+        {zone && (
+          <>
+            {" "}
+            <span className="text-[11px] font-medium text-muted max-[22rem]:sr-only">{zone}</span>
+          </>
+        )}
       </time>
       {share}
     </div>
@@ -1142,7 +1148,7 @@ export function MapStyleMenu({ theme, onChange, up = false }: { theme: ThemeKey;
   const { open, setOpen, buttonRef, rootProps } = usePopover();
   const current = THEME_OPTIONS.find((o) => o.key === theme) ?? THEME_OPTIONS[0];
   return (
-    <div {...rootProps} className="relative">
+    <div {...rootProps} className="relative xl:hidden">
       <button
         ref={buttonRef}
         type="button"

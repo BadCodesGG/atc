@@ -1285,10 +1285,13 @@ function Viewer({ airport, theme, onTheme, onAirport, filters, onFilters, focusP
       /**
        * On a phone or a tall tablet, the band the stacked chrome leaves the model, host-relative: from the
        * foot of the traffic tabs to the top of the flight card (or the column's foot, with no card shown).
+       * Null while a traffic panel is open over it: the band it leaves is the list's, and a card stepping
+       * aside for the list must not move the picture under it.
        */
-      const band = (width: number, height: number): Area => {
+      const band = (width: number, height: number): Area | null => {
         const origin = host.getBoundingClientRect();
         const column = columnRef.current;
+        if (column?.querySelector("[data-open=true]")) return null;
         const tabs = column?.querySelector("[role=tablist]")?.getBoundingClientRect();
         const card = column?.querySelector("section[aria-label^='Selected flight']")?.getBoundingClientRect();
         const foot = column?.getBoundingClientRect();
@@ -1306,7 +1309,7 @@ function Viewer({ airport, theme, onTheme, onAirport, filters, onFilters, focusP
         const column = window.matchMedia(COLUMN_BESIDE).matches ? columnRef.current?.getBoundingClientRect() : undefined;
         const free = column && column.width > 0 ? column.left - host.getBoundingClientRect().left : width;
         const margin = column && !window.matchMedia(WIDE).matches ? SHORT_FIELD_MARGIN : FIELD_MARGIN;
-        lastBand = width < height && window.matchMedia(STACKED).matches ? band(width, height) : null;
+        lastBand = width < height && window.matchMedia(STACKED).matches ? (band(width, height) ?? lastBand ?? { left: 0, top: 0, right: width, bottom: height }) : null;
         scene.resize(
           width,
           height,
@@ -1783,7 +1786,7 @@ function Viewer({ airport, theme, onTheme, onAirport, filters, onFilters, focusP
           // A portrait frame keeps what it looks at in the middle of the band the chrome leaves, as a card opens or folds.
           if (lastBand) {
             const now = band(host.clientWidth, host.clientHeight);
-            if (Math.abs(now.top - lastBand.top) > 4 || Math.abs(now.bottom - lastBand.bottom) > 4) {
+            if (now && (Math.abs(now.top - lastBand.top) > 4 || Math.abs(now.bottom - lastBand.bottom) > 4)) {
               lastBand = now;
               scene.setFreeArea(now);
             }
@@ -2011,7 +2014,9 @@ function Viewer({ airport, theme, onTheme, onAirport, filters, onFilters, focusP
   // them, on a wide screen the card is above the tabs and the column is read before the buttons at its foot. Keyed, so a window resized across
   // the breakpoint moves the controls rather than rebuilding them.
   const wide = useMedia(WIDE);
-  const stacked = useMedia(STACKED);
+  // Stacked on the server too: most first loads are phones, and a wide screen draws the same either way (the
+  // stacked-only controls are xl:hidden), where a phone would otherwise paint the short landscape's controls over its own.
+  const stacked = useMedia(STACKED, true);
   // A phone's flight card opens as a summary, so the model keeps the screen; a tablet has the room for all of it.
   const compactCard = useMedia(PHONE);
   const flightCard = <FlightCard key="card" compact={compactCard} card={chrome.card} procedure={chrome.procedure} here={airport.code} status={nas} following={chrome.following} onFollow={follow} journey={chrome.card && journey?.hex === chrome.card.id ? journeyPanel : null} />;

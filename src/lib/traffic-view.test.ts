@@ -107,6 +107,17 @@ describe("TrafficView with a ground aircraft that never sent a heading", () => {
   });
 });
 
+describe("TrafficView with a ground vehicle", () => {
+  it("cards it on the ground even when the feed says it is airborne, and never features it", () => {
+    const frame = new TrafficView(map, DEFAULT_AIRPORT).frame([
+      { id: "v", x: 0, y: 0, altitudeFt: 1100, headingDeg: 0, headingKnown: true, groundSpeedKt: 20, onGround: false, verticalRateFpm: null, callsign: "OPS1", typeCode: "SERV", military: false, category: "C2", fade: 1 },
+    ]);
+    expect(frame.entries[0].card).toMatchObject({ altitude: "Ground", state: "taxiing" });
+    expect(frame.entries[0].scene.heightM).toBe(0);
+    expect(frame.featured).toBeNull();
+  });
+});
+
 describe("TrafficView keeps ground aircraft on the pavement", () => {
   /** One 20 m taxiway running north, and nothing else. */
   const plan = {

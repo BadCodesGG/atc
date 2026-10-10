@@ -91,7 +91,7 @@ function card(a: TrackedAircraft, s: Situation, route: FlightRoute | null, here:
     tag: speedKt !== null && s.moving ? `${s.activity} · ${speed}` : s.activity,
     speed,
     heading: a.headingKnown ? `${String(Math.round(a.headingDeg) % 360).padStart(3, "0")}°` : "—",
-    altitude: a.onGround ? "Ground" : `${(Math.round(s.aglFt / 10) * 10).toLocaleString("en-US")} ft AGL`,
+    altitude: a.onGround || s.vehicle ? "Ground" : `${(Math.round(s.aglFt / 10) * 10).toLocaleString("en-US")} ft AGL`,
     route,
     direction,
     gate: s.place ? { ...s.place, left: false } : last && s.moving && leftFrom(last, direction) ? { ...last.place, left: true } : null,
