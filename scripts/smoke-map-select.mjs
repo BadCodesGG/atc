@@ -77,7 +77,8 @@ const CHROME = {
   filter: "button[aria-label*='ilter']",
   radar: "[data-radar]",
   view: "[role='group'][aria-label='View']",
-  themes: "[role='group'][aria-label='Map style']",
+  // A row of three wide, one button in the view row on phones and tablets.
+  themes: "[role='group'][aria-label='Map style'], button[aria-label^='Map style']",
   time: "main > div:has(> time)",
   credit: "p:has(> a[href='https://adsb.fi'])",
   attribution: ".maplibregl-ctrl-attrib",
