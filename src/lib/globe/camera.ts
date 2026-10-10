@@ -74,7 +74,8 @@ const MAX_CENTRE_LAT = 75;
 
 /**
  * The farthest out the world map goes: the globe's outline never shrinks below the frame's short side,
- * nor the flat map's world below it, and the centre stays off the poles. MapLibre draws the globe
+ * the flat map's square world never below its long side (smaller, it repeats across a wide frame, or
+ * leaves bands of nothing above and below a tall one), and the centre stays off the poles. MapLibre draws the globe
  * worldSize / 2pi / cos(lat) pixels in radius, seen in perspective from the lens's distance, so the
  * radius whose outline spans the short side comes from the angle that side subtends. A camera already
  * inside comes back unchanged.
@@ -84,7 +85,7 @@ export function worldFloor(cam: MapCamera, frame: { width: number; height: numbe
   if (!(frame.width > 0 && frame.height > 0)) return cam;
   const lat = Math.max(-MAX_CENTRE_LAT, Math.min(MAX_CENTRE_LAT, cam.lat));
   const short = Math.min(frame.width, frame.height);
-  let across = short;
+  let across = Math.max(frame.width, frame.height);
   if (globe) {
     const d = cameraToCentrePx(frame);
     const sin = Math.sin(Math.atan(short / 2 / d));
