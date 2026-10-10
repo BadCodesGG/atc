@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { OrbitView } from "../scene/orbit";
 import { airportByCode } from "../airports";
-import { type Band, globeCapable, Guide, guide, landingAirport, reveal, revealMask } from "./handover";
+import { type Band, globeCapable, Guide, guide, landingAirport, overAirport, reveal, revealMask } from "./handover";
 
 const band: Band = { near: 20_000, far: 50_000 };
 const home: OrbitView = { azimuthDeg: 30, elevationDeg: 40, target: [600, -200], height: 0, distance: 11_000 };
@@ -92,6 +92,16 @@ describe("guide", () => {
   it("leaves a zoom into somewhere else alone: only a view over the airport is drawn in", () => {
     const elsewhere: OrbitView = { ...entry, target: [80_000, 0], distance: 30_000 };
     expect(guide({ ...entry, target: [80_000, 0] }, elsewhere, home, band)).toEqual(elsewhere);
+  });
+});
+
+describe("overAirport", () => {
+  it("is a view whose target lies within the band's outer distance of the airport's, whatever its zoom or turn", () => {
+    expect(overAirport(home, home, band)).toBe(true);
+    expect(overAirport({ ...entry, target: [600 + 30_000, -200 + 40_000] }, home, band)).toBe(true);
+    expect(overAirport({ ...entry, target: [600 + 30_000, -200 + 40_001] }, home, band)).toBe(false);
+    // A lake 80 km off, zoomed right in: not over the airport, so the diorama stays hidden.
+    expect(overAirport({ ...home, target: [80_000, 0], distance: 5_000 }, home, band)).toBe(false);
   });
 });
 
