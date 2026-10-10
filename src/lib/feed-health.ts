@@ -12,6 +12,13 @@
 export const FRESH_MAX_S = 15;
 /** Past this age, seconds, the data is too old to call live; the server stops serving it then too. */
 export const OFFLINE_AFTER_S = 90;
+/**
+ * With no answer at all by this age, seconds, the feed is Offline. Past the slowest first answer the server
+ * can give (a read that times out on adsb.lol, waits its turn on adsb.fi and times out there too, about
+ * 21 s, answers 502 or 429): a page still waiting after that is not connected, and saying "LIVE" with a
+ * counter until the 90 s a feed that once answered gets would be telling it otherwise.
+ */
+export const FIRST_ANSWER_MAX_S = 25;
 
 export type FeedChannel = "airport" | "map";
 
@@ -78,7 +85,7 @@ export function fixtureFeed(flag: string | null): { hold?: boolean; ageS?: numbe
 }
 
 interface Feed {
-  /** When the feed started, ms: with no answer yet the age counts from here, so a dead connection goes Offline. */
+  /** When the feed started, ms: with no answer by FIRST_ANSWER_MAX_S from here, a dead connection goes Offline. */
   since: number;
   /** When the last good data was read upstream, ms on this page's clock. */
   goodAt: number | null;
@@ -127,8 +134,9 @@ export function feedStatus(nowMs: number, channel: FeedChannel = "airport"): Fee
   const feed = feeds[channel];
   if (feed.hold) return { ageS: 0, failed: feed.failed };
   const ageS = Math.max(0, Math.floor((nowMs - (feed.goodAt ?? feed.since)) / 1000));
-  // Before the first answer there is no data to give an age for until it would count as late.
-  return { ageS: feed.goodAt === null && ageS <= FRESH_MAX_S ? null : ageS, failed: feed.failed };
+  // Before the first answer there is no data to give an age for, until none coming reads as Offline.
+  if (feed.goodAt === null) return ageS > FIRST_ANSWER_MAX_S ? { ageS, failed: true } : { ageS: null, failed: feed.failed };
+  return { ageS, failed: feed.failed };
 }
 
 /** Told on every recorded answer or failure. */

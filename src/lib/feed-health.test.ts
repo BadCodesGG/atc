@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { feedStatus, liveDot, recordFeedAnswer, recordFeedFailure, startFeed, subscribeFeed, summariseReads, trafficReadout } from "./feed-health";
+import { FIRST_ANSWER_MAX_S, feedStatus, liveDot, recordFeedAnswer, recordFeedFailure, startFeed, subscribeFeed, summariseReads, trafficReadout } from "./feed-health";
 
 describe("the LIVE dot", () => {
   const live = (ageS: number | null, failed = false) => liveDot({ ageS, failed }, false);
@@ -60,10 +60,20 @@ describe("the feed's health", () => {
     expect(feedStatus(5_000)).toEqual({ ageS: 5, failed: false });
   });
 
-  it("with no answer yet, ages from when the feed started, so a dead connection still goes Offline", () => {
+  it("with no answer yet, says nothing of age while the first answer can still come", () => {
     startFeed(10_000);
     expect(feedStatus(10_000)).toEqual({ ageS: null, failed: false });
-    expect(feedStatus(101_500)).toEqual({ ageS: 91, failed: false });
+    expect(feedStatus(10_000 + FIRST_ANSWER_MAX_S * 1000)).toEqual({ ageS: null, failed: false });
+  });
+
+  it("with no answer by the slowest the server answers, goes Offline rather than counting to 90 s", () => {
+    startFeed(10_000);
+    const late = feedStatus(10_000 + (FIRST_ANSWER_MAX_S + 1) * 1000);
+    expect(late).toEqual({ ageS: FIRST_ANSWER_MAX_S + 1, failed: true });
+    expect(liveDot(late, false)).toEqual({ state: "offline", label: "Offline" });
+    // One answer, however late, brings it back.
+    recordFeedAnswer({}, 60_000);
+    expect(liveDot(feedStatus(61_000), false).state).toBe("fresh");
   });
 
   it("held, as on a frozen fixture, stays current however long the page is open", () => {
