@@ -646,13 +646,14 @@ export function CameraMenu({ camera, available, onChange }: CameraProps) {
  * lower, under the view buttons. On the world map the foot holds the view buttons and the map style
  * (in two rows on a narrow phone), and the map's credit above those, so the band ends above all of it. The scene
  * measures the wide column (`ref`) to frame the airport in what it leaves free; only the children take
- * clicks, so the empty part of the band never blocks the map.
+ * clicks, so the empty part of the band never blocks the map. On a tablet the band is no wider than a
+ * phone's, at the left: a card stretched across 1000 px reads as a banner, its facts far apart.
  */
 export function SideColumn({ children, ref }: { children: ReactNode; ref?: Ref<HTMLDivElement> }) {
   return (
     <div
       ref={ref}
-      className="side-column group/side pointer-events-none absolute inset-x-4 bottom-[132px] top-[296px] flex flex-col gap-2 max-xl:short:bottom-[76px] max-xl:in-data-on-map:bottom-[172px] max-xl:short:in-data-on-map:bottom-[172px] max-[28rem]:in-data-on-map:bottom-[232px] sm:top-[244px] max-xl:short:in-data-on-map:top-[128px] xl:bottom-[96px] xl:left-auto xl:right-8 xl:top-[104px] xl:w-[300px] xl:gap-3"
+      className="side-column group/side pointer-events-none absolute inset-x-4 bottom-[132px] top-[296px] flex flex-col gap-2 max-xl:short:bottom-[76px] max-xl:in-data-on-map:bottom-[172px] max-xl:short:in-data-on-map:bottom-[172px] max-[28rem]:in-data-on-map:bottom-[232px] sm:top-[244px] max-xl:short:in-data-on-map:top-[128px] md:max-w-[28rem] xl:bottom-[96px] xl:left-auto xl:right-8 xl:top-[104px] xl:w-[300px] xl:gap-3"
     >
       {children}
     </div>
