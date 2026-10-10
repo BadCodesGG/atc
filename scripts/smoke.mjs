@@ -680,7 +680,8 @@ try {
       radar: "[data-radar]",
       filters: "button[aria-label^='Filters']",
       view: "[role='group'][aria-label='View']",
-      themes: "[role='group'][aria-label='Map style']:visible",
+      // A row of three on wide and short landscape layouts, one button in the view row on phones and tablets.
+      themes: "[role='group'][aria-label='Map style']:visible, button[aria-label^='Map style']:visible",
       time: "main > div:has(> time)",
       credit: ".maplibregl-ctrl-attrib",
       data: DATA_CREDIT,
@@ -925,7 +926,8 @@ try {
       filters: "button[aria-label^='Filters']",
       counts: "[aria-live='polite']",
       // Rendered twice, once for each layout; only the one on screen counts.
-      themes: "[role='group'][aria-label='Map style']:visible",
+      // A row of three on wide and short landscape layouts, one button in the view row on phones and tablets.
+      themes: "[role='group'][aria-label='Map style']:visible, button[aria-label^='Map style']:visible",
       view: "[role='group'][aria-label='View']",
       // The camera picker on phones and tablets (the button row is for wide screens).
       camera: "#atc-camera",
@@ -940,6 +942,12 @@ try {
     const clashes = [];
     for (let i = 0; i < names.length; i++) for (let j = i + 1; j < names.length; j++) if (overlaps(b[names[i]], b[names[j]])) clashes.push(`${names[i]}/${names[j]}`);
     const size = `${width}x${height}${theme === "dark" ? " dark" : ""}`;
+    // A phone's card opens as a summary: its line of what the flight is doing opens the route.
+    const more = page.locator("section[aria-label^='Selected flight'] button[aria-expanded]");
+    if (width < 768) {
+      check(`${size}: the card opens as a summary, the route folded`, (await more.getAttribute("aria-expanded")) === "false" && (await page.locator("[data-route]").count()) === 0);
+      await more.click();
+    }
     check(`${size}: the card shows the route`, (await page.locator("[data-route]").count()) === 1);
     check(`${size}: every control is on screen`, names.length === (height < 640 ? 11 : 12), `missing: ${Object.keys(b).filter((k) => !b[k]).join(", ") || "none"}`);
     check(`${size}: nothing overlaps`, clashes.length === 0, clashes.join(", "));
@@ -977,6 +985,18 @@ try {
     check(`${size}: the open list shows rows and covers nothing`, o.list !== null && shownRows > 0 && openClashes.length === 0, `${shownRows} rows; ${openClashes.join(", ") || "no overlap"}`);
     const wide = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth);
     check(`${size}: no sideways scroll`, !wide);
+    // On a phone the map style is one button in the view row, whose menu names the three.
+    if (width < 768) {
+      const next = theme === "dark" ? "Light" : "Dark";
+      await page.keyboard.press("Escape");
+      await page.locator("button[aria-label^='Map style']").click();
+      await page.getByRole("group", { name: "Map style" }).getByRole("button", { name: next, exact: true }).click();
+      await page.waitForFunction((t) => document.querySelector("main")?.dataset.theme === t, next.toLowerCase(), { timeout: 5_000 }).catch(() => {});
+      check(
+        `${size}: the map style button's menu switches the style and folds`,
+        (await page.locator("main").getAttribute("data-theme")) === next.toLowerCase() && (await page.locator("#atc-map-style").count()) === 0 && (await page.locator("button[aria-label^='Map style']").getAttribute("aria-label")) === `Map style: ${next}`,
+      );
+    }
     await page.close();
   }
 
