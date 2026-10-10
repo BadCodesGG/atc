@@ -960,10 +960,11 @@ try {
       await more.click();
     }
     check(`${size}: the card shows the route`, (await page.locator("[data-route]").count()) === 1);
-    // The clock's zone sits under the time on a phone, so naming it leaves the scrubber its width.
+    // The clock's zone sits under the time on a phone, so naming it leaves the scrubber its width: 75 px
+    // at 390 in light type, 67 in the night theme's wider type; the zone inline left it 50.
     if (width < 500) {
       const scrub = await page.locator("main input[type='range']").boundingBox();
-      check(`${size}: the scrubber keeps its width beside the zoned clock`, (scrub?.width ?? 0) >= 70, String(scrub?.width));
+      check(`${size}: the scrubber keeps its width beside the zoned clock`, (scrub?.width ?? 0) >= 60, String(scrub?.width));
     }
     check(`${size}: every control is on screen`, names.length === (height < 640 ? 11 : 12), `missing: ${Object.keys(b).filter((k) => !b[k]).join(", ") || "none"}`);
     check(`${size}: nothing overlaps`, clashes.length === 0, clashes.join(", "));
