@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { assess, countTraffic, groundHeading, pickFeatured, type AirsideContext, type Motion } from "./aircraft-state";
+import { assess, countTraffic, groundHeading, interest, isVehicle, pickFeatured, type AirsideContext, type Motion } from "./aircraft-state";
 import { KNOTS } from "./geo";
 
 /** One runway along the x axis, 2 km long, a gate and a stand north of it. Field elevation 1000 ft. */
@@ -119,6 +119,39 @@ describe("assess in the air", () => {
   });
 });
 
+describe("ground vehicles", () => {
+  it("are told by their emitter category or their type designator", () => {
+    expect(isVehicle({ category: "C1" })).toBe(true);
+    expect(isVehicle({ category: "c2" })).toBe(true);
+    expect(isVehicle({ category: "C3" })).toBe(true);
+    expect(isVehicle({ category: "A3", typeCode: "SERV" })).toBe(true);
+    expect(isVehicle({ typeCode: "GRND" })).toBe(true);
+    expect(isVehicle({ category: "A3", typeCode: "B738" })).toBe(false);
+    expect(isVehicle({})).toBe(false);
+  });
+
+  it("read as a vehicle, not as lined up, when stopped on a runway", () => {
+    const s = assess(motion({ x: -850, y: -5, headingDeg: 92, typeCode: "SERV" }), ctx);
+    expect(s).toMatchObject({ state: "parked", activity: "Ground vehicle on runway 9/27", runway: null, aglFt: 0, moving: false, vehicle: true });
+    expect(s.activity).not.toMatch(/Lined up|Takeoff/);
+  });
+
+  it("read as a moving vehicle off the runway, and an emergency one says so", () => {
+    expect(assess(motion({ x: 300, y: 150, groundSpeedKt: 20, category: "C2" }), ctx)).toMatchObject({ state: "taxiing", activity: "Ground vehicle", moving: true, vehicle: true });
+    expect(assess(motion({ x: 300, y: 150, groundSpeedKt: 40, category: "C1" }), ctx).activity).toBe("Emergency vehicle");
+  });
+
+  it("are never in the air, whatever the feed says", () => {
+    expect(assess(motion({ onGround: false, altitudeFt: 1300, category: "C2" }), ctx)).toMatchObject({ aglFt: 0, vehicle: true });
+  });
+
+  it("rank below every aircraft", () => {
+    const vehicle = assess(motion({ x: -850, y: -5, groundSpeedKt: kt(24), category: "C2" }), ctx);
+    const parked = assess(motion({ x: 20, y: 320 }), ctx);
+    expect(interest(vehicle)).toBeGreaterThan(interest(parked));
+  });
+});
+
 describe("countTraffic", () => {
   it("counts every aircraft, those on the ground, and those moving", () => {
     const parked = assess(motion({ x: 20, y: 320 }), ctx);
@@ -149,6 +182,13 @@ describe("pickFeatured", () => {
     expect(pickFeatured([parked, taxiing])?.id).toBe("taxi");
     expect(pickFeatured([parked])?.id).toBe("parked");
     expect(pickFeatured([])).toBeNull();
+  });
+
+  it("never opens on a ground vehicle, however busy it looks", () => {
+    const parked = entry("parked", { x: 20, y: 320 });
+    const van = entry("van", { x: -850, y: -5, groundSpeedKt: kt(24), category: "C2" });
+    expect(pickFeatured([parked, van])?.id).toBe("parked");
+    expect(pickFeatured([van])).toBeNull();
   });
 
   it("among equals, prefers the one nearest the field", () => {

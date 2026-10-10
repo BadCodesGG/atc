@@ -1,3 +1,5 @@
+import { isVehicle } from "./aircraft-state";
+
 /**
  * Which model the scene draws an aircraft as, and how long it is, from what ADS-B says: the ICAO type
  * designator when the feed has one ("B738"), the emitter category otherwise ("A3"), and the
@@ -101,7 +103,11 @@ const DEFAULT: AircraftClass = { model: "narrow", lengthM: 38 };
  */
 export const MIN_DRAWN_LENGTH = 18;
 
+/** A ground vehicle has no model of its own: drawn as the smallest there is, not as an airliner. */
+const VEHICLE: AircraftClass = { model: "light", lengthM: 6 };
+
 export function classify(typeCode: string | null, category: string | null, military = false): AircraftClass {
+  if (isVehicle({ typeCode, category })) return { model: VEHICLE.model, lengthM: Math.max(MIN_DRAWN_LENGTH, VEHICLE.lengthM) };
   const known = typeCode ? BY_TYPE.get(typeCode.toUpperCase()) : undefined;
   const found = known ?? (category ? BY_CATEGORY[category.toUpperCase()] : undefined) ?? DEFAULT;
   // A military aircraft the type table does not know: a fast jet if it is small, else a transport.

@@ -25,6 +25,11 @@ describe("classify", () => {
     expect(classify(null, null).model).toBe("narrow");
   });
 
+  it("draws a ground vehicle as the smallest model, never the airliner fallback", () => {
+    expect(classify("SERV", null)).toEqual({ model: "light", lengthM: MIN_DRAWN_LENGTH });
+    expect(classify(null, "C2")).toEqual({ model: "light", lengthM: MIN_DRAWN_LENGTH });
+  });
+
   it("an unknown military type is a fast jet when small and a transport when large, but a helicopter stays one", () => {
     expect(classify("XYZ1", "A6", true).model).toBe("fighter");
     expect(classify("XYZ2", "A5", true).model).toBe("airlifter");
