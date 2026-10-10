@@ -681,11 +681,12 @@ export function CameraMenu({ camera, available, onChange, className = "" }: Came
  * tablets, the band between the traffic tabs and the legend: the tabs at its top (the camera picker
  * beside them), the flight at its foot, and the open panel only ever in the space between, so the two
  * can never overlap; where that space is too short for a useful list, or the movements list is expanded
- * to every moving aircraft, the card steps aside while the panel is open. On the world map the foot holds the view buttons with the map style, and the map's
- * credit above those, so the band ends above all of it. The scene
- * measures the wide column (`ref`) to frame the airport in what it leaves free; only the children take
- * clicks, so the empty part of the band never blocks the map. On a tablet the band is no wider than a
- * phone's, at the left: a card stretched across 1000 px reads as a banner, its facts far apart.
+ * to every moving aircraft, the card steps aside while the panel is open. On the world map the foot
+ * holds the view buttons with the map style, and the map's credit above those, so the band ends above
+ * all of it. The scene measures the wide column (`ref`) to frame the airport in what it leaves free;
+ * only the children take clicks, so the empty part of the band never blocks the map. On a tablet the
+ * band is no wider than a phone's, at the left: a card stretched across 1000 px reads as a banner, its
+ * facts far apart.
  */
 export function SideColumn({ children, ref }: { children: ReactNode; ref?: Ref<HTMLDivElement> }) {
   return (
