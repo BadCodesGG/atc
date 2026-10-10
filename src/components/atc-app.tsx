@@ -25,6 +25,7 @@ import { readHex } from "@/lib/hex";
 import type { FlightRoute } from "@/lib/routes";
 import { activeMovements, type Movements as MovementsData } from "@/lib/movements";
 import type { AirportScene, ScenePath } from "@/lib/scene/airport-scene";
+import type { Area } from "@/lib/scene/camera";
 import { type CameraMode, cameraModes, CameraRig, lookDrag, lookKey, MODES, type ModeLook, modeShot } from "@/lib/scene/cameras";
 import type { Rect, SceneLabel } from "@/lib/scene/labels";
 import { ease, type OrbitView, orbit, pan, panAlong, turn, zoom } from "@/lib/scene/orbit";
@@ -1281,6 +1282,22 @@ function Viewer({ airport, theme, onTheme, onAirport, filters, onFilters, focusP
       let controls: Rect[] = [];
       let bounds: Rect = { left: 0, top: 0, right: 0, bottom: 0 };
 
+      /**
+       * On a phone or a tall tablet, the band the stacked chrome leaves the model, host-relative: from the
+       * foot of the traffic tabs to the top of the flight card (or the column's foot, with no card shown).
+       */
+      const band = (width: number, height: number): Area => {
+        const origin = host.getBoundingClientRect();
+        const column = columnRef.current;
+        const tabs = column?.querySelector("[role=tablist]")?.getBoundingClientRect();
+        const card = column?.querySelector("section[aria-label^='Selected flight']")?.getBoundingClientRect();
+        const foot = column?.getBoundingClientRect();
+        if (!tabs || !foot || tabs.height === 0) return { left: 0, top: 0, right: width, bottom: height };
+        const bottom = card && card.height > 0 ? card.top : foot.bottom;
+        return { left: 0, top: tabs.bottom - origin.top, right: width, bottom: bottom - origin.top };
+      };
+      let lastBand: Area | null = null;
+
       const resize = () => {
         const width = host.clientWidth;
         const height = host.clientHeight;
@@ -1289,12 +1306,18 @@ function Viewer({ airport, theme, onTheme, onAirport, filters, onFilters, focusP
         const column = window.matchMedia(COLUMN_BESIDE).matches ? columnRef.current?.getBoundingClientRect() : undefined;
         const free = column && column.width > 0 ? column.left - host.getBoundingClientRect().left : width;
         const margin = column && !window.matchMedia(WIDE).matches ? SHORT_FIELD_MARGIN : FIELD_MARGIN;
-        scene.resize(width, height, window.devicePixelRatio, {
-          left: FIELD_MARGIN.x,
-          top: margin.top,
-          right: free - FIELD_MARGIN.x,
-          bottom: height - margin.bottom,
-        });
+        lastBand = width < height && window.matchMedia(STACKED).matches ? band(width, height) : null;
+        scene.resize(
+          width,
+          height,
+          window.devicePixelRatio,
+          lastBand ?? {
+            left: FIELD_MARGIN.x,
+            top: margin.top,
+            right: free - FIELD_MARGIN.x,
+            bottom: height - margin.bottom,
+          },
+        );
         bounds = { left: 8, top: 8, right: free - 8, bottom: height - 8 };
       };
       resize();
@@ -1757,6 +1780,14 @@ function Viewer({ airport, theme, onTheme, onAirport, filters, onFilters, focusP
             .map((el) => el.getBoundingClientRect())
             .filter((r) => r.width > 0 && r.height > 0)
             .map((r) => ({ left: r.left - origin.left, top: r.top - origin.top, right: r.right - origin.left, bottom: r.bottom - origin.top }));
+          // A portrait frame keeps what it looks at in the middle of the band the chrome leaves, as a card opens or folds.
+          if (lastBand) {
+            const now = band(host.clientWidth, host.clientHeight);
+            if (Math.abs(now.top - lastBand.top) > 4 || Math.abs(now.bottom - lastBand.bottom) > 4) {
+              lastBand = now;
+              scene.setFreeArea(now);
+            }
+          }
           if (selected) leader.style.stroke = `var(--color-${selected.card.state})`;
           // weather: the drawn time; replay: the moment the picture is of
           const drawn = drawnTime(weatherRef.current, picture, airport);

@@ -1087,8 +1087,9 @@ export class AirportScene {
   /**
    * Sizes the drawing buffer to the container and re-frames the model for the new shape. On a wide
    * screen the whole field is fitted into `area` (CSS pixels from the frame's top left: what the
-   * interface leaves free, default the whole frame); a phone shows the concourses, nudged up clear of
-   * the flight card. The framing depends on the shape and the area only, never on the theme.
+   * interface leaves free, default the whole frame); a phone shows the concourses, centred in the band
+   * `area` leaves between its controls and the flight card (setFreeArea). The framing depends on the
+   * shape and the area only, never on the theme.
    */
   resize(width: number, height: number, pixelRatio: number, area?: Area): void {
     this.width = Math.max(1, width);
@@ -1112,7 +1113,6 @@ export class AirportScene {
     if (portrait) {
       framed = this.framePoints;
       distance = fitView(this.camera, DEFAULT_VIEW, framed, { zoom: 0.95 });
-      this.camera.setViewOffset(this.width, this.height, 0, this.height * 0.1, this.width, this.height);
     } else {
       framed = this.fieldPoints;
       distance = fitViewToArea(this.camera, DEFAULT_VIEW, framed, area ?? { left: 0, top: 0, right: this.width, bottom: this.height }, { width: this.width, height: this.height });
@@ -1125,6 +1125,23 @@ export class AirportScene {
     const free = area ?? { left: 0, top: 0, right: this.width, bottom: this.height };
     this.offsets.eye = this.offsets.orbit && !portrait ? { x: this.width / 2 - (free.left + free.right) / 2, y: this.height / 2 - (free.top + free.bottom) / 2 } : this.offsets.orbit;
     this.home = { azimuthDeg: DEFAULT_VIEW.azimuthDeg, elevationDeg: DEFAULT_VIEW.elevationDeg, target: centreOf(framed), height: 0, distance };
+    if (portrait) this.setFreeArea(free);
+    else this.applyView(this.view ?? this.home);
+  }
+
+  /**
+   * On a portrait frame, where the controls stand in rows above the model and the flight card below it:
+   * what they leave free, so what the camera looks at (the framed field, a followed aircraft) is drawn
+   * in the middle of that band rather than of the whole frame, behind the rows. The page measures the
+   * band as the chrome changes (a card opening, the tabs folding) and calls this again; it moves the
+   * picture without refitting it. A landscape frame is framed into its area by `resize`.
+   */
+  setFreeArea(area: Area): void {
+    if (this.width >= this.height) return;
+    // A band too short to centre anything in (the chrome not laid out yet) centres in the frame.
+    const y = area.bottom - area.top >= 80 ? this.height / 2 - (area.top + area.bottom) / 2 : 0;
+    const offset = { x: 0, y };
+    this.offsets = { orbit: offset, eye: offset };
     this.applyView(this.view ?? this.home);
   }
 
