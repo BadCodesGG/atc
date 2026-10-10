@@ -71,8 +71,6 @@ const PICK_RADIUS = 28;
 const FIELD_MARGIN = { x: 40, top: 88, bottom: 88 };
 /** The same on a short landscape window (COLUMN_BESIDE without the wide layout), where the title, search, wind and map style rows run to 176 px (the model is framed a little under them, as the corners of its plan are empty) and the view controls start 124 px up from the foot. */
 const SHORT_FIELD_MARGIN = { top: 168, bottom: 124 };
-/** Rows in the active movements list. */
-const MOVEMENT_ROWS = 5;
 /** Faded out past this much by the filters, an aircraft counts as left out: it cannot be picked and has no path drawn. */
 const GHOSTED = 0.5;
 /** How long a link's camera waits for its flight to be selected, ms. */
@@ -1758,7 +1756,8 @@ function Viewer({ airport, theme, onTheme, onAirport, filters, onFilters, focusP
             card: selected?.card ?? null,
             // path-pulse: the published procedure the selected flight's path follows, cited on its card
             procedure: selected && pulse && replay.isLive ? pulse.citationOf(selected.aircraft.id) : null,
-            movements: activeMovements(kept, selected?.aircraft.id ?? null, MOVEMENT_ROWS),
+            // Every moving aircraft: the list folds to its first rows until it is expanded.
+            movements: activeMovements(kept, selected?.aircraft.id ?? null),
             // weather: the drawn time; replay: the moment the picture is of
             clock: clockFormat.format(new Date(drawnTime(weatherRef.current, picture, airport))),
             // A journey is followed even while the map has the camera.
