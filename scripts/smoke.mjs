@@ -983,6 +983,19 @@ try {
       return items.filter((li) => li.getBoundingClientRect().top < ul.bottom - 20).length;
     });
     check(`${size}: the open list shows rows and covers nothing`, o.list !== null && shownRows > 0 && openClashes.length === 0, `${shownRows} rows; ${openClashes.join(", ") || "no overlap"}`);
+    // Expanded to every moving aircraft, the list takes the card's room (a short window has stepped it aside already).
+    const moreRows = page.getByRole("button", { name: /more moving/ });
+    if (await moreRows.count()) {
+      const before = await page.locator("#movements-rows").boundingBox();
+      await moreRows.click();
+      await sleep(400);
+      const after = await page.locator("#movements-rows").boundingBox();
+      const cardShown = await page.locator("section[aria-label^='Selected flight']").isVisible();
+      check(`${size}: the expanded list takes the card's room`, !cardShown && !!before && !!after && (short ? after.height >= before.height : after.height > before.height), `card ${cardShown ? "shown" : "aside"}; ${before?.height} -> ${after?.height}`);
+      await page.getByRole("button", { name: "Show fewer" }).click();
+      await sleep(400);
+      check(`${size}: Show fewer gives the card back`, short || (await page.locator("section[aria-label^='Selected flight']").isVisible()));
+    }
     const wide = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth);
     check(`${size}: no sideways scroll`, !wide);
     // On a phone the map style is one button in the view row, whose menu names the three.
