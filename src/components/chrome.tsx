@@ -1077,7 +1077,7 @@ export function TimeBar({
   const live = replay?.live ?? true;
   // Nothing to scrub yet: the page has just opened, or shows a frozen moment.
   const idle = !replay || replay.span < 1;
-  const chip = "min-h-11 min-w-11 rounded-[10px] px-2.5 text-sm max-[26rem]:px-2 sm:px-3 min-[1400px]:px-4 xl:min-h-10";
+  const chip = "min-h-11 min-w-11 rounded-[10px] px-2.5 text-sm max-[26rem]:px-2 sm:px-3 xl:min-h-10 min-[90rem]:px-4";
   return (
     <div
       data-map-foot
@@ -1100,8 +1100,8 @@ export function TimeBar({
           </button>
         );
       })}
-      {/* A phone narrower than 24rem has no room for a track (the bar's other controls take it all at 44 px), so it keeps the rate chips and LIVE, which replay and return; from 24rem the track has 55 px or more. The title sits on a wrapper as well: a disabled input shows no tooltip of its own. The track is short at 1280, where the bar, centred, has the legend on its left: "LIVE · 27 s" and the night theme's wider type leave the two 11 px apart at least. */}
-      <span title={idle ? IDLE : `Since ${replay!.since}`} className={`mx-1 min-w-0 flex-1 max-[24rem]:hidden sm:mx-2 xl:w-[100px] xl:flex-none min-[1400px]:w-[240px] ${liveOnly ? "hidden" : "flex"}`}>
+      {/* A phone narrower than 23rem has no room for a track (the bar's other controls take it all at 44 px), so it keeps the rate chips and LIVE, which replay and return; from 23rem the track has 60 px or more while the feed is current. The title sits on a wrapper as well: a disabled input shows no tooltip of its own. The track is short at 1280, where the bar, centred, has the legend on its left: "LIVE · 27 s" and the night theme's wider type leave the two 9 px apart at least. From 90rem it is 200 px, which with "LIVE · 27 s" still clears the legend by 16 px (the breakpoint is in rem so it sorts after xl's and wins). */}
+      <span title={idle ? IDLE : `Since ${replay!.since}`} className={`mx-1 min-w-0 flex-1 max-[23rem]:hidden sm:mx-2 xl:w-[100px] xl:flex-none min-[90rem]:w-[200px] ${liveOnly ? "hidden" : "flex"}`}>
         <input
           type="range"
           aria-label={idle ? "Replay since the page opened" : `Replay since the page opened at ${replay!.since}`}
@@ -1119,13 +1119,13 @@ export function TimeBar({
         />
       </span>
       <div aria-hidden className={`h-6 w-px shrink-0 bg-hairline max-[26rem]:hidden ${liveOnly ? "ml-1" : ""}`} />
-      <time title={zone ? `Local time at the airport (${zone})` : undefined} className="shrink-0 px-3 text-sm font-semibold tabular-nums max-[26rem]:px-2 xl:px-3.5">
-        {clock}
-        {/* Under 22rem the chips leave no room for it, and it is only read out. */}
+      {/* On a phone the zone sits under the time, so naming it costs the scrubber none of its width; under 22rem it is only read out. */}
+      <time title={zone ? `Local time at the airport (${zone})` : undefined} className="flex shrink-0 flex-col items-center px-3 text-sm font-semibold leading-tight tabular-nums max-[26rem]:px-2 sm:flex-row sm:items-baseline sm:gap-1 xl:px-3.5">
+        <span>{clock}</span>
         {zone && (
           <>
             {" "}
-            <span className="text-[11px] font-medium text-muted max-[22rem]:sr-only">{zone}</span>
+            <span className="text-[11px] font-medium leading-none text-muted max-[22rem]:sr-only">{zone}</span>
           </>
         )}
       </time>

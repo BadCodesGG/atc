@@ -641,12 +641,21 @@ try {
     await page.waitForFunction(() => document.querySelector("main > div:has(> time) button[aria-pressed='true']")?.textContent?.trim() === "30x", null, { timeout: 8_000 }).catch(() => {});
     check("30x replays from the start of the sequence", (await clock.innerText()) !== live);
     check("replaying, the LIVE dot is grey", (await page.locator("main > div:has(> time) [data-live]").getAttribute("data-live")) === "replay");
-    await page.locator("main input[type='range']").fill("120");
-    await sleep(800);
-    const seeked = Number(await page.locator("main input[type='range']").inputValue());
-    check("the scrubber seeks", seeked >= 120 && seeked < 200, String(seeked));
+    // Seek only once the replay has restarted from the start (a slow frame can land the restart after the
+    // click), and far: 30x alone moves the thumb at most 30 s a second, so reaching 300 sooner than that
+    // allows can only be the seek, however long a frame freezes.
+    const scrubber = page.locator("main input[type='range']");
+    check("1440x900: the scrubber has its full 200 px", Math.round((await scrubber.boundingBox())?.width ?? 0) === 200, String((await scrubber.boundingBox())?.width));
+    await page.waitForFunction(() => Number(document.querySelector("main input[type='range']")?.value) < 60, null, { timeout: 15_000 }).catch(() => {});
+    const from = Number(await scrubber.inputValue());
+    const seekedAt = Date.now();
+    await scrubber.fill("300");
+    await page.waitForFunction(() => Number(document.querySelector("main input[type='range']")?.value) >= 300, null, { timeout: 5_000 }).catch(() => {});
+    const seeked = Number(await scrubber.inputValue());
+    const played = (30 * (Date.now() - seekedAt)) / 1000;
+    check("the scrubber seeks", from < 60 && seeked >= 300 && from + played < 300, `${from} -> ${seeked}, 30x alone ${Math.round(played)}`);
     await page.getByRole("button", { name: "LIVE", exact: true }).click();
-    await page.waitForFunction((t) => document.querySelector("main > div:has(> time) > time")?.textContent === t, live, { timeout: 8_000 }).catch(() => {});
+    await page.waitForFunction((t) => document.querySelector("main > div:has(> time) > time")?.innerText === t, live, { timeout: 8_000 }).catch(() => {});
     check("LIVE goes back to the end", (await clock.innerText()) === live, `${live} / ${await clock.innerText()}`);
     await page.close();
   }
@@ -776,6 +785,8 @@ try {
     await page.waitForFunction(() => document.querySelector("[data-radar] a[href='https://www.rainviewer.com/']"), null, { timeout: 15_000 }).catch(() => {});
     const credit = page.locator("[data-radar] a[href='https://www.rainviewer.com/']");
     check("on, the radar shows RainViewer's credit with a link", (await toggle.getAttribute("aria-pressed")) === "true" && (await credit.innerText()) === "Weather data by RainViewer");
+    // The credit shows as the toggle turns on, the frame's age once its index has loaded.
+    await page.waitForFunction(() => /^Radar ·/.test(document.querySelector("[data-radar] p")?.textContent?.trim() ?? ""), null, { timeout: 15_000 }).catch(() => {});
     const note = (await page.locator("[data-radar] p").innerText()).replace(/\s+/g, " ");
     check("on, the radar says how old its frame is, not a clock time", /^Radar · (1 min ago|2 min ago|just now) · Weather data by RainViewer$/.test(note), note);
     await sleep(3000);
@@ -949,6 +960,11 @@ try {
       await more.click();
     }
     check(`${size}: the card shows the route`, (await page.locator("[data-route]").count()) === 1);
+    // The clock's zone sits under the time on a phone, so naming it leaves the scrubber its width.
+    if (width < 500) {
+      const scrub = await page.locator("main input[type='range']").boundingBox();
+      check(`${size}: the scrubber keeps its width beside the zoned clock`, (scrub?.width ?? 0) >= 70, String(scrub?.width));
+    }
     check(`${size}: every control is on screen`, names.length === (height < 640 ? 11 : 12), `missing: ${Object.keys(b).filter((k) => !b[k]).join(", ") || "none"}`);
     check(`${size}: nothing overlaps`, clashes.length === 0, clashes.join(", "));
     if (short) {
