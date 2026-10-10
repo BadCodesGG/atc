@@ -17,6 +17,7 @@ import { AirportPicker } from "./airport-picker";
 import { CardPhoto } from "./card-photo";
 import type { RadarControl } from "./use-radar";
 import { RAISED, RING } from "./shadows";
+import { usePopover } from "./use-popover";
 
 /**
  * The UI around the model, in the light, dark (night ops) and satellite themes: one layout for wide
@@ -59,6 +60,9 @@ export const COLUMN_BESIDE = `${WIDE}, (48rem <= width < 80rem) and (max-height:
  * wide layout, and not the short landscape one (COLUMN_BESIDE), which has its own. The page puts its DOM in the order that is seen.
  */
 export const STACKED = "(width < 80rem) and (not ((width >= 48rem) and (height <= 40rem)))";
+
+/** A phone, upright: narrower than a tablet's 48rem. */
+export const PHONE = "(width < 48rem)";
 
 /** Whether a media query matches now, as React state; false on the server, which has no window to ask. */
 export function useMedia(query: string): boolean {
@@ -202,7 +206,18 @@ interface FlightCardProps {
   note?: string | null;
   /** The flight cannot be followed (on the map, one that has left the feed): the toggle is dimmed and does nothing. */
   unavailable?: boolean;
+  /**
+   * Phones: the card opens as a summary (who, what state, what it is doing, Follow) so the
+   * model keeps the screen, and its line of what the flight is doing opens the rest.
+   */
+  compact?: boolean;
 }
+
+const CHEVRON = (
+  <svg aria-hidden viewBox="0 0 16 16" className="size-4 shrink-0 text-muted transition-transform group-aria-expanded/more:rotate-180">
+    <path d="M4 6.5 8 10.5l4-4" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+  </svg>
+);
 
 const CHECK = (
   <svg aria-hidden viewBox="0 0 16 16" className="size-3.5 shrink-0">
@@ -210,8 +225,11 @@ const CHECK = (
   </svg>
 );
 
-export function FlightCard({ card, procedure = null, here, status, following, onFollow, journey = null, phase, note = null, unavailable = false }: FlightCardProps) {
+export function FlightCard({ card, procedure = null, here, status, following, onFollow, journey = null, phase, note = null, unavailable = false, compact = false }: FlightCardProps) {
+  // Which flight the compact card was opened for: picking another one starts it folded again.
+  const [openFor, setOpenFor] = useState<string | null>(null);
   if (!card) return null;
+  const open = !compact || openFor === card.id;
   const { route, direction, gate } = card;
   const far = route ? (direction === "outbound" ? route.destination : route.origin) : null;
   const gateLabel = gate ? (gate.left ? `Left ${gate.kind}` : gate.kind === "gate" ? "Gate" : "Stand") : "";
@@ -233,7 +251,7 @@ export function FlightCard({ card, procedure = null, here, status, following, on
       aria-label={`Selected flight ${card.callsign}`}
       className="pointer-events-auto relative flex shrink-0 flex-col gap-2 rounded-2xl bg-surface px-4 py-3.5 shadow-[0_8px_24px_rgba(20,20,20,0.08),0_0_0_1px_var(--color-hairline)] max-xl:order-last max-xl:mt-auto cramped:group-has-[[data-open=true]]/side:hidden xl:p-4 roomy:gap-3 roomy:p-5"
     >
-      <CardPhoto key={card.id} hex={card.id} />
+      {open && <CardPhoto key={card.id} hex={card.id} />}
       <div className="flex items-start justify-between gap-3">
         <div className="flex min-w-0 flex-col gap-1">
           <h2 className="truncate text-lg font-bold tracking-[-0.01em] xl:text-xl roomy:text-2xl">{card.callsign}</h2>
@@ -259,55 +277,74 @@ export function FlightCard({ card, procedure = null, here, status, following, on
           </button>
         </div>
       </div>
-      {journey ? (
-        <JourneyPanel journey={journey} />
-      ) : route ? (
-        <p data-route className="flex min-w-0 items-baseline gap-2 text-[15px] font-semibold tabular-nums xl:text-base">
-          <span>{route.origin.code}</span>
-          <span aria-hidden className="text-muted">
-            →
+      {compact && (
+        <button
+          type="button"
+          aria-expanded={open}
+          aria-controls="flight-details"
+          onClick={() => setOpenFor(open ? null : card.id)}
+          className="group/more -mx-1 -my-1.5 flex min-h-11 items-center justify-between gap-2 rounded-lg px-1 text-left text-sm font-semibold"
+        >
+          <span className="min-w-0 truncate">{headline ?? place ?? "Details"}</span>
+          <span className="flex shrink-0 items-center gap-1 text-xs font-medium text-muted">
+            {open ? "Less" : "More"}
+            {CHEVRON}
           </span>
-          <span className="sr-only">to</span>
-          <span>{route.destination.code}</span>
-          <span title={farCity} className="line-clamp-2 min-w-0 text-[13px] font-normal text-muted">
-            {farCity}
-          </span>
-          {/* A short window hides the facts, so the gate comes up onto this line. */}
-          {place && <span className="hidden shrink-0 text-[13px] text-ink-2 max-xl:short:inline">· {place}</span>}
-        </p>
-      ) : (
-        place && <p className="hidden text-sm font-semibold max-xl:short:block">{place}</p>
+        </button>
       )}
-      {headline && <p className="text-sm font-semibold max-xl:short:hidden roomy:text-[15px]">{headline}</p>}
-      <dl className="flex justify-between gap-x-6 max-xl:short:hidden">
-        {facts.map(([label, value]) => (
-          <div key={label} title={label === "ETA" ? ESTIMATE : undefined} className="flex flex-col gap-0.5">
-            <dt className="text-xs text-muted">{label}</dt>
-            <dd className="whitespace-nowrap text-[15px] font-semibold tabular-nums roomy:text-base">{value}</dd>
-          </div>
-        ))}
-        {/* A gate makes a fourth fact on the same row, so it never makes the card taller. */}
-        {gate && (
-          <div className="flex flex-col gap-0.5">
-            <dt className="text-xs text-muted">{gateLabel}</dt>
-            <dd data-gate className="whitespace-nowrap text-[15px] font-semibold tabular-nums roomy:text-base">
-              {gate.ref}
-            </dd>
-          </div>
-        )}
-      </dl>
-      {note && (
-        <p data-note className="text-xs text-muted">
-          {note}
-        </p>
+      {open && (
+        <div id="flight-details" className="contents">
+          {journey ? (
+            <JourneyPanel journey={journey} />
+          ) : route ? (
+            <p data-route className="flex min-w-0 items-baseline gap-2 text-[15px] font-semibold tabular-nums xl:text-base">
+              <span>{route.origin.code}</span>
+              <span aria-hidden className="text-muted">
+                →
+              </span>
+              <span className="sr-only">to</span>
+              <span>{route.destination.code}</span>
+              <span title={farCity} className="line-clamp-2 min-w-0 text-[13px] font-normal text-muted">
+                {farCity}
+              </span>
+              {/* A short window hides the facts, so the gate comes up onto this line. */}
+              {place && <span className="hidden shrink-0 text-[13px] text-ink-2 max-xl:short:inline">· {place}</span>}
+            </p>
+          ) : (
+            place && <p className="hidden text-sm font-semibold max-xl:short:block">{place}</p>
+          )}
+          {headline && !compact && <p className="text-sm font-semibold max-xl:short:hidden roomy:text-[15px]">{headline}</p>}
+          <dl className="flex justify-between gap-x-6 max-xl:short:hidden">
+            {facts.map(([label, value]) => (
+              <div key={label} title={label === "ETA" ? ESTIMATE : undefined} className="flex flex-col gap-0.5">
+                <dt className="text-xs text-muted">{label}</dt>
+                <dd className="whitespace-nowrap text-[15px] font-semibold tabular-nums roomy:text-base">{value}</dd>
+              </div>
+            ))}
+            {/* A gate makes a fourth fact on the same row, so it never makes the card taller. */}
+            {gate && (
+              <div className="flex flex-col gap-0.5">
+                <dt className="text-xs text-muted">{gateLabel}</dt>
+                <dd data-gate className="whitespace-nowrap text-[15px] font-semibold tabular-nums roomy:text-base">
+                  {gate.ref}
+                </dd>
+              </div>
+            )}
+          </dl>
+          {note && (
+            <p data-note className="text-xs text-muted">
+              {note}
+            </p>
+          )}
+          {procedure && (
+            <p data-procedure className="text-xs text-muted">
+              {procedure}
+            </p>
+          )}
+          {journey?.endLine && <p className={END_LINE}>{journey.endLine}</p>}
+          <Delays here={here} status={status} direction={direction} far={far?.country === "US" ? far.code : null} />
+        </div>
       )}
-      {procedure && (
-        <p data-procedure className="text-xs text-muted">
-          {procedure}
-        </p>
-      )}
-      {journey?.endLine && <p className={END_LINE}>{journey.endLine}</p>}
-      <Delays here={here} status={status} direction={direction} far={far?.country === "US" ? far.code : null} />
       <button
         type="button"
         aria-pressed={following}
@@ -459,8 +496,8 @@ function Delays({ here, status, direction, far }: { here: string; status: NasSta
 /**
  * Turn, zoom and go back to the framed view: the buttons for what drags, the wheel, pinches and the
  * keyboard do. A column at the bottom left on wide screens, with the camera switch beside it along its
- * foot; on phones and tablets a row above or beside the traffic tabs, the camera picker first and
- * Reset view folded into the row as one more button.
+ * foot; on phones and tablets a row beside the wind, the map style first (MapStyleMenu, in `before`) and
+ * Reset view folded into the row as one more button, the camera picker a row lower beside the traffic tabs.
  */
 export function ViewControls({
   moved,
@@ -474,7 +511,7 @@ export function ViewControls({
   onTurn: (deg: number) => void;
   onZoom: (factor: number) => void;
   onReset: () => void;
-  /** Drawn ahead of the view buttons, in the DOM as on screen: the camera picker on phones. */
+  /** Drawn ahead of the view buttons, in the DOM as on screen: the map style on phones and tablets, the camera picker on a short landscape window. */
   before?: ReactNode;
   /** Drawn after them: the camera switch on wide screens. */
   children?: ReactNode;
@@ -488,7 +525,7 @@ export function ViewControls({
   return (
     // On the world map the stacked layout has no counts or column to sit under: the buttons go to the
     // foot, in one row with the map style above the time bar, clear of the map (MAP_FOOT).
-    <div data-map-foot className={`view-controls absolute right-4 top-[244px] flex flex-col items-end gap-2 xl:bottom-[84px] xl:left-8 xl:right-auto xl:top-auto xl:items-start ${MAP_FOOT} max-xl:in-data-on-map:left-4 max-xl:in-data-on-map:right-auto`}>
+    <div data-map-foot className={`view-controls absolute right-4 top-[184px] flex flex-col items-end gap-2 xl:bottom-[84px] xl:left-8 xl:right-auto xl:top-auto xl:items-start ${MAP_FOOT} max-xl:in-data-on-map:left-4 max-xl:in-data-on-map:right-auto`}>
       <div className="flex items-center gap-2 xl:items-end xl:gap-3">
         {before}
         <div role="group" aria-label="View" className={`flex gap-0.5 rounded-full bg-surface p-1 xl:flex-col ${RAISED}`}>
@@ -498,11 +535,11 @@ export function ViewControls({
           <button type="button" aria-label="Zoom out" title="Zoom out (scroll, -)" className={btn} onClick={() => onZoom(1 / ZOOM_STEP)}>
             {icon("M3 8h10")}
           </button>
-          {/* A phone turns the map with two fingers (and the keys Q and E turn it): on the map the row has room only for zoom and Reset view, and a phone narrower than 24rem has none for the turn buttons at their 44 px. */}
-          <button type="button" aria-label="Turn left" title="Turn left (right-drag, Q)" className={`${btn} max-[24rem]:hidden max-sm:in-data-on-map:hidden`} onClick={() => onTurn(-TURN_STEP)}>
+          {/* A phone turns the map with two fingers (and the keys Q and E turn it): on the map the row has room only for the map style, zoom and Reset view, and beside the wind a phone narrower than 28rem has none for the turn buttons at their 44 px. */}
+          <button type="button" aria-label="Turn left" title="Turn left (right-drag, Q)" className={`${btn} max-[28rem]:hidden max-sm:in-data-on-map:hidden`} onClick={() => onTurn(-TURN_STEP)}>
             {icon("M5.5 3.5 2.5 6.5l3 3M2.5 6.5H10a3.5 3.5 0 0 1 0 7H7")}
           </button>
-          <button type="button" aria-label="Turn right" title="Turn right (right-drag, E)" className={`${btn} max-[24rem]:hidden max-sm:in-data-on-map:hidden`} onClick={() => onTurn(TURN_STEP)}>
+          <button type="button" aria-label="Turn right" title="Turn right (right-drag, E)" className={`${btn} max-[28rem]:hidden max-sm:in-data-on-map:hidden`} onClick={() => onTurn(TURN_STEP)}>
             {icon("M10.5 3.5l3 3-3 3M13.5 6.5H6a3.5 3.5 0 0 0 0 7h3")}
           </button>
           {moved && (
@@ -613,9 +650,9 @@ export function CameraSwitch({ camera, available, onChange }: CameraProps) {
  * The camera switch on phones and tablets: the platform's own picker, in the view buttons' row, ahead
  * of them (ViewControls' `before`).
  */
-export function CameraMenu({ camera, available, onChange }: CameraProps) {
+export function CameraMenu({ camera, available, onChange, className = "" }: CameraProps & { className?: string }) {
   return (
-    <div className="xl:hidden">
+    <div className={`xl:hidden ${className}`}>
       <label htmlFor="atc-camera" className="sr-only">
         Camera
       </label>
@@ -639,12 +676,11 @@ export function CameraMenu({ camera, available, onChange }: CameraProps) {
 /**
  * The selected flight and the traffic panel. On wide screens, the right-hand column: the flight
  * above the panel, the panel taking what height is left above the map-style switch. On phones and
- * tablets, the band between the traffic tabs and the legend: the tabs at its top, the flight at
- * its foot, and the open panel only ever in the space between, so the two can never overlap; where
- * that space is too short for a useful list, the card steps aside while the panel is open. On a phone
- * narrower than `sm` the tabs and the view buttons do not fit side by side, so the band starts a row
- * lower, under the view buttons. On the world map the foot holds the view buttons and the map style
- * (in two rows on a narrow phone), and the map's credit above those, so the band ends above all of it. The scene
+ * tablets, the band between the traffic tabs and the legend: the tabs at its top (the camera picker
+ * beside them), the flight at its foot, and the open panel only ever in the space between, so the two
+ * can never overlap; where that space is too short for a useful list, the card steps aside while the
+ * panel is open. On the world map the foot holds the view buttons with the map style, and the map's
+ * credit above those, so the band ends above all of it. The scene
  * measures the wide column (`ref`) to frame the airport in what it leaves free; only the children take
  * clicks, so the empty part of the band never blocks the map. On a tablet the band is no wider than a
  * phone's, at the left: a card stretched across 1000 px reads as a banner, its facts far apart.
@@ -653,7 +689,7 @@ export function SideColumn({ children, ref }: { children: ReactNode; ref?: Ref<H
   return (
     <div
       ref={ref}
-      className="side-column group/side pointer-events-none absolute inset-x-4 bottom-[132px] top-[296px] flex flex-col gap-2 max-xl:short:bottom-[76px] max-xl:in-data-on-map:bottom-[172px] max-xl:short:in-data-on-map:bottom-[172px] max-[28rem]:in-data-on-map:bottom-[232px] sm:top-[244px] max-xl:short:in-data-on-map:top-[128px] md:max-w-[28rem] xl:bottom-[96px] xl:left-auto xl:right-8 xl:top-[104px] xl:w-[300px] xl:gap-3"
+      className="side-column group/side pointer-events-none absolute inset-x-4 bottom-[132px] top-[244px] flex flex-col gap-2 max-xl:short:bottom-[76px] max-xl:in-data-on-map:bottom-[172px] max-xl:short:in-data-on-map:bottom-[172px] max-xl:short:in-data-on-map:top-[128px] md:max-w-[28rem] xl:bottom-[96px] xl:left-auto xl:right-8 xl:top-[104px] xl:w-[300px] xl:gap-3"
     >
       {children}
     </div>
@@ -962,12 +998,6 @@ const RATES: ReplayRate[] = [10, 30];
 /** The stacked layout on the world map: a control sits in the row at the foot, just above the time bar (globals.css lifts the map's credit above it). */
 const MAP_FOOT = "max-xl:in-data-on-map:top-auto max-xl:in-data-on-map:bottom-[76px]";
 
-/**
- * On a phone the map style and the view buttons cannot share that row (the night theme's wider type
- * needs 411 px for both): the map style takes its own row above (globals.css lifts the credit over it).
- */
-const MAP_STYLE_ROW = "max-[28rem]:in-data-on-map:bottom-[136px]";
-
 /** The feed's status when the page is rendered on the server: nothing known yet, so LIVE. */
 const SERVER_FEED: FeedStatus = { ageS: null, failed: false };
 
@@ -1104,13 +1134,62 @@ const THEME_OPTIONS: { key: ThemeKey; label: string; short?: string }[] = [
 ];
 
 /**
- * Picks the map's style: the same model in another light. It sits under the counts on phones and at
- * the bottom right on wide screens, so the page renders it twice, `className` showing each copy only
- * in its own layout, and the keyboard reaches it where it is seen in both.
+ * The map style folded into one button, in the view row on phones and tablets, where a row of three
+ * named buttons cost the model room. It names the style it is on and opens a menu of the three; on the
+ * world map, at the foot, the menu opens upward.
+ */
+export function MapStyleMenu({ theme, onChange, up = false }: { theme: ThemeKey; onChange: (theme: ThemeKey) => void; up?: boolean }) {
+  const { open, setOpen, buttonRef, rootProps } = usePopover();
+  const current = THEME_OPTIONS.find((o) => o.key === theme) ?? THEME_OPTIONS[0];
+  return (
+    <div {...rootProps} className="relative">
+      <button
+        ref={buttonRef}
+        type="button"
+        aria-expanded={open}
+        aria-controls="atc-map-style"
+        aria-label={`Map style: ${current.label}`}
+        title="Map style"
+        onClick={() => setOpen(!open)}
+        className={`flex size-[52px] items-center justify-center rounded-full bg-surface text-ink-2 ${RAISED}`}
+      >
+        <svg aria-hidden viewBox="0 0 16 16" className="size-[18px]">
+          <path d="M8 2 1.5 5.5 8 9l6.5-3.5L8 2ZM1.5 8.5 8 12l6.5-3.5M1.5 11.5 8 15l6.5-3.5" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />
+        </svg>
+      </button>
+      {open && (
+        <div id="atc-map-style" role="group" aria-label="Map style" className={`absolute left-0 z-50 flex w-36 flex-col gap-0.5 rounded-2xl bg-surface p-1 ${up ? "bottom-full mb-2" : "top-full mt-2"} ${RAISED}`}>
+          {THEME_OPTIONS.map(({ key, label }) => (
+            <button
+              key={key}
+              type="button"
+              aria-pressed={key === theme}
+              onClick={() => {
+                onChange(key);
+                setOpen(false);
+                buttonRef.current?.focus();
+              }}
+              className={`flex min-h-11 items-center justify-between rounded-xl px-3.5 text-left text-sm font-semibold ${key === theme ? "bg-accent text-on-accent" : "text-ink-2 hover:bg-well"}`}
+            >
+              {label}
+              {key === theme && CHECK}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Picks the map's style: the same model in another light. At the bottom right on wide screens and beside
+ * the wind on a short landscape window, so the page renders it twice, `className` showing each copy only
+ * in its own layout, and the keyboard reaches it where it is seen in both. Phones and tablets have
+ * MapStyleMenu in the view row instead.
  */
 export function ThemeSwitch({ theme, onChange, className }: { theme: ThemeKey; onChange: (theme: ThemeKey) => void; className: string }) {
   return (
-    <div data-map-foot role="group" aria-label="Map style" className={`theme-switch absolute right-4 top-[184px] flex gap-1 rounded-full bg-surface p-1 xl:bottom-8 xl:right-8 xl:top-auto ${MAP_FOOT} ${MAP_STYLE_ROW} ${RAISED} ${className}`}>
+    <div data-map-foot role="group" aria-label="Map style" className={`theme-switch absolute right-4 top-[184px] flex gap-1 rounded-full bg-surface p-1 xl:bottom-8 xl:right-8 xl:top-auto ${MAP_FOOT} ${RAISED} ${className}`}>
       {THEME_OPTIONS.map(({ key, label, short }) => (
         <button
           key={key}

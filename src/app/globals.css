@@ -258,13 +258,6 @@ main .maplibregl-ctrl-attrib a {
   }
 }
 
-/* On a phone the map style has a row of its own above the controls (chrome.tsx MAP_STYLE_ROW), so the credit sits above that. */
-@media (width < 28rem) {
-  main .maplibregl-ctrl-bottom-right {
-    bottom: 192px;
-  }
-}
-
 /* Wide, it sits above the map style at the bottom right. */
 @media (width >= 80rem) {
   main .maplibregl-ctrl-bottom-right {
