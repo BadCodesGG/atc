@@ -641,22 +641,27 @@ try {
     await page.waitForFunction(() => document.querySelector("main > div:has(> time) button[aria-pressed='true']")?.textContent?.trim() === "30x", null, { timeout: 8_000 }).catch(() => {});
     check("30x replays from the start of the sequence", (await clock.innerText()) !== live);
     check("replaying, the LIVE dot is grey", (await page.locator("main > div:has(> time) [data-live]").getAttribute("data-live")) === "replay");
-    // Seek only once the replay has restarted from the start (a slow frame can land the restart after the
-    // click), and far: 30x alone moves the thumb at most 30 s a second, so reaching 300 sooner than that
-    // allows can only be the seek, however long a frame freezes.
     const scrubber = page.locator("main input[type='range']");
     check("1440x900: the scrubber has its full 200 px", Math.round((await scrubber.boundingBox())?.width ?? 0) === 200, String((await scrubber.boundingBox())?.width));
-    await page.waitForFunction(() => Number(document.querySelector("main input[type='range']")?.value) < 60, null, { timeout: 15_000 }).catch(() => {});
-    const from = Number(await scrubber.inputValue());
-    const seekedAt = Date.now();
-    await scrubber.fill("300");
-    await page.waitForFunction(() => Number(document.querySelector("main input[type='range']")?.value) >= 300, null, { timeout: 5_000 }).catch(() => {});
-    const seeked = Number(await scrubber.inputValue());
-    const played = (30 * (Date.now() - seekedAt)) / 1000;
-    check("the scrubber seeks", from < 60 && seeked >= 300 && from + played < 300, `${from} -> ${seeked}, 30x alone ${Math.round(played)}`);
-    await page.getByRole("button", { name: "LIVE", exact: true }).click();
-    await page.waitForFunction((t) => document.querySelector("main > div:has(> time) > time")?.innerText === t, live, { timeout: 8_000 }).catch(() => {});
+    const toLive = async () => {
+      await page.getByRole("button", { name: "LIVE", exact: true }).click();
+      await page.waitForFunction((t) => document.querySelector("main > div:has(> time) > time")?.innerText === t, live, { timeout: 8_000 }).catch(() => {});
+    };
+    await toLive();
     check("LIVE goes back to the end", (await clock.innerText()) === live, `${live} / ${await clock.innerText()}`);
+    // From LIVE a seek plays on at 1x, so however slow a frame is the thumb moves a second a second: a seek
+    // that took lands at 120 and creeps on from there, one that was ignored leaves the thumb at the live end.
+    // (At 30x a frozen frame let the thumb run 90 s between two reads, and a restart could overwrite the seek.)
+    const end = Number(await scrubber.getAttribute("max"));
+    const seekedAt = Date.now();
+    await scrubber.fill("120");
+    await page.waitForFunction(() => Number(document.querySelector("main input[type='range']")?.value) < 200, null, { timeout: 10_000 }).catch(() => {});
+    const seeked = Number(await scrubber.inputValue());
+    const waited = (Date.now() - seekedAt) / 1000;
+    check("the scrubber seeks", end > 200 && seeked >= 120 && seeked <= 120 + waited + 2, `${end} -> ${seeked} after ${waited.toFixed(1)} s`);
+    check("a seek leaves LIVE for the replay", (await page.locator("main > div:has(> time) [data-live]").getAttribute("data-live")) === "replay");
+    await toLive();
+    check("LIVE comes back from a seek", (await clock.innerText()) === live, `${live} / ${await clock.innerText()}`);
     await page.close();
   }
 
