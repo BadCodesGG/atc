@@ -79,10 +79,10 @@ export async function procedureChecks({ browser, base, check }) {
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  const { chromium } = await import("playwright");
+  const { launchChrome } = await import("./lib/chrome.mjs");
   const base = process.env.SMOKE_URL;
   if (!base) throw new Error("set SMOKE_URL to a running server, e.g. SMOKE_URL=http://localhost:3124");
-  const browser = await chromium.launch({ args: ["--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist"] });
+  const browser = await launchChrome({ args: ["--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist"] });
   let failures = 0;
   try {
     await procedureChecks({

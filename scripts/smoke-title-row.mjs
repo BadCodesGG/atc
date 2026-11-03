@@ -6,7 +6,7 @@
  *   SMOKE_URL=http://localhost:3146 node scripts/smoke-title-row.mjs
  */
 
-import { chromium } from "playwright";
+import { launchChrome } from "./lib/chrome.mjs";
 
 /** The longest names built, which is what the check is for (src/lib/airports.ts), each in the theme that gives the title the most room taken. */
 const CASES = [
@@ -73,7 +73,7 @@ if (process.argv[1] && process.argv[1].endsWith("smoke-title-row.mjs")) {
     console.log(`${ok ? "PASS" : "FAIL"}  ${name}${detail ? `  (${detail})` : ""}`);
     if (!ok) failures++;
   };
-  const browser = await chromium.launch({ headless: true, args: ["--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist"] });
+  const browser = await launchChrome({ headless: true, args: ["--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist"] });
   try {
     await titleRowChecks({ browser, base: process.env.SMOKE_URL ?? "http://localhost:3128", check });
     await titleRowPointerChecks({ browser, base: process.env.SMOKE_URL ?? "http://localhost:3128", check });

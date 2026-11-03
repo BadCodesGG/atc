@@ -11,7 +11,7 @@
 import { spawn } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { chromium } from "playwright";
+import { launchChrome } from "./lib/chrome.mjs";
 import { journeyLiveChecks } from "./smoke-journey-live.mjs";
 import { journeyProcedureChecks } from "./smoke-journey-procedures.mjs";
 import { mapSelectChecks } from "./smoke-map-select.mjs";
@@ -97,7 +97,13 @@ if (!process.env.SMOKE_URL) {
   server = spawn(process.execPath, [path.join(ROOT, "node_modules", "next", "dist", "bin", "next"), "start", "-p", String(PORT)], { cwd: ROOT, stdio: "inherit" });
 }
 
-const browser = await chromium.launch({ args: ["--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist"] });
+// The installed Google Chrome, never Playwright's bundled Chromium (CVE-2026-118306 et al). A failed
+// launch (no Chrome here, or one older than the patched build) stops the server it would otherwise leave holding the port.
+const browser = await launchChrome({ args: ["--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist"] })
+  .catch((error) => {
+    server?.kill();
+    throw error;
+  });
 try {
   await waitFor(BASE);
 
