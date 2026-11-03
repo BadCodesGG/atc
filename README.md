@@ -73,7 +73,7 @@ npm run dev            # http://localhost:3000
 | `npm test` | Vitest unit tests (feeds, tracker, routing, parsers, scene maths) |
 | `npm run test:smoke` | End-to-end checks in a real browser; needs a production build first |
 
-The smoke test starts `next start` on port 3119 and drives the page with Playwright, so run `npm run build` first and install a browser once with `npx playwright install chromium`. The page checks use the frozen fixture; the two API checks call the live feeds, so they need network access. To test a server that is already running, set `SMOKE_URL`:
+The smoke test starts `next start` on port 3119 and drives the page with Playwright, so run `npm run build` first and have Google Chrome installed (`npx playwright install chrome`): the smoke scripts launch the installed Chrome, not Playwright's bundled Chromium. The page checks use the frozen fixture; the two API checks call the live feeds, so they need network access. To test a server that is already running, set `SMOKE_URL`:
 
 ```bash
 npm run build && npm run test:smoke

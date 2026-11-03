@@ -200,7 +200,7 @@ if (process.argv[1] && process.argv[1].endsWith("smoke-map-select.mjs")) {
     console.log(results.at(-1));
     if (!ok) failures++;
   };
-  const browser = await chromium.launch({ args: ["--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist"] });
+  const browser = await chromium.launch({ channel: "chrome", args: ["--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist"] });
   try {
     await mapSelectChecks({ browser, base: process.env.SMOKE_URL ?? "http://localhost:3127", check });
   } catch (error) {

@@ -287,7 +287,7 @@ if (process.argv[1] && process.argv[1].endsWith("smoke-journey-procedures.mjs"))
     if (!ok) failures++;
   };
   const args = process.env.HEADED ? ["--ignore-gpu-blocklist"] : ["--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist"];
-  const browser = await chromium.launch({ headless: !process.env.HEADED, args });
+  const browser = await chromium.launch({ channel: "chrome", headless: !process.env.HEADED, args });
   try {
     // `node scripts/smoke-journey-procedures.mjs none` runs only the unbuilt and no-route blocks, which is how their timing is looked at on its own;
     // SMOKE_ONLY=map-follow runs just the flights picked on the map (the rest play the recording in real time, minutes of it).

@@ -73,7 +73,7 @@ if (process.argv[1] && process.argv[1].endsWith("smoke-title-row.mjs")) {
     console.log(`${ok ? "PASS" : "FAIL"}  ${name}${detail ? `  (${detail})` : ""}`);
     if (!ok) failures++;
   };
-  const browser = await chromium.launch({ headless: true, args: ["--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist"] });
+  const browser = await chromium.launch({ channel: "chrome", headless: true, args: ["--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist"] });
   try {
     await titleRowChecks({ browser, base: process.env.SMOKE_URL ?? "http://localhost:3128", check });
     await titleRowPointerChecks({ browser, base: process.env.SMOKE_URL ?? "http://localhost:3128", check });

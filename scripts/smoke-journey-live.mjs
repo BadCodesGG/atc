@@ -274,7 +274,7 @@ if (process.argv[1] && process.argv[1].endsWith("smoke-journey-live.mjs")) {
     if (!ok) failures++;
   };
   const args = process.env.HEADED ? ["--ignore-gpu-blocklist"] : ["--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist"];
-  const browser = await chromium.launch({ headless: !process.env.HEADED, args });
+  const browser = await chromium.launch({ channel: "chrome", headless: !process.env.HEADED, args });
   try {
     // SMOKE_ONLY=hand,quiet,origin,reader picks the checks; each plays the recording in real time, minutes of it.
     await journeyLiveChecks({ browser, base: process.env.SMOKE_URL ?? "http://localhost:3128", check, only: process.env.SMOKE_ONLY?.split(",") });
