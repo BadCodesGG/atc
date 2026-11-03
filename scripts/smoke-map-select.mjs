@@ -11,7 +11,7 @@
  * aircraft is on screen (to click it) and, for the lost state, to take it out of the sky.
  */
 
-import { chromium } from "playwright";
+import { launchChrome } from "./lib/chrome.mjs";
 
 /** AAL972 (hex adacfd), the one aircraft in the fixture's sky with a recorded route that is in the air: DFW to AUS, climbing out of Dallas-Fort Worth. */
 const HEX = "adacfd";
@@ -200,7 +200,7 @@ if (process.argv[1] && process.argv[1].endsWith("smoke-map-select.mjs")) {
     console.log(results.at(-1));
     if (!ok) failures++;
   };
-  const browser = await chromium.launch({ channel: "chrome", args: ["--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist"] });
+  const browser = await launchChrome({ args: ["--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist"] });
   try {
     await mapSelectChecks({ browser, base: process.env.SMOKE_URL ?? "http://localhost:3127", check });
   } catch (error) {

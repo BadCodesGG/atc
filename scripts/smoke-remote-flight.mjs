@@ -11,7 +11,7 @@
  * failure here, not an Enter pressed on nothing.
  */
 
-import { chromium } from "playwright";
+import { launchChrome } from "./lib/chrome.mjs";
 
 export async function remoteFlightChecks({ browser, base, check }) {
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
@@ -40,7 +40,7 @@ export async function remoteFlightChecks({ browser, base, check }) {
 if (process.argv[1] && process.argv[1].endsWith("smoke-remote-flight.mjs")) {
   const base = process.env.SMOKE_URL ?? "http://localhost:3128";
   const times = Number(process.env.TIMES ?? 1);
-  const browser = await chromium.launch({ channel: "chrome", args: ["--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist"] });
+  const browser = await launchChrome({ args: ["--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist"] });
   let failures = 0;
   try {
     for (let i = 0; i < times; i++) {
