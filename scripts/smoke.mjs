@@ -97,7 +97,14 @@ if (!process.env.SMOKE_URL) {
   server = spawn(process.execPath, [path.join(ROOT, "node_modules", "next", "dist", "bin", "next"), "start", "-p", String(PORT)], { cwd: ROOT, stdio: "inherit" });
 }
 
-const browser = await chromium.launch({ channel: "chrome", args: ["--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist"] });
+// The installed Google Chrome, never Playwright's bundled Chromium (CVE-2026-118306 et al). A failed
+// launch (no Chrome here) stops the server it would otherwise leave holding the port.
+const browser = await chromium
+  .launch({ channel: "chrome", args: ["--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist"] })
+  .catch((error) => {
+    server?.kill();
+    throw error;
+  });
 try {
   await waitFor(BASE);
 
