@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { Albert_Sans, IBM_Plex_Mono, IBM_Plex_Sans_Condensed, Instrument_Sans } from "next/font/google";
+import { SITE_URL } from "@/lib/site";
 import "./globals.css";
 
 const instrumentSans = Instrument_Sans({
@@ -38,9 +39,12 @@ const DESCRIPTION = "Every aircraft at a busy US airport, live from ADS-B, on a 
  * unfurls as one family.
  */
 export const metadata: Metadata = {
-  metadataBase: new URL("https://atc.badcodes.dev"),
+  metadataBase: new URL(SITE_URL),
   title: TITLE,
   description: DESCRIPTION,
+  // Airports, flights and views are query and hash state on the one page, so every variant of it
+  // (a shared ?airport=dfw link) points search engines back at the page itself.
+  alternates: { canonical: "/" },
   openGraph: { type: "website", url: "/", siteName: "ATC", title: TITLE, description: DESCRIPTION, images: [{ url: "/og.jpg", width: 1200, height: 630, alt: "ATC: live US airport traffic in 3D" }] },
   twitter: { card: "summary_large_image", title: TITLE, description: DESCRIPTION, images: ["/og.jpg"] },
 };
