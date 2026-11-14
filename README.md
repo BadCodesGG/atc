@@ -82,6 +82,10 @@ SMOKE_URL=http://localhost:3000 npm run test:smoke
 
 No API keys or environment variables are needed. The `public/maplibre/` folder is generated on install and not committed.
 
+CI (`.github/workflows/ci.yml`) runs lint, typecheck, tests and the build on every push to `main`, not on pull requests; `test:smoke` needs a browser and the live feeds, so it stays local.
+
+`package.json` `overrides` force `minimatch` ^11.0.8 under `@typescript-eslint/typescript-estree` (the lint parser) to clear GHSA-g3hv-75wg-m249 (minimatch >=7.0.0 <11.0.1). The parent declares an older major and only calls the named `minimatch()` export, which 11 keeps. Drop the override once it declares a fixed range (`npm view @typescript-eslint/typescript-estree dependencies`), then rerun `npm audit`.
+
 ## Regenerating the data
 
 The airport layouts and procedures are committed, so you do not need to run either of these to use or change the app.
