@@ -42,6 +42,9 @@ export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
   title: TITLE,
   description: DESCRIPTION,
+  // Airports, flights and views are query and hash state on the one page, so every variant of it
+  // (a shared ?airport=dfw link) points search engines back at the page itself.
+  alternates: { canonical: "/" },
   openGraph: { type: "website", url: "/", siteName: "ATC", title: TITLE, description: DESCRIPTION, images: [{ url: "/og.jpg", width: 1200, height: 630, alt: "ATC: live US airport traffic in 3D" }] },
   twitter: { card: "summary_large_image", title: TITLE, description: DESCRIPTION, images: ["/og.jpg"] },
 };
