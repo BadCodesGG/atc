@@ -30,6 +30,10 @@ export interface FlightCard {
   heading: string;
   /** Height above the field, "480 ft AGL", or "Ground". */
   altitude: string;
+  /** The tail number, "N301DV", when the feed carries one. Optional: the world map's card (globe/map-flight.ts) has none to give. */
+  registration?: string | null;
+  /** In the air, the vertical rate: "↑ 1,830 fpm", "↓ 640 fpm", or "Level" under LEVEL_FPM; null on the ground or when the feed sends none. */
+  climb?: string | null;
   /** Where it flies from and to, when known (this airport is always one end). */
   route: FlightRoute | null;
   /** Leaving this airport or coming in: from the route, else from what it is doing; null when neither says. */
@@ -77,6 +81,20 @@ interface LastPlace {
   firstSeenThere: boolean;
 }
 
+/**
+ * Under this vertical rate either way, ft/min, an aircraft in the air reads as level: ADS-B rates wobble by
+ * a hundred or so in level flight, and an arrow for that would say it is climbing when it is not.
+ */
+const LEVEL_FPM = 250;
+
+/** The vertical rate as the card prints it, to the nearest 10 ft/min; null on the ground or with no rate sent. */
+function climbOf(a: TrackedAircraft, vehicle: boolean | undefined): string | null {
+  if (a.onGround || vehicle || a.verticalRateFpm === null) return null;
+  if (Math.abs(a.verticalRateFpm) < LEVEL_FPM) return "Level";
+  const fpm = Math.round(Math.abs(a.verticalRateFpm) / 10) * 10;
+  return `${a.verticalRateFpm > 0 ? "↑" : "↓"} ${fpm.toLocaleString("en-US")} fpm`;
+}
+
 function card(a: TrackedAircraft, s: Situation, route: FlightRoute | null, here: string, last: LastPlace | undefined): FlightCard {
   const operator = [airlineName(a.callsign), typeName(a.typeCode)].filter(Boolean).join(" · ");
   const speedKt = a.groundSpeedKt === null ? null : Math.round(a.groundSpeedKt);
@@ -86,6 +104,8 @@ function card(a: TrackedAircraft, s: Situation, route: FlightRoute | null, here:
     id: a.id,
     callsign: a.callsign ?? a.id.toUpperCase(),
     operator,
+    registration: a.registration ?? null,
+    climb: climbOf(a, s.vehicle),
     state: s.state,
     headline: s.runway ? `${s.activity}, runway ${s.runway}` : s.activity,
     tag: speedKt !== null && s.moving ? `${s.activity} · ${speed}` : s.activity,
