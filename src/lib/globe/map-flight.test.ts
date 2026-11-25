@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isFlight, lostNote, type MapFlight, mapFlightCard, markLost } from "./map-flight";
+import { isFlight, lostNote, type MapFlight, mapFlightCard, markLost, soughtStep } from "./map-flight";
 
 const flight: MapFlight = {
   id: "a0540a",
@@ -78,5 +78,27 @@ describe("isFlight", () => {
 
   it("knows nothing by nothing", () => {
     expect(isFlight(aircraft, { hex: null, callsign: null })).toBe(false);
+  });
+});
+
+describe("soughtStep", () => {
+  const sought = { hex: "a4097b", callsign: "N3596W" };
+  const found = { id: "a4097b", callsign: "N3596W" };
+
+  it("does nothing while nothing is sought, or nothing is selected yet", () => {
+    expect(soughtStep(null, found, true)).toBe("idle");
+    expect(soughtStep(sought, null, true)).toBe("idle");
+  });
+
+  it("lets go when the reader has selected another flight", () => {
+    expect(soughtStep(sought, { id: "a1b2c3", callsign: "DAL1" }, true)).toBe("drop");
+  });
+
+  it("waits, to look again, while the sought flight is selected but not drawn yet", () => {
+    expect(soughtStep(sought, found, false)).toBe("wait");
+  });
+
+  it("follows the sought flight once it is selected and drawn", () => {
+    expect(soughtStep(sought, found, true)).toBe("follow");
   });
 });

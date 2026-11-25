@@ -2,7 +2,7 @@
 
 import "maplibre-gl/dist/maplibre-gl.css";
 import { flushSync } from "react-dom";
-import { type KeyboardEvent, type RefObject, useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { type KeyboardEvent, type RefObject, useCallback, useEffect, useReducer, useRef, useState, useSyncExternalStore } from "react";
 import { countTraffic, pickFeatured, type TrafficCounts } from "@/lib/aircraft-state";
 import type { AirportMap, Point } from "@/lib/airport-map";
 import type { NasStatus } from "@/lib/faa-status";
@@ -43,7 +43,7 @@ import { quietArrival } from "@/lib/journey-arrival";
 import { journeyFrame, type ReaderAction, releasesJourney } from "@/lib/journey-release";
 import { arrivedCard, selectedOf } from "@/lib/journey-card";
 import { flightPhase, journeyView } from "@/lib/journey-view";
-import { type FlightIdentity, isFlight, lostNote, type MapFlight, mapFlightCard } from "@/lib/globe/map-flight";
+import { type FlightIdentity, lostNote, type MapFlight, mapFlightCard, soughtStep } from "@/lib/globe/map-flight";
 // weather
 import type { Metar } from "@/lib/metar";
 import { atmosphere, backdropOver } from "@/lib/scene/atmosphere";
@@ -111,6 +111,8 @@ const FOLLOW_NEAR_M = 150_000;
  * ms: the fly there, and a few reads of its traffic.
  */
 const FOUND_WAIT_MS = 40_000;
+/** How soon to look again for a found flight selected on the map but not drawn yet, ms. */
+const FOUND_RETRY_MS = 250;
 /**
  * The followed flight's beacon shows where its model is shorter on screen than BEACON_UNTIL_PX, fully
  * from BEACON_FADE_PX shorter than that; the model's length is measured as a typical airliner's.
@@ -778,6 +780,7 @@ function Viewer({ airport, theme, onTheme, onAirport, filters, onFilters, focusP
   // The map can take the camera for it: made, and either leading already or with the diorama there to hand over from (toMap).
   const mapFollows = globeReady && (onMap || status === "ready");
   const soughtRef = useRef<FlightIdentity | null>(null);
+  const soughtTimerRef = useRef(0);
   const followOnMap = (flight: FlightAnswer, summary: RemoteSummary) => {
     const globe = globeRef.current;
     if (!globe || !mapFollows) return;
@@ -787,24 +790,27 @@ function Viewer({ airport, theme, onTheme, onAirport, filters, onFilters, focusP
     globe.flyToFlight({ ...sought, latitude: flight.latitude, longitude: flight.longitude });
     soughtRef.current = sought;
     // Selected later than this (the reader's own click on it, say), it is not followed on the search's behalf.
-    window.setTimeout(() => {
+    window.clearTimeout(soughtTimerRef.current);
+    soughtTimerRef.current = window.setTimeout(() => {
       if (soughtRef.current === sought) soughtRef.current = null;
     }, FOUND_WAIT_MS);
   };
-  // Every render, as actionsRef is kept: followMapFlight is made anew each render, and only a change
-  // of mapFlight can make this do anything.
+  useEffect(() => () => window.clearTimeout(soughtTimerRef.current), []);
+  /** Bumped to look again for the sought flight's drawing, without waiting on its traffic to change. */
+  const [, lookAgain] = useReducer((n: number) => n + 1, 0);
+  // Every render, as actionsRef is kept: followMapFlight is made anew each render.
   useEffect(() => {
-    const sought = soughtRef.current;
-    if (!sought || !mapFlight) return;
-    // The reader picked another flight on the map: nothing more to follow.
-    if (!isFlight(mapFlight, sought)) {
-      soughtRef.current = null;
-      return;
+    const step = soughtStep(soughtRef.current, mapFlight, !!globeRef.current?.selectedAt);
+    if (step === "drop") soughtRef.current = null;
+    // Selected before the map draws it: looked at again shortly, until it is drawn or the search's wait ends (the timer above).
+    if (step === "wait") {
+      const timer = window.setTimeout(lookAgain, FOUND_RETRY_MS);
+      return () => window.clearTimeout(timer);
     }
-    // Once the map draws it (its first selection may come a frame before), it is followed.
-    if (!globeRef.current?.selectedAt) return;
-    soughtRef.current = null;
-    followMapFlight(true);
+    if (step === "follow") {
+      soughtRef.current = null;
+      followMapFlight(true);
+    }
   });
   // /map-select
 
