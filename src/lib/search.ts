@@ -306,13 +306,20 @@ export function remoteSummary(flight: FlightAnswer, here: Airport["code"]): Remo
   };
 }
 
+/** What a flight elsewhere's row offers: the words for what choosing it does, and whether that can work. */
+export interface RemoteOffer {
+  label: string;
+  enabled: boolean;
+}
+
 /**
- * What a flight elsewhere's row offers: the words for what choosing it does, and whether that can
- * work. Following on the world map needs the map there and able to take the camera (`mapFollows`);
- * opening an airport, or showing the flight in the diorama on screen, does not.
+ * The offer for a flight elsewhere. Following on the world map needs the map there and able to take
+ * the camera (`mapFollows`); opening an airport does not, nor showing the flight in the diorama on
+ * screen where the diorama draws it (`onScreen`). A flight near the airport on screen that the diorama
+ * does not draw is followed on the map instead.
  */
-export function remoteOffer(summary: RemoteSummary, mapFollows: boolean): { label: string; enabled: boolean } {
+export function remoteOffer(summary: RemoteSummary, mapFollows: boolean, onScreen: boolean): RemoteOffer {
   if (summary.opens === "airport") return { label: `Open ${summary.nearest.toUpperCase()}`, enabled: true };
-  if (summary.opens === "here") return { label: "Show", enabled: true };
+  if (summary.opens === "here" && onScreen) return { label: "Show", enabled: true };
   return mapFollows ? { label: "Follow on map", enabled: true } : { label: "Map unavailable", enabled: false };
 }

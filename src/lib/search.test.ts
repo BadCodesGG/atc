@@ -252,18 +252,23 @@ describe("remoteOffer", () => {
   const here = remoteSummary({ ...base, latitude: 33.4, longitude: -112.2 }, "phx");
 
   it("offers to follow a far flight on the map only while the map can follow it", () => {
-    expect(remoteOffer(far, true)).toEqual({ label: "Follow on map", enabled: true });
-    expect(remoteOffer(far, false)).toEqual({ label: "Map unavailable", enabled: false });
+    expect(remoteOffer(far, true, false)).toEqual({ label: "Follow on map", enabled: true });
+    expect(remoteOffer(far, false, false)).toEqual({ label: "Map unavailable", enabled: false });
   });
 
-  it("offers the airport a flight is near, and the diorama on screen, whatever the map can do", () => {
-    expect(remoteOffer(close, false)).toEqual({ label: "Open PHX", enabled: true });
-    expect(remoteOffer(here, false)).toEqual({ label: "Show", enabled: true });
+  it("offers the airport a flight is near, and the diorama on screen where it is drawn, whatever the map can do", () => {
+    expect(remoteOffer(close, false, false)).toEqual({ label: "Open PHX", enabled: true });
+    expect(remoteOffer(here, false, true)).toEqual({ label: "Show", enabled: true });
+  });
+
+  it("follows a flight near the airport on screen on the map when the diorama does not draw it, as far as the map can", () => {
+    expect(remoteOffer(here, true, false)).toEqual({ label: "Follow on map", enabled: true });
+    expect(remoteOffer(here, false, false)).toEqual({ label: "Map unavailable", enabled: false });
   });
 
   it("finds a flight with neither callsign nor hex on the map, having nothing to pick it by at an airport", () => {
     const anonymous = remoteSummary({ ...base, hex: null, callsign: null, latitude: 33.4, longitude: -112.2 }, "atl");
     expect(anonymous.opens).toBe("map");
-    expect(remoteOffer(anonymous, true)).toEqual({ label: "Follow on map", enabled: true });
+    expect(remoteOffer(anonymous, true, false)).toEqual({ label: "Follow on map", enabled: true });
   });
 });

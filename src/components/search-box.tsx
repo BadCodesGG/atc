@@ -1,7 +1,7 @@
 import { type KeyboardEvent, useEffect, useMemo, useRef, useState } from "react";
 import type { Airport } from "@/lib/airports";
 import type { FlightAnswer } from "@/lib/flight-lookup";
-import { type AirportHit, type FlightHit, type PlaceDoc, type PlaceHit, type RemoteSummary, remoteOffer, remoteSummary, search, type SearchData } from "@/lib/search";
+import { type AirportHit, type FlightHit, type PlaceDoc, type PlaceHit, type RemoteOffer, type RemoteSummary, remoteOffer, remoteSummary, search, type SearchData } from "@/lib/search";
 import { STATE_INK, STATE_LABEL, STATE_SWATCH } from "./chrome";
 import { RAISED } from "./shadows";
 
@@ -36,7 +36,7 @@ type Option =
   | { id: string; kind: "flight"; hit: FlightHit }
   | { id: string; kind: "place"; hit: PlaceHit }
   | { id: string; kind: "airport"; hit: AirportHit }
-  | { id: string; kind: "remote"; callsign: string; flight: FlightAnswer; summary: RemoteSummary; offer: { label: string; enabled: boolean } };
+  | { id: string; kind: "remote"; callsign: string; flight: FlightAnswer; summary: RemoteSummary; offer: RemoteOffer };
 
 interface Section {
   key: string;
@@ -131,10 +131,12 @@ export function Search({ read, onFlight, onPlace, onAirport, onRemote, mapFollow
     if (wanted && remoteOutcome && remoteOutcome !== "none" && remoteOutcome !== "error" && here) {
       const { flight } = remoteOutcome;
       const summary = remoteSummary(flight, here);
-      out.push({ key: "remote", heading: "Flight elsewhere", options: [{ id: id(), kind: "remote", callsign: wanted, flight, summary, offer: remoteOffer(summary, mapFollows) }] });
+      // As the diorama draws it, so "Show" can select it there (onRemote asks the same of the frame).
+      const onScreen = !!flight.hex && !!data?.flights.some((f) => f.id === flight.hex);
+      out.push({ key: "remote", heading: "Flight elsewhere", options: [{ id: id(), kind: "remote", callsign: wanted, flight, summary, offer: remoteOffer(summary, mapFollows, onScreen) }] });
     }
     return out;
-  }, [results, wanted, remoteOutcome, here, mapFollows]);
+  }, [results, wanted, remoteOutcome, here, mapFollows, data]);
   const options = useMemo(() => sections.flatMap((s) => s.options), [sections]);
 
   const index = cursor.query === debounced ? Math.min(cursor.index, options.length - 1) : 0;
@@ -286,7 +288,7 @@ function OptionRow({ option, active, onHover, onChoose }: { option: Option; acti
       onMouseDown={(e) => e.preventDefault()}
       onPointerMove={onHover}
       onClick={() => onChoose(false)}
-      className={`flex min-h-11 cursor-pointer items-center gap-3 rounded-lg px-3 py-1.5 text-left ${active ? "bg-selected shadow-[0_0_0_1px_var(--color-selected-ring)]" : ""} ${disabled ? "cursor-default" : ""}`}
+      className={`flex min-h-11 ${disabled ? "cursor-default" : "cursor-pointer"} items-center gap-3 rounded-lg px-3 py-1.5 text-left ${active ? "bg-selected shadow-[0_0_0_1px_var(--color-selected-ring)]" : ""}`}
     >
       <Row option={option} onFollow={() => onChoose(true)} />
     </div>

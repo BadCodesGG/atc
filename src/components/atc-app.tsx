@@ -2,7 +2,7 @@
 
 import "maplibre-gl/dist/maplibre-gl.css";
 import { flushSync } from "react-dom";
-import { type KeyboardEvent, type RefObject, useCallback, useEffect, useReducer, useRef, useState, useSyncExternalStore } from "react";
+import { type KeyboardEvent, type RefObject, useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { countTraffic, pickFeatured, type TrafficCounts } from "@/lib/aircraft-state";
 import type { AirportMap, Point } from "@/lib/airport-map";
 import type { NasStatus } from "@/lib/faa-status";
@@ -772,18 +772,20 @@ function Viewer({ airport, theme, onTheme, onAirport, filters, onFilters, focusP
     });
   };
 
+  // The map can take the camera for a flight the search found: made, and either leading already or with
+  // the diorama there to hand over from (toMap). The search offers "Follow on map" on this.
+  const mapFollows = globeReady && (onMap || status === "ready");
   /**
    * A flight the search found anywhere, out of range of a built airport: the map takes the camera (as a
    * pick of another airport has it), flies to the flight and selects it once its traffic shows it; the
    * flight is then followed as the map card's Follow does (followMapFlight), from wherever it is.
    */
-  // The map can take the camera for it: made, and either leading already or with the diorama there to hand over from (toMap).
-  const mapFollows = globeReady && (onMap || status === "ready");
   const soughtRef = useRef<FlightIdentity | null>(null);
   const soughtTimerRef = useRef(0);
   const followOnMap = (flight: FlightAnswer, summary: RemoteSummary) => {
     const globe = globeRef.current;
-    if (!globe || !mapFollows) return;
+    // As toMap needs: with the diorama leading, its scene to hand the camera over from.
+    if (!globe || !mapFollows || (leadRef.current.by === "scene" && !sceneRef.current)) return;
     world.stopJourney();
     if (leadRef.current.by === "scene") toMap();
     const sought: FlightIdentity = { hex: flight.hex, callsign: summary.selectBy };
@@ -796,21 +798,27 @@ function Viewer({ airport, theme, onTheme, onAirport, filters, onFilters, focusP
     }, FOUND_WAIT_MS);
   };
   useEffect(() => () => window.clearTimeout(soughtTimerRef.current), []);
-  /** Bumped to look again for the sought flight's drawing, without waiting on its traffic to change. */
-  const [, lookAgain] = useReducer((n: number) => n + 1, 0);
   // Every render, as actionsRef is kept: followMapFlight is made anew each render.
   useEffect(() => {
-    const step = soughtStep(soughtRef.current, mapFlight, !!globeRef.current?.selectedAt);
+    const sought = soughtRef.current;
+    const step = soughtStep(sought, mapFlight, !!globeRef.current?.selectedAt);
     if (step === "drop") soughtRef.current = null;
-    // Selected before the map draws it: looked at again shortly, until it is drawn or the search's wait ends (the timer above).
-    if (step === "wait") {
-      const timer = window.setTimeout(lookAgain, FOUND_RETRY_MS);
-      return () => window.clearTimeout(timer);
-    }
     if (step === "follow") {
       soughtRef.current = null;
       followMapFlight(true);
     }
+    // Selected before the map draws it: looked at again every so often, without a render, until it is drawn
+    // (then followed) or the search's wait ends (the timer above lets go of it). A new selection reruns this.
+    if (step !== "wait") return;
+    const timer = window.setInterval(() => {
+      if (soughtRef.current !== sought) window.clearInterval(timer);
+      else if (globeRef.current?.selectedAt) {
+        window.clearInterval(timer);
+        soughtRef.current = null;
+        followMapFlight(true);
+      }
+    }, FOUND_RETRY_MS);
+    return () => window.clearInterval(timer);
   });
   // /map-select
 
