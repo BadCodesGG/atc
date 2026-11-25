@@ -876,7 +876,8 @@ try {
       ["military", "Military aircraft in the area"],
     ]) {
       const page = await open(`&alerts=${kind}`, "granted", true);
-      await page.waitForFunction(() => window.__notes.length > 0, null, { timeout: 10_000 }).catch(() => {});
+      // Pushback's script waits out thirty-odd steps before the aircraft moves, which a software GPU can stretch past ten seconds.
+      await page.waitForFunction(() => window.__notes.length > 0, null, { timeout: 30_000 }).catch(() => {});
       await sleep(3000);
       check(`alerts: ${kind} is notified exactly once`, JSON.stringify(await notes(page)) === JSON.stringify([title]), JSON.stringify(await notes(page)));
       await page.close();
