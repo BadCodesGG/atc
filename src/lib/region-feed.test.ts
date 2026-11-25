@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { airportByCode } from "./airports";
+import { AIRPORTS, airportByCode } from "./airports";
 import { readViaLol } from "./__fixtures__/lol-read";
 import { cellOf } from "./region";
-import { COUNTS_KEEP_MS, MAX_CELLS_HELD, RegionFeed } from "./region-feed";
+import { COLD_CELLS_PER_COUNTS, COUNTS_KEEP_MS, MAX_CELLS_HELD, RegionFeed } from "./region-feed";
 import { UpstreamBusyError } from "./upstream";
 
 const CELL = { latitude: 32, longitude: -84 };
@@ -170,24 +170,50 @@ describe("RegionFeed.counts", () => {
       return { f, asked, peak: () => peak, advance: (ms: number) => (clock += ms) };
     }
 
-    it("reads at most two cells it does not already hold, one after another, however many airports ask", async () => {
+    it("reads at most COLD_CELLS_PER_COUNTS cells it does not already hold, one after another, however many airports ask", async () => {
       expect(cells.size).toBe(many.length);
+      expect(cells.size).toBeGreaterThan(COLD_CELLS_PER_COUNTS);
       const { f, asked, peak } = budgeted();
       const counts = await f.counts(many);
-      expect(asked).toHaveLength(2);
+      expect(asked).toHaveLength(COLD_CELLS_PER_COUNTS);
       expect(peak()).toBe(1);
-      expect(Object.keys(counts)).toHaveLength(2);
+      expect(Object.keys(counts)).toHaveLength(COLD_CELLS_PER_COUNTS);
     });
 
     it("fills in the rest on later requests without reading the same cells again first", async () => {
       const { f, asked, advance } = budgeted();
-      await f.counts(many);
-      advance(60_000);
-      await f.counts(many);
-      advance(60_000);
-      const counts = await f.counts(many);
+      const requests = Math.ceil(many.length / COLD_CELLS_PER_COUNTS);
+      let counts = await f.counts(many);
+      for (let i = 1; i < requests; i++) {
+        advance(60_000);
+        counts = await f.counts(many);
+      }
+      expect(asked).toHaveLength(new Set(asked).size);
       expect(new Set(asked).size).toBe(6);
       expect(Object.keys(counts).sort()).toEqual([...codes].sort());
+    });
+
+    /** How often the world map asks for the counts (COUNTS_MS in globe/globe-map.ts). */
+    const POLL_MS = 60_000;
+
+    it("goes round every listed airport's cell inside COUNTS_KEEP_MS at the map's polling rate, with a poll to spare", () => {
+      const all = new Set(AIRPORTS.map((a) => JSON.stringify(cellOf(a))));
+      expect((Math.ceil(all.size / COLD_CELLS_PER_COUNTS) + 1) * POLL_MS).toBeLessThanOrEqual(COUNTS_KEEP_MS);
+    });
+
+    it("keeps a count on every listed airport once the first round is done, polled once a minute", async () => {
+      const { f, advance } = budgeted();
+      const all = new Set(AIRPORTS.map((a) => JSON.stringify(cellOf(a))));
+      const round = Math.ceil(all.size / COLD_CELLS_PER_COUNTS);
+      for (let i = 0; i < round; i++) {
+        await f.counts(AIRPORTS);
+        advance(POLL_MS);
+      }
+      for (let i = 0; i < 3 * round; i++) {
+        const counts = await f.counts(AIRPORTS);
+        expect(Object.keys(counts), `poll ${round + i}`).toHaveLength(AIRPORTS.length);
+        advance(POLL_MS);
+      }
     });
 
     it("counts a cell the feed already holds without spending the budget", async () => {

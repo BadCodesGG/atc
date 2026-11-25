@@ -51,11 +51,14 @@ function end(raw: unknown): (RouteEnd & { icao: string | null }) | null {
   return { code, city, country: str(r.country_iso_name), icao, ...placed };
 }
 
+/** What a route is matched against: the airport's codes, and the ones it had before a rename. */
+export type RouteAirport = Pick<Airport, "code" | "icao" | "formerly">;
+
 /**
  * The route in an adsbdb answer, or null when there is none, it is malformed, or neither end is
  * `airport`. With no `airport` (a flight looked up from anywhere) any route is kept.
  */
-export function parseRoute(json: unknown, airport?: Pick<Airport, "code" | "icao">): FlightRoute | null {
+export function parseRoute(json: unknown, airport?: RouteAirport): FlightRoute | null {
   if (typeof json !== "object" || json === null) return null;
   const response = (json as Record<string, unknown>).response;
   if (typeof response !== "object" || response === null) return null;
@@ -65,7 +68,10 @@ export function parseRoute(json: unknown, airport?: Pick<Airport, "code" | "icao
   const origin = end(r.origin);
   const destination = end(r.destination);
   if (!origin || !destination) return null;
-  const here = (e: { code: string; icao: string | null }) => !!airport && (e.code.toLowerCase() === airport.code || e.icao === airport.icao);
+  // A renamed airport is matched by its old codes too: adsbdb can lag a rename by months.
+  const here = (e: { code: string; icao: string | null }) =>
+    !!airport &&
+    (e.code.toLowerCase() === airport.code || e.icao === airport.icao || (!!airport.formerly && (e.code.toLowerCase() === airport.formerly.code || e.icao === airport.formerly.icao)));
   if (airport && !here(origin) && !here(destination)) return null;
   // The end that is this airport is named by its IATA code even where adsbdb gave only the ICAO one,
   // so the page can tell which way the flight goes by comparing codes.
@@ -110,11 +116,11 @@ export class RouteBook {
   private readonly pending = new Set<string>();
   private pausedUntil = 0;
 
-  private readonly airport: Pick<Airport, "code" | "icao">;
+  private readonly airport: RouteAirport;
   private readonly get: Fetcher;
   private readonly now: () => number;
 
-  constructor(airport: Pick<Airport, "code" | "icao">, get: Fetcher = defaultFetcher, now: () => number = Date.now) {
+  constructor(airport: RouteAirport, get: Fetcher = defaultFetcher, now: () => number = Date.now) {
     this.airport = airport;
     this.get = get;
     this.now = now;

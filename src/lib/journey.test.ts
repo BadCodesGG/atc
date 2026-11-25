@@ -17,11 +17,13 @@ describe("journeyEnd", () => {
 
   it("ends at the destination's gate when it is one of the airports built in 3D", () => {
     expect(journeyEnd(route("CLT"))).toEqual({ kind: "gate", destination: CLT });
+    // adsbdb still names President Donald J. Trump International by its old code.
+    expect(journeyEnd(route("PBI"))).toMatchObject({ kind: "gate", destination: { code: "djt" } });
   });
 
   it("ends on the map, saying why, with no route or a destination not built", () => {
     expect(journeyEnd(null)).toEqual({ kind: "map", code: null, line: "No route is known for this flight, so the journey ends on the map." });
-    expect(journeyEnd(route("GSP"))).toEqual({ kind: "map", code: "GSP", line: "GSP is not one of the 32 airports in 3D, so the journey ends on the map." });
+    expect(journeyEnd(route("GSP"))).toEqual({ kind: "map", code: "GSP", line: "GSP is not one of the 67 airports in 3D, so the journey ends on the map." });
   });
 });
 

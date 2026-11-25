@@ -2,7 +2,8 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import type { AirportMap } from "./airport-map";
-import { DEFAULT_AIRPORT } from "./airports";
+import { regionName } from "./airport-search";
+import { AIRPORTS, DEFAULT_AIRPORT } from "./airports";
 import routes from "./__fixtures__/routes_atl.json";
 import raw from "./__fixtures__/adsblol_atl.json";
 import { buildPlaces, flightDocs, nearestAirport, remoteSummary, search, type SearchData } from "./search";
@@ -108,11 +109,28 @@ describe("airports", () => {
     expect(airportsOf("arizona")).toEqual(["phx"]);
     expect(airportsOf("sky harbor")).toEqual(["phx"]);
     expect(airportsOf("KJFK")).toEqual(["jfk"]);
-    expect(airportsOf("TX")).toEqual(expect.arrayContaining(["dfw", "iah", "aus"]));
+    // Six airports are in Texas; the group shows its first four.
+    expect(airportsOf("TX")).toEqual(["aus", "dal", "dfw", "hou"]);
   });
 
   it("ranks the code above the city", () => {
     expect(airportsOf("sea")[0]).toBe("sea");
+  });
+
+  it("ranks an exact code above another airport's name or city that starts with it", () => {
+    expect(airportsOf("pit")[0]).toBe("pit");
+    expect(airportsOf("pit")).toContain("btp");
+    expect(airportsOf("kpit")[0]).toBe("pit");
+    expect(airportsOf("btp")[0]).toBe("btp");
+  });
+
+  it("puts every airport first for its own IATA and ICAO code", () => {
+    for (const a of AIRPORTS) {
+      // The airport on screen is left out, so look for each from another one.
+      const first = (q: string) => search(q, { here: a.code === "atl" ? "jfk" : "atl", places: [], flights: [] }).groups.find((g) => g.kind === "airports")?.hits[0];
+      expect(first(a.code), a.code).toMatchObject({ code: a.code });
+      expect(first(a.icao), a.icao).toMatchObject({ code: a.code });
+    }
   });
 
   it("leaves out the airport on screen", () => {
@@ -123,6 +141,21 @@ describe("airports", () => {
   it("describes the airport", () => {
     const hit = run("phx").groups.find((g) => g.kind === "airports")?.hits[0];
     expect(hit).toMatchObject({ kind: "airport", title: "PHX", where: "Phoenix, Arizona" });
+  });
+
+  it("takes every airport's state from the airport list", () => {
+    for (const a of AIRPORTS.filter((x) => x.code !== "atl")) {
+      const hit = run(a.code).groups.find((g) => g.kind === "airports")?.hits[0];
+      expect(hit, a.code).toMatchObject({ code: a.code, where: `${a.city}, ${regionName(a.country, a.state)}` });
+    }
+  });
+
+  it("finds an airport by its state's code or name, DC and Puerto Rico included", () => {
+    expect(airportsOf("DC")).toEqual(["dca"]);
+    expect(airportsOf("district of columbia")).toEqual(["dca"]);
+    expect(airportsOf("puerto rico")).toEqual(["sju"]);
+    expect(airportsOf("virginia")).toEqual(expect.arrayContaining(["iad", "orf", "ric"]));
+    expect(airportsOf("virginia")).not.toContain("dca");
   });
 });
 

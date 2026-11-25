@@ -139,4 +139,19 @@ describe("fetchMetar", () => {
     expect(asked[0]).toBe("https://aviationweather.gov/api/data/metar?ids=KATL&format=json");
     expect(m.station).toBe("KATL");
   });
+
+  it("asks the stations nearby too for a field that issues no METAR of its own, and takes the first that reported", async () => {
+    const bft = AIRPORTS.find((a) => a.code === "bft")!;
+    const asked: string[] = [];
+    const report = (icaoId: string) => ({ icaoId, rawOb: `${icaoId} 251656Z 02013KT 7SM OVC007 10/09 A3009` });
+    const m = await fetchMetar(bft, async (url) => {
+      asked.push(url);
+      return [report("KHXD"), report("KNBC")];
+    });
+    expect(asked).toEqual([metarUrl(["KARW", ...bft.metarFallback!].join(","))]);
+    expect(m.station).toBe("KNBC");
+    // Its own report wins whenever there is one.
+    expect((await fetchMetar(bft, async () => [report("KNBC"), report("KARW")])).station).toBe("KARW");
+    await expect(fetchMetar(bft, async () => [])).rejects.toThrow();
+  });
 });
