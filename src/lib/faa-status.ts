@@ -4,6 +4,8 @@
  * is airport-wide, not per flight: a flight's own delay needs a schedule, which no free feed gives.
  */
 
+import { AIRPORTS, airportByCode } from "./airports";
+
 export const FAA_STATUS_URL = "https://nasstatus.faa.gov/api/airport-status-information";
 
 export type ProgramKind = "ground-stop" | "ground-delay" | "departure" | "arrival" | "closure";
@@ -118,13 +120,20 @@ export interface FlightProgram extends Program {
   airport: string;
 }
 
+const US_ICAO = /^[KP][A-Z0-9]{3}$/;
+
 /**
  * The FAA's code for a US airport given by IATA ("PHX") or ICAO code: the feed keys on the three-letter
- * one, and a US ICAO code is that with a K (or, in Alaska, Hawaii and the Pacific, a P) in front.
+ * one, and a US ICAO code is that with a K (or, in Alaska, Hawaii and the Pacific, a P) in front. A listed
+ * airport is looked up instead, by either code or the codes it had before a rename: in the K block its
+ * ICAO code is the one to trust, since the IATA code can differ (Beaufort Executive is BFT to IATA, KARW,
+ * ARW to the FAA); elsewhere (PHOG, TJSJ) the FAA uses the IATA code (OGG, SJU).
  */
 export function faaCode(code: string): string {
   const c = code.toUpperCase();
-  return /^[KP][A-Z0-9]{3}$/.test(c) ? c.slice(1) : c;
+  const listed = airportByCode(c.toLowerCase()) ?? AIRPORTS.find((a) => a.icao === c || a.formerly?.icao === c);
+  if (listed) return /^K[A-Z0-9]{3}$/.test(listed.icao) ? listed.icao.slice(1) : listed.code.toUpperCase();
+  return US_ICAO.test(c) ? c.slice(1) : c;
 }
 
 const AT_ORIGIN: ProgramKind[] = ["departure"];

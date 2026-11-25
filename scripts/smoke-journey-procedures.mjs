@@ -220,7 +220,7 @@ const VIEW = "#map=7/32.3/-97.1";
 
 const place = (code, city, latitude, longitude) => ({ code, city, country: "US", latitude, longitude });
 
-/** A flight picked on the world map and followed: its panel's "from" is the route's origin, whether or not that is one of the 32. */
+/** A flight picked on the world map and followed: its panel's "from" is the route's origin, whether or not that is one of the 67. */
 export async function mapFollowChecks({ browser, base, check }) {
   const t0 = Date.now() / 1000;
   // `late`: no route is known at the pick, and the flight lookup learns this one a moment after. Dallas-Fort Worth, the nearest built airport to this flight, is its destination here.

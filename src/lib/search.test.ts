@@ -2,7 +2,8 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import type { AirportMap } from "./airport-map";
-import { DEFAULT_AIRPORT } from "./airports";
+import { regionName } from "./airport-search";
+import { AIRPORTS, DEFAULT_AIRPORT } from "./airports";
 import routes from "./__fixtures__/routes_atl.json";
 import raw from "./__fixtures__/adsblol_atl.json";
 import { buildPlaces, flightDocs, nearestAirport, remoteSummary, search, type SearchData } from "./search";
@@ -108,7 +109,8 @@ describe("airports", () => {
     expect(airportsOf("arizona")).toEqual(["phx"]);
     expect(airportsOf("sky harbor")).toEqual(["phx"]);
     expect(airportsOf("KJFK")).toEqual(["jfk"]);
-    expect(airportsOf("TX")).toEqual(expect.arrayContaining(["dfw", "iah", "aus"]));
+    // Six airports are in Texas; the group shows its first four.
+    expect(airportsOf("TX")).toEqual(["aus", "dal", "dfw", "hou"]);
   });
 
   it("ranks the code above the city", () => {
@@ -123,6 +125,21 @@ describe("airports", () => {
   it("describes the airport", () => {
     const hit = run("phx").groups.find((g) => g.kind === "airports")?.hits[0];
     expect(hit).toMatchObject({ kind: "airport", title: "PHX", where: "Phoenix, Arizona" });
+  });
+
+  it("takes every airport's state from the airport list", () => {
+    for (const a of AIRPORTS.filter((x) => x.code !== "atl")) {
+      const hit = run(a.code).groups.find((g) => g.kind === "airports")?.hits[0];
+      expect(hit, a.code).toMatchObject({ code: a.code, where: `${a.city}, ${regionName(a.country, a.state)}` });
+    }
+  });
+
+  it("finds an airport by its state's code or name, DC and Puerto Rico included", () => {
+    expect(airportsOf("DC")).toEqual(["dca"]);
+    expect(airportsOf("district of columbia")).toEqual(["dca"]);
+    expect(airportsOf("puerto rico")).toEqual(["sju"]);
+    expect(airportsOf("virginia")).toEqual(expect.arrayContaining(["iad", "orf", "ric"]));
+    expect(airportsOf("virginia")).not.toContain("dca");
   });
 });
 

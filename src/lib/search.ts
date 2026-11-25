@@ -1,6 +1,7 @@
 import { designator, type FlightState } from "./aircraft-state";
 import { iataFlight } from "./airline-codes";
 import type { AirportMap, Point } from "./airport-map";
+import { regionName } from "./airport-search";
 import { AIRPORTS, type Airport } from "./airports";
 import { airlineName, typeName } from "./flight-names";
 import { type FlightAnswer, lookupCallsign } from "./flight-lookup";
@@ -88,42 +89,6 @@ export interface SearchResults {
 }
 
 const LIMIT = { flights: 6, places: 6, airports: 4 };
-
-/** The state each airport is in, abbreviation and name: the airport list does not carry one. */
-const STATES: Record<string, [string, string]> = {
-  atl: ["GA", "Georgia"],
-  pit: ["PA", "Pennsylvania"],
-  jfk: ["NY", "New York"],
-  dfw: ["TX", "Texas"],
-  ord: ["IL", "Illinois"],
-  den: ["CO", "Colorado"],
-  lax: ["CA", "California"],
-  mco: ["FL", "Florida"],
-  las: ["NV", "Nevada"],
-  mia: ["FL", "Florida"],
-  sfo: ["CA", "California"],
-  clt: ["NC", "North Carolina"],
-  sea: ["WA", "Washington"],
-  phx: ["AZ", "Arizona"],
-  ewr: ["NJ", "New Jersey"],
-  iah: ["TX", "Texas"],
-  bos: ["MA", "Massachusetts"],
-  msp: ["MN", "Minnesota"],
-  dtw: ["MI", "Michigan"],
-  lga: ["NY", "New York"],
-  fll: ["FL", "Florida"],
-  phl: ["PA", "Pennsylvania"],
-  iad: ["VA", "Virginia"],
-  slc: ["UT", "Utah"],
-  san: ["CA", "California"],
-  bna: ["TN", "Tennessee"],
-  bwi: ["MD", "Maryland"],
-  tpa: ["FL", "Florida"],
-  dca: ["VA", "Virginia"],
-  aus: ["TX", "Texas"],
-  hnl: ["HI", "Hawaii"],
-  cle: ["OH", "Ohio"],
-};
 
 // ---------------------------------------------------------------- what is on screen
 
@@ -241,7 +206,9 @@ function airportHits(query: string, here: Airport["code"]): AirportHit[] {
   const hits: AirportHit[] = [];
   for (const a of AIRPORTS) {
     if (a.code === here) continue;
-    const [abbr, state] = STATES[a.code] ?? ["", ""];
+    // The state's code and full name, from the airport list ("DC", "District of Columbia").
+    const abbr = a.state;
+    const state = regionName(a.country, a.state);
     const score = overall(query, (t) =>
       Math.max(
         tiered(a.code, t, [100, 80]),
@@ -252,7 +219,7 @@ function airportHits(query: string, here: Airport["code"]): AirportHit[] {
         tiered(a.name.toLowerCase(), t, [0, 55, 50]),
       ),
     );
-    if (score) hits.push({ kind: "airport", score, code: a.code, title: a.code.toUpperCase(), name: a.name, where: state ? `${a.city}, ${state}` : a.city });
+    if (score) hits.push({ kind: "airport", score, code: a.code, title: a.code.toUpperCase(), name: a.name, where: `${a.city}, ${state}` });
   }
   return hits.sort((a, b) => b.score - a.score || a.title.localeCompare(b.title));
 }

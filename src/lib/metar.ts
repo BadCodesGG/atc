@@ -8,7 +8,8 @@ import type { Airport } from "./airports";
  * remarks section (after RMK) is not read.
  */
 
-export const metarUrl = (icao: string) => `https://aviationweather.gov/api/data/metar?ids=${encodeURIComponent(icao)}&format=json`;
+/** The report request for one station, or several as "KARW,KNBC". */
+export const metarUrl = (ids: string) => `https://aviationweather.gov/api/data/metar?ids=${encodeURIComponent(ids)}&format=json`;
 
 export type Intensity = "light" | "moderate" | "heavy";
 
@@ -191,9 +192,21 @@ const defaultFetcher: Fetcher = async (url) => {
   return res.json();
 };
 
-/** The current report for one listed airport; the request names its ICAO code and nothing else. */
+/**
+ * The current report for one listed airport; the request names its ICAO code and nothing else, or, for a
+ * field that issues no METAR, that and its stand-in stations, the first of them that reported winning.
+ */
 export async function fetchMetar(airport: Airport, get: Fetcher = defaultFetcher): Promise<Metar> {
-  return parseMetarResponse(await get(metarUrl(airport.icao)), airport.icao);
+  const stations = [airport.icao, ...(airport.metarFallback ?? [])];
+  const json = await get(metarUrl(stations.join(",")));
+  for (const station of stations.slice(0, -1)) {
+    try {
+      return parseMetarResponse(json, station);
+    } catch {
+      // No report from this one: the next station stands in.
+    }
+  }
+  return parseMetarResponse(json, stations[stations.length - 1]);
 }
 
 /** "270° 15 kt, gusts 28", "Variable 3 kt", "Calm"; `short` for a phone. */

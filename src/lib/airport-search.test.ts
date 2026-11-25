@@ -28,18 +28,36 @@ describe("matchAirports", () => {
     expect(codes(matchAirports(AIRPORTS, "jfk"))).toEqual(["jfk"]);
     expect(codes(matchAirports(AIRPORTS, "KJFK"))).toEqual(["jfk"]);
     expect(codes(matchAirports(AIRPORTS, "phnl"))).toEqual(["hnl"]);
+    expect(codes(matchAirports(AIRPORTS, "tjsj"))).toEqual(["sju"]);
+  });
+
+  it("finds an airport by the code it had before a rename (PBI, now DJT)", () => {
+    expect(codes(matchAirports(AIRPORTS, "pbi"))).toEqual(["djt"]);
+    expect(codes(matchAirports(AIRPORTS, "kpbi"))).toEqual(["djt"]);
+    expect(codes(matchAirports(AIRPORTS, "palm beach"))).toEqual(["djt"]);
+  });
+
+  it("finds the general aviation fields by city and name", () => {
+    expect(codes(matchAirports(AIRPORTS, "butler"))).toEqual(["btp"]);
+    expect(codes(matchAirports(AIRPORTS, "beaufort"))).toEqual(["bft"]);
+    expect(codes(matchAirports(AIRPORTS, "karw"))).toEqual(["bft"]);
+    expect(codes(matchAirports(AIRPORTS, "pittsburgh"))).toEqual(["btp", "pit"]);
   });
 
   it("matches by city", () => {
     expect(codes(matchAirports(AIRPORTS, "fort laud"))).toEqual(["fll"]);
-    expect(codes(matchAirports(AIRPORTS, "new york"))).toEqual(["jfk", "lga"]);
+    // "New York" is a city and a state: Buffalo is in the state, so it matches too, as "texas" finds every Texas airport.
+    expect(codes(matchAirports(AIRPORTS, "new york"))).toEqual(["buf", "jfk", "lga"]);
+    expect(codes(matchAirports(AIRPORTS, "new york ny"))).toEqual(["buf", "jfk", "lga"]);
   });
 
   it("matches by state code and by full state name", () => {
-    expect(codes(matchAirports(AIRPORTS, "tx"))).toEqual(["aus", "dfw", "iah"]);
-    expect(codes(matchAirports(AIRPORTS, "tex"))).toEqual(["aus", "dfw", "iah"]);
-    expect(codes(matchAirports(AIRPORTS, "Texas"))).toEqual(["aus", "dfw", "iah"]);
-    expect(codes(matchAirports(AIRPORTS, "hawaii"))).toEqual(["hnl"]);
+    expect(codes(matchAirports(AIRPORTS, "tx"))).toEqual(["aus", "dal", "dfw", "hou", "iah", "sat"]);
+    expect(codes(matchAirports(AIRPORTS, "tex"))).toEqual(["aus", "dal", "dfw", "hou", "iah", "sat"]);
+    expect(codes(matchAirports(AIRPORTS, "Texas"))).toEqual(["aus", "dal", "dfw", "hou", "iah", "sat"]);
+    expect(codes(matchAirports(AIRPORTS, "hawaii"))).toEqual(["hnl", "ogg"]);
+    expect(codes(matchAirports(AIRPORTS, "puerto rico"))).toEqual(["sju"]);
+    expect(codes(matchAirports(AIRPORTS, "san juan"))).toEqual(["sju"]);
   });
 
   it("matches by airport name, ignoring case, accents and punctuation", () => {
@@ -50,7 +68,8 @@ describe("matchAirports", () => {
   });
 
   it("needs every word of the query to match", () => {
-    expect(codes(matchAirports(AIRPORTS, "dallas tx"))).toEqual(["dfw"]);
+    expect(codes(matchAirports(AIRPORTS, "dallas tx"))).toEqual(["dal", "dfw"]);
+    expect(codes(matchAirports(AIRPORTS, "dallas love"))).toEqual(["dal"]);
     expect(matchAirports(AIRPORTS, "dallas ca")).toEqual([]);
   });
 
@@ -70,15 +89,16 @@ describe("groupAirports", () => {
     const groups = groupAirports(AIRPORTS);
     const names = groups.map((g) => g.name);
     expect(names).toEqual([...names].sort((a, b) => a.localeCompare(b, "en")));
-    expect(names[0]).toBe("Arizona");
+    expect(names[0]).toBe("Alaska");
+    expect(names).toContain("Puerto Rico");
     expect(names).toContain("District of Columbia");
     expect(groups.flatMap((g) => g.airports)).toHaveLength(AIRPORTS.length);
   });
 
   it("sorts airports within a state by city, then code", () => {
     const groups = groupAirports(AIRPORTS);
-    expect(groups.find((g) => g.state === "TX")!.airports.map((a) => a.code)).toEqual(["aus", "dfw", "iah"]);
-    expect(groups.find((g) => g.state === "NY")!.airports.map((a) => a.code)).toEqual(["jfk", "lga"]);
+    expect(groups.find((g) => g.state === "TX")!.airports.map((a) => a.code)).toEqual(["aus", "dal", "dfw", "hou", "iah", "sat"]);
+    expect(groups.find((g) => g.state === "NY")!.airports.map((a) => a.code)).toEqual(["buf", "jfk", "lga"]);
   });
 
   it("keeps only the states that have a match", () => {

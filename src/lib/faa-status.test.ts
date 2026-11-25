@@ -75,6 +75,9 @@ describe("programsFor", () => {
     expect(programs.map((p) => `${p.airport} ${p.kind}`)).toEqual(["ATL departure", "EWR ground-stop"]);
     expect(checked).toEqual(["ATL", "EWR"]);
     expect([faaCode("PHNL"), faaCode("KOA"), faaCode("phx"), faaCode("CYUL")]).toEqual(["HNL", "KOA", "PHX", "CYUL"]);
+    // A listed airport whose FAA identifier is not its IATA code goes by its ICAO code: Beaufort Executive is BFT to IATA, ARW to the FAA.
+    expect([faaCode("bft"), faaCode("BFT"), faaCode("djt"), faaCode("PBI"), faaCode("sju"), faaCode("ogg")]).toEqual(["ARW", "ARW", "DJT", "DJT", "SJU", "OGG"]);
+    expect([faaCode("KARW"), faaCode("KPBI"), faaCode("PHOG"), faaCode("TJSJ")]).toEqual(["ARW", "DJT", "OGG", "SJU"]);
   });
 
   it("an airport with nothing says which airports were checked", () => {

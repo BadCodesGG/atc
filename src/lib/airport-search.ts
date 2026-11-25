@@ -1,6 +1,6 @@
 import type { Airport } from "./airports";
 
-/** The US states (and DC) by their two-letter code, for the picker's headings and for searching by state name. */
+/** The US states (and DC and Puerto Rico) by their two-letter code, for the picker's headings and for searching by state name. */
 const US_STATES: Record<string, string> = {
   AL: "Alabama",
   AK: "Alaska",
@@ -41,6 +41,7 @@ const US_STATES: Record<string, string> = {
   OK: "Oklahoma",
   OR: "Oregon",
   PA: "Pennsylvania",
+  PR: "Puerto Rico",
   RI: "Rhode Island",
   SC: "South Carolina",
   SD: "South Dakota",
@@ -87,11 +88,11 @@ function fold(text: string): string {
     .trim();
 }
 
-/** What a query is matched against: codes by their start, words by the start of any word. */
+/** What a query is matched against: codes by their start (a renamed airport's old ones too), words by the start of any word. */
 function fields(airport: Airport): { codes: string[]; words: string[][] } {
   const region = regionName(airport.country, airport.state);
   return {
-    codes: [airport.code, airport.icao, airport.state].map(fold),
+    codes: [airport.code, airport.icao, airport.state, ...(airport.formerly ? [airport.formerly.code, airport.formerly.icao] : [])].map(fold),
     words: [airport.city, region, airport.name].map((text) => fold(text).split(" ")),
   };
 }
