@@ -24,8 +24,8 @@ export interface SearchProps {
   onPlace: (place: PlaceDoc) => void;
   /** Switch to another airport. */
   onAirport: (code: Airport["code"]) => void;
-  /** Open the airport a flight elsewhere is near and select the flight there. */
-  onRemote: (callsign: string, airport: Airport["code"]) => void;
+  /** Show a flight found elsewhere as `summary.opens` says: at the airport it is near, in the diorama on screen, or on the world map, followed. */
+  onRemote: (flight: FlightAnswer, summary: RemoteSummary) => void;
 }
 
 type Remote = "none" | "error" | { flight: FlightAnswer };
@@ -34,7 +34,7 @@ type Option =
   | { id: string; kind: "flight"; hit: FlightHit }
   | { id: string; kind: "place"; hit: PlaceHit }
   | { id: string; kind: "airport"; hit: AirportHit }
-  | { id: string; kind: "remote"; callsign: string; summary: RemoteSummary };
+  | { id: string; kind: "remote"; callsign: string; flight: FlightAnswer; summary: RemoteSummary };
 
 interface Section {
   key: string;
@@ -127,7 +127,8 @@ export function Search({ read, onFlight, onPlace, onAirport, onRemote }: SearchP
       });
     }
     if (wanted && remoteOutcome && remoteOutcome !== "none" && remoteOutcome !== "error" && here) {
-      out.push({ key: "remote", heading: "Flight elsewhere", options: [{ id: id(), kind: "remote", callsign: wanted, summary: remoteSummary(remoteOutcome.flight, here) }] });
+      const { flight } = remoteOutcome;
+      out.push({ key: "remote", heading: "Flight elsewhere", options: [{ id: id(), kind: "remote", callsign: wanted, flight, summary: remoteSummary(flight, here) }] });
     }
     return out;
   }, [results, wanted, remoteOutcome, here]);
@@ -146,10 +147,8 @@ export function Search({ read, onFlight, onPlace, onAirport, onRemote }: SearchP
     inputRef.current?.blur();
   };
   const choose = (option: Option, follow: boolean) => {
-    if (option.kind === "remote") {
-      if (!option.summary.openable) return;
-      onRemote(option.callsign, option.summary.nearest);
-    } else if (option.kind === "flight") onFlight(option.hit.id, follow);
+    if (option.kind === "remote") onRemote(option.flight, option.summary);
+    else if (option.kind === "flight") onFlight(option.hit.id, follow);
     else if (option.kind === "place") onPlace(option.hit.place);
     else onAirport(option.hit.code);
     finish();
@@ -270,18 +269,16 @@ export function Search({ read, onFlight, onPlace, onAirport, onRemote }: SearchP
 }
 
 function OptionRow({ option, active, onHover, onChoose }: { option: Option; active: boolean; onHover: () => void; onChoose: (follow: boolean) => void }) {
-  const disabled = option.kind === "remote" && !option.summary.openable;
   return (
     <div
       id={option.id}
       role="option"
       aria-selected={active}
-      aria-disabled={disabled || undefined}
       // Keep focus in the input, so choosing never closes the list by blurring it first.
       onMouseDown={(e) => e.preventDefault()}
       onPointerMove={onHover}
       onClick={() => onChoose(false)}
-      className={`flex min-h-11 cursor-pointer items-center gap-3 rounded-lg px-3 py-1.5 text-left ${active ? "bg-selected shadow-[0_0_0_1px_var(--color-selected-ring)]" : ""} ${disabled ? "cursor-default" : ""}`}
+      className={`flex min-h-11 cursor-pointer items-center gap-3 rounded-lg px-3 py-1.5 text-left ${active ? "bg-selected shadow-[0_0_0_1px_var(--color-selected-ring)]" : ""}`}
     >
       <Row option={option} onFollow={() => onChoose(true)} />
     </div>
@@ -354,7 +351,7 @@ function Row({ option, onFollow }: { option: Option; onFollow: () => void }) {
         <span className="truncate text-xs text-muted">{[summary.aircraft, summary.altitude, summary.route].filter(Boolean).join(" · ")}</span>
       </span>
       <span aria-hidden className="shrink-0 text-xs text-muted">
-        {summary.openable ? `Open ${summary.nearest.toUpperCase()}` : "Out of range"}
+        {summary.opens === "airport" ? `Open ${summary.nearest.toUpperCase()}` : summary.opens === "here" ? "Show" : "Track on map"}
       </span>
     </>
   );

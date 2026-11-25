@@ -54,6 +54,9 @@ import type { Replay, ReplayRate } from "@/lib/replay";
 // /replay
 // search
 import { useSearch } from "./use-search";
+import type { SearchProps } from "./search-box";
+import type { FlightAnswer } from "@/lib/flight-lookup";
+import type { RemoteSummary } from "@/lib/search";
 import { type RadarControl, useRadar } from "./use-radar";
 // alerts
 import { inBounds } from "@/lib/alerts";
@@ -103,6 +106,8 @@ const MAP_FOLLOW_MS = 250;
 const SCRIM_ROW_PX = 56;
 /** A flight followed from the map this near its origin, metres, brings that airport's diorama up first. */
 const FOLLOW_NEAR_M = 150_000;
+/** How long a flight the search sent the map to may take to be selected there and still be followed, ms: the fly there, and a few reads of its traffic. */
+const TRACK_WAIT_MS = 40_000;
 /**
  * The followed flight's beacon shows where its model is shorter on screen than BEACON_UNTIL_PX, fully
  * from BEACON_FADE_PX shorter than that; the model's length is measured as a typical airliner's.
@@ -756,6 +761,41 @@ function Viewer({ airport, theme, onTheme, onAirport, filters, onFilters, focusP
       world.journeyToMap(globe.view, airportByCode(globe.airportCode) ?? origin, performance.now());
     });
   };
+
+  /**
+   * A flight the search found anywhere, out of range of a built airport: the map takes the camera (as a
+   * pick of another airport has it), flies to the flight and selects it once its traffic shows it; the
+   * flight is then followed as the map card's Follow does (followMapFlight), from wherever it is.
+   */
+  const trackedRef = useRef<{ hex: string | null; select: string } | null>(null);
+  const trackOnMap = (flight: FlightAnswer, summary: RemoteSummary) => {
+    const globe = globeRef.current;
+    const select = summary.select;
+    if (!globe || !select) return;
+    world.stopJourney();
+    if (leadRef.current.by === "scene") toMap();
+    globe.track({ hex: flight.hex, callsign: select, latitude: flight.latitude, longitude: flight.longitude });
+    const tracked = { hex: flight.hex, select: select.toUpperCase() };
+    trackedRef.current = tracked;
+    // Selected later than this (the reader's own click on it, say), it is not followed on the search's behalf.
+    window.setTimeout(() => {
+      if (trackedRef.current === tracked) trackedRef.current = null;
+    }, TRACK_WAIT_MS);
+  };
+  useEffect(() => {
+    const tracked = trackedRef.current;
+    if (!tracked || !mapFlight) return;
+    const ours = tracked.hex ? mapFlight.id === tracked.hex : (mapFlight.callsign ?? mapFlight.id.toUpperCase()) === tracked.select;
+    // The reader picked another flight on the map: nothing more to follow.
+    if (!ours) {
+      trackedRef.current = null;
+      return;
+    }
+    // Once the map draws it (its first selection may come a frame before), it is followed.
+    if (!globeRef.current?.selectedAt) return;
+    trackedRef.current = null;
+    followMapFlight(true);
+  });
   // /map-select
 
   // journey
@@ -985,14 +1025,21 @@ function Viewer({ airport, theme, onTheme, onAirport, filters, onFilters, focusP
     onAirport: pickAirport,
   });
   // On the map, a flight or place here lands on the diorama first; its own frames would undo the pick before then.
-  const searchProps = {
+  const onSearchFlight = (id: string, follow: boolean) => afterLanding(() => search.onFlight(id, follow));
+  const searchProps: SearchProps = {
     ...search,
-    onFlight: (id: string, follow: boolean) => afterLanding(() => search.onFlight(id, follow)),
+    onFlight: onSearchFlight,
     onPlace: (place: Parameters<typeof search.onPlace>[0]) =>
       afterLanding(() => {
         clearFollow({ kind: "slide" }); // journey: the camera goes to the place, away from the flight
         search.onPlace(place);
       }),
+    // A flight elsewhere: the airport it is near opens on it; one near this airport is followed in its diorama while the diorama draws it; anywhere else the world map follows it.
+    onRemote: (flight, summary) => {
+      if (summary.opens === "airport" && summary.select) pickAirport(summary.nearest, summary.select);
+      else if (summary.opens === "here" && flight.hex && entriesRef.current.some((e) => e.aircraft.id === flight.hex)) onSearchFlight(flight.hex, true);
+      else trackOnMap(flight, summary);
+    },
   };
   // /search
 

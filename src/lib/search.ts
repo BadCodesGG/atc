@@ -3,7 +3,7 @@ import { iataFlight } from "./airline-codes";
 import type { AirportMap, Point } from "./airport-map";
 import { AIRPORTS, type Airport } from "./airports";
 import { airlineName, typeName } from "./flight-names";
-import { type FlightAnswer, lookupCallsign } from "./flight-lookup";
+import { type FlightAnswer, flightKey, lookupRegistration } from "./flight-lookup";
 import { toLocal } from "./geo";
 import type { FlightRoute } from "./routes";
 import { RADIUS_NM } from "./traffic";
@@ -257,11 +257,14 @@ function airportHits(query: string, here: Airport["code"]): AirportHit[] {
   return hits.sort((a, b) => b.score - a.score || a.title.localeCompare(b.title));
 }
 
-/** Whether the query could be a callsign or flight number worth asking the network about. */
+/** Whether the query could be a callsign, flight number or tail number worth asking the network about, and the spelling to ask by. */
 function remoteCallsign(query: string): string | null {
   const compact = query.replace(/\s+/g, "");
+  // A tail may carry no digit ("G-ZBKJ"); a callsign worth asking about carries both.
+  const registration = lookupRegistration(compact);
+  if (registration && compact.includes("-")) return registration;
   if (!/[a-z]/i.test(compact) || !/\d/.test(compact)) return null;
-  return lookupCallsign(compact);
+  return flightKey(compact);
 }
 
 export function search(input: string, data: SearchData): SearchResults {
@@ -306,8 +309,14 @@ export interface RemoteSummary {
   nearest: Airport["code"];
   /** "34 nm from PHX", or "over PHX" within a mile. */
   nearness: string;
-  /** Whether it is within the scene's range of a listed airport other than `here`, so opening that airport can show it. */
-  openable: boolean;
+  /**
+   * What picking it does: open the listed airport it is within the scene's range of (`nearest`) and
+   * select it there; select it in the diorama on screen, when that airport is `here`; or, anywhere else,
+   * fly the world map to it, select it and follow it.
+   */
+  opens: "airport" | "here" | "map";
+  /** What it is selected by where it opens: the callsign it sends, else its hex upper-cased, as the traffic names it. */
+  select: string | null;
 }
 
 export function remoteSummary(flight: FlightAnswer, here: Airport["code"]): RemoteSummary {
@@ -320,6 +329,7 @@ export function remoteSummary(flight: FlightAnswer, here: Airport["code"]): Remo
     route: flight.route ? `${flight.route.origin.code} → ${flight.route.destination.code}` : "",
     nearest: airport.code,
     nearness: nm < 1 ? `over ${code}` : `${Math.round(nm).toLocaleString("en-US")} nm from ${code}`,
-    openable: nm <= RADIUS_NM && airport.code !== here,
+    opens: nm > RADIUS_NM ? "map" : airport.code === here ? "here" : "airport",
+    select: flight.callsign ?? flight.hex?.toUpperCase() ?? null,
   };
 }

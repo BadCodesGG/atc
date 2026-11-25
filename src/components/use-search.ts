@@ -9,7 +9,7 @@ import type { SearchProps } from "./search-box";
 
 /**
  * What the header search does to the page: select or follow a flight, ease the camera to a gate or
- * runway and label it, and switch airports. The page hands over the refs its own buttons drive and its
+ * runway and label it, and switch airports. A flight found elsewhere is the page's own (atc-app.tsx). The page hands over the refs its own buttons drive and its
  * own actions, so a search pick behaves like a click on the model.
  */
 
@@ -53,7 +53,7 @@ export interface SearchHost {
   onAirport: (code: Airport["code"], flight?: string) => void;
 }
 
-export function useSearch({ map, entriesRef, sceneRef, labelsRef, goalRef, viewRef, followRef, refreshRef, onFlight, leaveCamera, onAirport }: SearchHost): SearchProps {
+export function useSearch({ map, entriesRef, sceneRef, labelsRef, goalRef, viewRef, followRef, refreshRef, onFlight, leaveCamera, onAirport }: SearchHost): Omit<SearchProps, "onRemote"> {
   const places = useMemo(() => (map ? buildPlaces(map) : []), [map]);
   const [lit, setLit] = useState<{ place: PlaceDoc; goal: Goal } | null>(null);
   // The page's own action, which it makes anew each render; the arrival below reads the latest.
@@ -164,5 +164,5 @@ export function useSearch({ map, entriesRef, sceneRef, labelsRef, goalRef, viewR
     return () => window.clearInterval(timer);
   }, [map, entriesRef]);
 
-  return { read, onFlight, onPlace, onAirport: (code) => onAirport(code), onRemote: (callsign, code) => onAirport(code, callsign) };
+  return { read, onFlight, onPlace, onAirport: (code) => onAirport(code) };
 }

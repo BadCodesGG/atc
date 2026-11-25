@@ -108,6 +108,39 @@ describe("GET /api/flight/[callsign]", () => {
     });
   });
 
+  describe("by tail number", () => {
+    const tail = (registration: string, flight: string) =>
+      vi.fn(async (url: string) =>
+        url.includes(`/v2/reg/${registration}`)
+          ? Response.json({ ac: [{ hex: "a1b2c3", flight, r: registration, lat: 51.5, lon: -0.4, alt_baro: 9000, gs: 250, t: "A320" }] })
+          : url.includes("adsb.lol")
+            ? Response.json({ ac: [] })
+            : new Response("no", { status: 404 }),
+      );
+
+    it("answers a hyphenated tail at its own address, asking adsb.lol for the tail", async () => {
+      const fetchMock = tail("G-ZBKJ", "BAW117 ");
+      vi.stubGlobal("fetch", fetchMock);
+      const res = await call("G-ZBKJ");
+      expect(res.status).toBe(200);
+      expect(await res.json()).toMatchObject({ hex: "a1b2c3", callsign: "BAW117", registration: "G-ZBKJ" });
+      expect(fetchMock.mock.calls[0]).toEqual(["https://api.adsb.lol/v2/reg/G-ZBKJ", expect.anything()]);
+    });
+
+    it("redirects another spelling of a tail to the tail itself", async () => {
+      vi.stubGlobal("fetch", tail("G-ZBKJ", "BAW117 "));
+      const res = await call("g-zbkj");
+      expect([res.status, res.headers.get("Location")]).toEqual([308, "/api/flight/G-ZBKJ"]);
+    });
+
+    it("finds an N-number no aircraft sends as its callsign by the tail", async () => {
+      vi.stubGlobal("fetch", tail("N820DX", "DAL3104 "));
+      const res = await call("N820DX");
+      expect(res.status).toBe(200);
+      expect(await res.json()).toMatchObject({ callsign: "DAL3104", registration: "N820DX" });
+    });
+  });
+
   it("answers 503 with a Retry-After when the server's cap on upstream requests is spent, and does not remember it", async () => {
     vi.stubGlobal("fetch", swa77());
     vi.mocked(findFlight).mockRejectedValueOnce(new UpstreamBusyError(3));

@@ -55,6 +55,8 @@ const PAGE_FRAMES = 2;
 const TRACK_STEP_S = 8;
 /** How long the page waits for a flight a link names to appear in the traffic, ms. */
 const WANTED_MS = 30_000;
+/** How low the map comes down over a flight found anywhere (track): well inside REGION_ZOOM, the airport picker's height. */
+const TRACK_ZOOM = 9;
 /** The map eases the selected aircraft clear of the card no more often than this, ms. */
 const EASE_EVERY_MS = 1_500;
 /** One beat of an airport's ripple, and one step of the routes' flow, ms. */
@@ -196,8 +198,8 @@ export class GlobeMap {
   private selectionData: GeoJSON.FeatureCollection = { type: "FeatureCollection", features: [] };
   /** What the card last printed: kept when the aircraft leaves the feed, which it then marks lost. */
   private lastFlight: MapFlight | null = null;
-  /** A flight a link names (its callsign), selected once the traffic shows it, until this time (ms). */
-  private wanted: { callsign: string; until: number } | null = null;
+  /** A flight a link or the search names (its hex where known, else its callsign), selected once the traffic shows it, until this time (ms). */
+  private wanted: { callsign: string; hex: string | null; until: number } | null = null;
   /** The aircraft under the pointer, who is not selected: a ring is drawn round it. */
   private hoverId: string | null = null;
   /** Whether the reader has moved the map since the selection: the map then leaves the camera alone. */
@@ -207,7 +209,7 @@ export class GlobeMap {
   private cardRect: (() => DOMRect | null) | null = null;
   /** On a phone, the journey's card and the controls round the foot of the map (null elsewhere): the band between them is where the flight is kept. */
   private frameBand: (() => { card: DOMRect | null; controls: DOMRect[] } | null) | null = null;
-  /** The followed aircraft as drawn and the end of its approach, [longitude, latitude], to keep in that band; empty with no approach. */
+  /** The followed aircraft as drawn and the end of its approach where it has one, [longitude, latitude], to keep in that band; empty with no aircraft drawn. */
   private framing: [number, number][] = [];
   /** The aircraft drawn last frame, which a click is matched against. */
   private drawn: SkyFeatures["aircraft"]["features"] = [];
@@ -345,7 +347,18 @@ export class GlobeMap {
 
   /** Selects the flight with this callsign (or hex, upper case, where it has none) as soon as the traffic shows it: a link's flight. */
   selectCallsign(callsign: string): void {
-    this.wanted = { callsign: callsign.toUpperCase(), until: Date.now() + WANTED_MS };
+    this.wanted = { callsign: callsign.toUpperCase(), hex: null, until: Date.now() + WANTED_MS };
+  }
+
+  /**
+   * A flight found anywhere (the search's flight elsewhere): the map lets go of what it had selected,
+   * flies to where the flight is, low enough to read the traffic there, and selects it as soon as the
+   * traffic shows it, by its hex where it has one, else by `callsign` as selectCallsign does.
+   */
+  track(flight: { hex: string | null; callsign: string; latitude: number; longitude: number }): void {
+    this.select(null);
+    this.wanted = { callsign: flight.callsign.toUpperCase(), hex: flight.hex, until: Date.now() + WANTED_MS };
+    this.map.flyTo({ center: [flight.longitude, flight.latitude], zoom: TRACK_ZOOM, bearing: 0, pitch: 45, duration: 2500 });
   }
 
   /** Where the flight card is on screen, so the selected aircraft is kept clear of it; null stops that. */
@@ -501,27 +514,30 @@ export class GlobeMap {
       this.drawProcedure();
     }
     const end = features?.approach.at(-1);
-    this.framing = features?.aircraft && end ? [features.aircraft, end] : [];
+    this.framing = features?.aircraft ? (end ? [features.aircraft, end] : [features.aircraft]) : [];
     this.keepInBand();
   }
 
   /**
-   * On a phone, with an approach drawn and the aircraft near enough to see it with, zooms out and moves the
-   * map so the aircraft and the approach's threshold end both stand in the band between the card and the
-   * controls. After the journey's own camera for the frame, which is set afresh every frame, so it never
+   * On a phone, moves the map so the followed aircraft stands in the band between the card and the
+   * controls, rather than under the card; with an approach drawn and the aircraft near enough to see it
+   * with, zooms out so the approach's threshold end stands there too. After the journey's own camera for the frame, which is set afresh every frame, so it never
    * pulls against the reader: a drag or a wheel ends the journey's steering and with it this.
    */
   private keepInBand(): void {
-    const rects = this.framing.length === 2 ? this.frameBand?.() : null;
-    if (!rects || Math.hypot(...toLocal({ latitude: this.framing[0][1], longitude: this.framing[0][0] }, this.framing[1][1], this.framing[1][0])) > FRAME_RANGE_M) return;
+    const rects = this.framing.length ? this.frameBand?.() : null;
+    if (!rects) return;
+    // An approach too far off to frame with the aircraft leaves the aircraft alone in the band.
+    const [aircraft, end] = this.framing;
+    const framed = end && Math.hypot(...toLocal({ latitude: aircraft[1], longitude: aircraft[0] }, end[1], end[0])) <= FRAME_RANGE_M ? this.framing : [aircraft];
     const box = this.container.getBoundingClientRect();
     const within = (r: DOMRect) => ({ left: r.left - box.left, right: r.right - box.left, top: r.top - box.top, bottom: r.bottom - box.top });
     const band = freeBand({ width: box.width, height: box.height }, rects.card && within(rects.card), rects.controls.filter((r) => r.width > 0 && r.height > 0).map(within));
     this.following = true;
     for (let i = 0; i < 3; i++) {
-      const first = frameShift(this.framing.map((c) => this.map.project(c)), band);
+      const first = frameShift(framed.map((c) => this.map.project(c)), band);
       if (first.scale < 0.99) this.map.jumpTo({ zoom: this.map.getZoom() + Math.log2(Math.max(first.scale, FRAME_STEP)) });
-      const { dx, dy } = frameShift(this.framing.map((c) => this.map.project(c)), band);
+      const { dx, dy } = frameShift(framed.map((c) => this.map.project(c)), band);
       if (Math.hypot(dx, dy) >= 1) this.map.panBy([-dx, -dy], { duration: 0 });
       else if (first.scale >= 0.99) break;
     }
@@ -788,8 +804,8 @@ export class GlobeMap {
       this.history.sweep(now);
     }
     if (this.wanted && !this.selectedId) {
-      const wanted = this.wanted.callsign;
-      const i = tracked.findIndex((a) => (a.callsign ?? a.id.toUpperCase()) === wanted);
+      const { callsign: wanted, hex } = this.wanted;
+      const i = tracked.findIndex((a) => (hex ? a.id === hex : (a.callsign ?? a.id.toUpperCase()) === wanted));
       if (i >= 0) this.select(tracked[i].id);
       else if (Date.now() > this.wanted.until) this.wanted = null;
     }

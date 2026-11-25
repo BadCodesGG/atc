@@ -148,6 +148,12 @@ describe("remote", () => {
     expect(run("N123AB").remote).toBe("N123AB");
   });
 
+  it("asks about a tail number, hyphen and all, though it carries no digit", () => {
+    expect(run("n3596w").remote).toBe("N3596W");
+    expect(run("g-zbkj").remote).toBe("G-ZBKJ");
+    expect(run("ei-nsg").remote).toBe("EI-NSG");
+  });
+
   it("does not ask when something here matches", () => {
     expect(run("DL3104").remote).toBeNull();
     expect(run("E15").remote).toBeNull();
@@ -171,12 +177,27 @@ describe("nearestAirport and remoteSummary", () => {
     expect(nearestAirport(40.7, -74.2).airport.code).toBe("ewr");
   });
 
-  it("offers to open an airport only for a flight within the scene's range of it", () => {
-    const base = { callsign: "AAL100", registration: null, typeCode: "A321", altitudeFt: 4200, groundSpeedKt: 190, route: null };
+  const base = { hex: "a1b2c3", callsign: "AAL100", registration: null, typeCode: "A321", altitudeFt: 4200, groundSpeedKt: 190, route: null };
+
+  it("opens the airport a flight is within the scene's range of", () => {
     const close = remoteSummary({ ...base, latitude: 33.4, longitude: -112.2 }, "atl");
-    expect(close).toMatchObject({ nearest: "phx", openable: true, altitude: "4,200 ft" });
+    expect(close).toMatchObject({ nearest: "phx", opens: "airport", altitude: "4,200 ft" });
+  });
+
+  it("shows a flight within range of the airport on screen in its diorama, rather than reopening it", () => {
+    expect(remoteSummary({ ...base, latitude: 33.4, longitude: -112.2 }, "phx").opens).toBe("here");
+  });
+
+  it("tracks a flight out of range of every built airport on the world map, wherever it is", () => {
     const far = remoteSummary({ ...base, latitude: 37.0, longitude: -100.0, altitudeFt: 35_000 }, "atl");
-    expect(far.openable).toBe(false);
+    expect(far.opens).toBe("map");
     expect(far.altitude).toBe("35,000 ft");
+    // N3596W, a PA-32 57 nm from CLT, with CLT on screen.
+    expect(remoteSummary({ ...base, latitude: 35.82, longitude: -81.85 }, "clt").opens).toBe("map");
+  });
+
+  it("names what picking it selects: its broadcast callsign, else its hex", () => {
+    expect(remoteSummary({ ...base, latitude: 37, longitude: -100 }, "atl").select).toBe("AAL100");
+    expect(remoteSummary({ ...base, callsign: null, latitude: 37, longitude: -100 }, "atl").select).toBe("A1B2C3");
   });
 });
