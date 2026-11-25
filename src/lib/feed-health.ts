@@ -54,6 +54,25 @@ export function trafficReadout({ heard, tracked }: { heard: boolean; tracked: nu
   return heard ? "ready" : "loading";
 }
 
+const READOUT_NOTE: Record<TrafficReadout, string | undefined> = {
+  loading: "Reading traffic…",
+  // The poll goes on every few seconds whatever the last one brought, so the reader need do nothing but wait.
+  offline: "Flight data can't be reached right now. The page keeps trying on its own.",
+  ready: undefined,
+};
+
+/** The same in fewer words, for a phone's counts row, which shares its width with the wind. */
+const SHORT_NOTE: Record<TrafficReadout, string | undefined> = { ...READOUT_NOTE, offline: "Can't reach flight data. Still trying." };
+
+/**
+ * What the counts (as their tooltip, or on a phone in their place) and the lists say in place of figures while there are none to
+ * give: the first answer on its way, or a feed that cannot be reached. Undefined once traffic is read, so a list's own empty line
+ * ("No aircraft match the filters.") shows.
+ */
+export function readoutNote(readout: TrafficReadout, { short = false }: { short?: boolean } = {}): string | undefined {
+  return (short ? SHORT_NOTE : READOUT_NOTE)[readout];
+}
+
 /** One read in a round (the map reads a few region cells at once): what came back, or the failing status (null when the request itself failed). */
 export type Read = { ok: true; stale?: boolean; ageS?: number } | { ok: false; status: number | null };
 

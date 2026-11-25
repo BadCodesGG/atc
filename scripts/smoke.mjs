@@ -47,6 +47,15 @@ const recorder = (permission, opted) => `
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+/**
+ * Chrome's own note that the software GPU stalled ("[.WebGL-0x…]GL Driver Message (OpenGL, Performance,
+ * …): GPU stall due to ReadPixels"): it comes from the driver on a canvas screenshot, not from the page.
+ */
+const GL_DRIVER_NOTE = /^\[\.WebGL-0x[0-9a-f]+\]GL Driver Message \(OpenGL, Performance, /;
+
+/** A console message that counts against a clean console: an error or a warning, but for the driver's performance notes. */
+const consoleProblem = (m) => (m.type() === "error" || m.type() === "warning") && !GL_DRIVER_NOTE.test(m.text());
+
 async function waitFor(url, ms = 60_000) {
   const end = Date.now() + ms;
   while (Date.now() < end) {
@@ -123,7 +132,7 @@ try {
     const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
     const problems = [];
     page.on("console", (m) => {
-      if (m.type() === "error" || m.type() === "warning") problems.push(m.text());
+      if (consoleProblem(m)) problems.push(m.text());
     });
     page.on("pageerror", (e) => problems.push(String(e)));
     await page.goto(`${BASE}/?fixture=1${theme === "light" ? "" : `&theme=${theme}`}`);
@@ -140,7 +149,7 @@ try {
     const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
     const problems = [];
     page.on("console", (m) => {
-      if (m.type() === "error" || m.type() === "warning") problems.push(m.text());
+      if (consoleProblem(m)) problems.push(m.text());
     });
     page.on("pageerror", (e) => problems.push(String(e)));
     await page.goto(`${BASE}/?fixture=1`);
@@ -192,7 +201,10 @@ try {
     };
     const settled = await settle();
     await page.getByRole("button", { name: "Zoom in" }).click();
-    await sleep(1500);
+    // Until a frame drawn after the zoom has moved the label: a software renderer can take seconds to draw one.
+    await page
+      .waitForFunction((before) => (document.querySelector(".scene-label")?.style.transform ?? "") !== before, settled, { timeout: 20_000 })
+      .catch(() => {});
     check("Zoom in works while following, and Follow holds", settled !== null && (await labelAt()) !== settled && (await pressed()));
     await page.mouse.move(500, 500);
     await page.mouse.down();
@@ -336,7 +348,7 @@ try {
     const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
     const problems = [];
     page.on("console", (m) => {
-      if (m.type() === "error" || m.type() === "warning") problems.push(m.text());
+      if (consoleProblem(m)) problems.push(m.text());
     });
     page.on("pageerror", (e) => problems.push(String(e)));
     await page.goto(`${BASE}/?fixture=1`);
@@ -488,7 +500,7 @@ try {
     const page = await context.newPage();
     const problems = [];
     page.on("console", (m) => {
-      if (m.type() === "error" || m.type() === "warning") problems.push(m.text());
+      if (consoleProblem(m)) problems.push(m.text());
     });
     await page.goto(`${BASE}/?fixture=1&airline=DAL&state=taxiing&theme=dark`);
     const card = page.locator("section[aria-label^='Selected flight']");
@@ -602,6 +614,11 @@ try {
       const text = (await label.innerText().catch(() => "")).trim();
       check(`the LIVE dot reads ${state}`, (await dot.getAttribute("data-live")) === state && pattern.test(text), text);
       if (state === "fresh") check("the fresh dot pulses", (await dot.locator(".live-dot").evaluate((el) => getComputedStyle(el).animationName)) === "live-pulse");
+      // A frozen fixture has nothing to replay: the speeds are off, as the slider is, and say why.
+      if (state === "fresh") {
+        const rates = await Promise.all(["10x", "30x"].map(async (name) => { const rate = page.getByRole("button", { name, exact: true }); return (await rate.isDisabled()) && (await rate.getAttribute("title")) === "Replay builds up while the page is open"; }));
+        check("with nothing to replay yet, 10x and 30x are off and say why", rates.every(Boolean), String(rates));
+      }
       if (state === "stale") {
         // A software GPU can hold the main thread for a while; the age only has to move on.
         await page.waitForFunction((t) => document.querySelector("main > div:has(> time) [data-live] > span:nth-child(2)")?.textContent?.trim() !== t, text, { timeout: 10_000 }).catch(() => {});
@@ -684,7 +701,7 @@ try {
     const page = await browser.newPage({ viewport: { width, height }, isMobile: width < 500, hasTouch: width < 500 });
     const problems = [];
     page.on("console", (m) => {
-      if (m.type() === "error" || m.type() === "warning") problems.push(m.text());
+      if (consoleProblem(m)) problems.push(m.text());
     });
     await page.goto(`${BASE}/?fixture=1${theme === "dark" ? "&theme=dark" : ""}#map=6.5/33.5/-84.4`);
     await page.locator("main[data-on-map]").waitFor({ timeout: 30_000 }).catch(() => {});
@@ -866,7 +883,8 @@ try {
     }
     {
       const page = await open("&alerts=all", "granted", true);
-      await page.waitForFunction(() => window.__notes.length >= 5, null, { timeout: 20_000 }).catch(() => {});
+      // Sixty-odd steps a quarter second apart, which a software GPU can stretch past twenty seconds.
+      await page.waitForFunction(() => window.__notes.length >= 5, null, { timeout: 40_000 }).catch(() => {});
       await sleep(2000);
       check("alerts: all five kinds, in turn, once each", (await notes(page)).length === 5, JSON.stringify(await notes(page)));
       await page.close();
@@ -902,7 +920,7 @@ try {
     const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
     const problems = [];
     page.on("console", (m) => {
-      if (m.type() === "error" || m.type() === "warning") problems.push(m.text());
+      if (consoleProblem(m)) problems.push(m.text());
     });
     page.on("pageerror", (e) => problems.push(String(e)));
     // Alerts on, to see the live path (the poll, not a script) tell of the followed flight.
@@ -948,10 +966,10 @@ try {
       filters: "button[aria-label^='Filters']",
       counts: "[aria-live='polite']",
       // Rendered twice, once for each layout; only the one on screen counts.
-      // A row of three on wide and short landscape layouts, one button in the view row on phones and tablets.
-      themes: "[role='group'][aria-label='Map style']:visible, button[aria-label^='Map style']:visible",
+      // A row of three on wide and short landscape layouts; on phones and tablets one button at the top of the view column, whose menu holds the camera too.
+      themes: "[role='group'][aria-label='Map style']:visible, button[aria-label^='Camera and map style']:visible",
       view: "[role='group'][aria-label='View']",
-      // The camera picker on phones and tablets (the button row is for wide screens).
+      // The camera picker on a short landscape window, in its view row (the button row is for wide screens, the map style button's menu for phones).
       camera: "#atc-camera",
       tabs: "[role='tablist'][aria-label='Traffic']",
       card: "section[aria-label^='Selected flight']",
@@ -977,8 +995,11 @@ try {
       const scrub = await page.locator("main input[type='range']").boundingBox();
       check(`${size}: the scrubber keeps its width beside the zoned clock`, (scrub?.width ?? 0) >= 60, String(scrub?.width));
     }
-    check(`${size}: every control is on screen`, names.length === (height < 640 ? 11 : 12), `missing: ${Object.keys(b).filter((k) => !b[k]).join(", ") || "none"}`);
+    // A phone has no camera picker of its own (it is in the map style button's menu); a short window has no legend.
+    check(`${size}: every control is on screen`, names.length === 11 && (short ? !b.legend : !b.camera), `missing: ${Object.keys(b).filter((k) => !b[k]).join(", ") || "none"}`);
     check(`${size}: nothing overlaps`, clashes.length === 0, clashes.join(", "));
+    // The counts and the wind share a row and the view buttons are a column beside the tabs, so the tabs (and the model under them) start one row higher than they did at 244 px.
+    if (width < 500) check(`${size}: the tabs start under the counts' row`, !!b.tabs && b.tabs.y <= 190, String(b.tabs?.y));
     if (short) {
       const row = await page.evaluate(() => {
         const edge = (sel, side) => document.querySelector(sel).getBoundingClientRect()[side];
@@ -1026,18 +1047,58 @@ try {
     }
     const wide = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth);
     check(`${size}: no sideways scroll`, !wide);
-    // On a phone the map style is one button in the view row, whose menu names the three.
+    // On a phone the map style is one button at the top of the view column, whose menu names the three styles and the cameras.
     if (width < 768) {
       const next = theme === "dark" ? "Light" : "Dark";
+      const button = page.locator("button[aria-label^='Camera and map style']");
       await page.keyboard.press("Escape");
-      await page.locator("button[aria-label^='Map style']").click();
+      // The column steps aside while a sheet is open over it: tapping the open tab folds the sheet and brings it back.
+      check(`${size}: the view column steps aside while the sheet is open`, !(await button.isVisible()));
+      await page.locator("#column-tab-movements").click();
+      await button.click();
       await page.getByRole("group", { name: "Map style" }).getByRole("button", { name: next, exact: true }).click();
       await page.waitForFunction((t) => document.querySelector("main")?.dataset.theme === t, next.toLowerCase(), { timeout: 5_000 }).catch(() => {});
       check(
         `${size}: the map style button's menu switches the style and folds`,
-        (await page.locator("main").getAttribute("data-theme")) === next.toLowerCase() && (await page.locator("#atc-map-style").count()) === 0 && (await page.locator("button[aria-label^='Map style']").getAttribute("aria-label")) === `Map style: ${next}`,
+        (await page.locator("main").getAttribute("data-theme")) === next.toLowerCase() && (await page.locator("#atc-map-style").count()) === 0 && (await button.getAttribute("aria-label")) === `Camera and map style: Orbit, ${next}`,
       );
+      await button.click();
+      await page.getByRole("group", { name: "Camera" }).getByRole("button", { name: "Tower", exact: true }).click();
+      await page.waitForFunction(() => /^Camera and map style: Tower,/.test(document.querySelector("button[aria-label^='Camera and map style']")?.getAttribute("aria-label") ?? ""), null, { timeout: 5_000 }).catch(() => {});
+      check(`${size}: the same menu switches the camera and folds`, (await page.locator("#atc-map-style").count()) === 0 && /^Camera and map style: Tower,/.test((await button.getAttribute("aria-label")) ?? ""), (await button.getAttribute("aria-label")) ?? "");
     }
+    await page.close();
+  }
+
+  // At 320 px, WCAG 1.4.10's reflow width, in each theme (the night theme's type is the widest): nothing runs off the screen or overlaps,
+  // so the tabs stop short of the view column beside them and the legend wraps inside the width; the tabs keep their wide names.
+  for (const theme of ["light", "dark", "satellite"]) {
+    const page = await browser.newPage({ viewport: { width: 320, height: 844 }, isMobile: true, hasTouch: true });
+    await page.goto(`${BASE}/?fixture=1${theme === "light" ? "" : `&theme=${theme}`}`);
+    await page.locator("section[aria-label^='Selected flight']").waitFor({ timeout: 30_000 });
+    await sleep(800);
+    const b = await boxes(page, {
+      header: ".atc-title",
+      search: "#atc-search",
+      filters: "button[aria-label^='Filters']",
+      counts: ".counts",
+      wind: "[data-weather]",
+      themes: "button[aria-label^='Camera and map style']",
+      view: "[role='group'][aria-label='View']",
+      tabs: "[role='tablist'][aria-label='Traffic']",
+      card: "section[aria-label^='Selected flight']",
+      legend: "main > ul",
+      time: "main > div:has(> time)",
+      data: DATA_CREDIT,
+    });
+    const names = Object.keys(b).filter((k) => b[k]);
+    const clashes = [];
+    for (let i = 0; i < names.length; i++) for (let j = i + 1; j < names.length; j++) if (overlaps(b[names[i]], b[names[j]])) clashes.push(`${names[i]}/${names[j]}`);
+    const outside = names.filter((k) => b[k].x < 0 || b[k].x + b[k].width > 320);
+    const wide = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth);
+    check(`320 ${theme}: every control is on screen, inside the width, and nothing overlaps`, names.length === 12 && outside.length === 0 && clashes.length === 0 && !wide, `missing: ${Object.keys(b).filter((k) => !b[k]).join(", ") || "none"}; outside: ${outside.join(", ") || "none"}; ${clashes.join(", ")}`);
+    const tab = (await page.locator("#column-tab-movements").innerText()).replace(/\s+/g, " ").trim();
+    check(`320 ${theme}: the movements tab has its full name and count`, /^Movements \d+$/.test(tab), tab);
     await page.close();
   }
 
