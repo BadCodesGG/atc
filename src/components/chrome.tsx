@@ -1,7 +1,7 @@
 import { type KeyboardEvent, type ReactNode, type Ref, useCallback, useId, useState, useSyncExternalStore } from "react";
 import type { FlightState, TrafficCounts } from "@/lib/aircraft-state";
 import { type Airport, AIRPORTS } from "@/lib/airports";
-import { currentFeedStatus, type FeedChannel, type FeedStatus, liveDot, type LiveState, type TrafficReadout, trafficReadout, watchFeed } from "@/lib/feed-health";
+import { currentFeedStatus, type FeedChannel, type FeedStatus, liveDot, type LiveState, readoutNote, type TrafficReadout, trafficReadout, watchFeed } from "@/lib/feed-health";
 import { type NasStatus, programsFor } from "@/lib/faa-status";
 import { describeWeather, describeWind, formatVisibility, type Metar } from "@/lib/metar";
 import { cutMovements, MOVEMENT_ROWS, type Movements as MovementsData, movementsFoot } from "@/lib/movements";
@@ -121,39 +121,47 @@ export function Header({ airport, onAirport, focusPicker, onMap = false, inView 
 /** The header's search box lives in its own file; it is exported here with the rest of the chrome. */
 export { Search } from "./search-box";
 
-/** What the counts and lists say while there is nothing to count yet, and where there is no feed to count from. */
-const READOUT_NOTE: Record<TrafficReadout, string | undefined> = { loading: "Reading traffic…", offline: "No aircraft read yet", ready: undefined };
 
 /** The room a wide screen leaves the counts: from the right margin (32 px) to the filter button's badge (centre + 262 px, 6 px of badge, an 8 px gap). */
 const COUNTS_ROOM = "xl:max-w-[calc(50vw-308px)]";
 
 /**
  * The counts, or `note` in their place when there is no traffic to count (the fixture holds only Atlanta's).
- * With the filters on they count what is left showing, and the first says how many of all there are.
+ * With the filters on they count what is left showing, and the first says how many of all there are. Below
+ * the wide layout they share their row with the wind (WeatherReadout, at its right end), so the moving count
+ * goes: the Movements tab under it gives the same figure.
  */
 export function Counts({ counts, total = null, note, readout = "ready" }: { counts: TrafficCounts | null; total?: number | null; note: string | null; readout?: TrafficReadout }) {
   if (note) {
     return (
-      <div aria-live="polite" className={`counts absolute left-4 top-[132px] xl:left-auto xl:right-8 xl:top-7 ${COUNTS_ROOM}`}>
-        <div className={`rounded-xl bg-surface px-3 py-2 text-[13px] text-ink-2 xl:px-3.5 xl:py-2.5 ${RING}`}>{note}</div>
+      // Kept left of the wind at the row's right end (9rem leaves it its widest, "270° 25 kt" in the night theme's type), in two lines at most.
+      <div aria-live="polite" className={`counts absolute left-4 top-[132px] max-xl:right-[9rem] xl:left-auto xl:right-8 xl:top-7 ${COUNTS_ROOM}`}>
+        <div className={`w-fit rounded-xl bg-surface px-3 py-2 text-xs leading-4 text-ink-2 xl:px-3.5 xl:py-2.5 xl:text-[13px] xl:leading-normal ${RING}`}>{note}</div>
       </div>
     );
   }
   // Until the feed has answered, or with nothing to read it from, the figures are a dash: a zero would say the airfield is empty.
   const counted = readout === "ready" ? counts : null;
   const filtered = counted !== null && total !== null && counted.tracked !== total;
-  const items: [number | undefined, string, string?][] = [
-    [counted?.tracked, "tracked", filtered ? `of ${total}` : undefined],
-    [counted?.onGround, "on the ground"],
-    [counted?.moving, "moving"],
+  const reason = readoutNote(readout);
+  // Below the wide layout a tile can be left out: the moving count always (the Movements tab gives it), the others while the reason takes their place.
+  const narrowHidden = "max-xl:hidden!";
+  const items: { n: number | undefined; label: string; of?: string; narrow: string }[] = [
+    { n: counted?.tracked, label: "tracked", of: filtered ? `of ${total}` : undefined, narrow: reason ? narrowHidden : "" },
+    { n: counted?.onGround, label: "on the ground", narrow: reason ? narrowHidden : "" },
+    { n: counted?.moving, label: "moving", narrow: narrowHidden },
   ];
+  // Without figures, a wide screen keeps the dashes, with the reason as their tooltip and read out (the movements list beside them says it too).
+  // Below it the list is folded and a phone has no tooltip, so the reason, in its short form, takes the dashes' place, left of the wind as `note` is.
   return (
     // On a wide screen the row is right-anchored and grows left toward the filter button, so it is held to the room between them (COUNTS_ROOM)
     // and each count is a two-line tile (the figure over its label), which keeps the widest readout narrower than that room at 1280 in every theme.
-    // A phone narrower than 24rem has the same tiles: in one line each, the three are wider than the screen in the night theme and wrap in the others.
-    <div aria-live="polite" aria-busy={readout === "loading"} title={READOUT_NOTE[readout]} className={`counts absolute left-4 top-[132px] flex gap-2 xl:left-auto xl:right-8 xl:top-7 xl:flex-wrap xl:justify-end ${COUNTS_ROOM}`}>
-      {items.map(([n, label, of]) => (
-        <div key={label} className={`rounded-xl bg-surface px-3 py-2 text-[13px] text-ink-2 max-[24rem]:flex max-[24rem]:flex-col max-[24rem]:py-[5px] max-[24rem]:text-[11px] max-[24rem]:leading-3.5 xl:flex xl:flex-col xl:px-3.5 xl:py-[5px] xl:text-[11px] xl:leading-3.5 ${RING}`}>
+    // A phone narrower than 24rem has the same tiles: in one line each, the two and the wind beside them are wider than the screen.
+    <div aria-live="polite" aria-busy={readout === "loading"} title={reason} className={`counts absolute left-4 top-[132px] flex gap-2 xl:left-auto xl:right-8 xl:top-7 xl:flex-wrap xl:justify-end ${reason ? "max-xl:right-[9rem]" : ""} ${COUNTS_ROOM}`}>
+      {reason && <span className="sr-only max-xl:hidden">{reason}</span>}
+      {reason && <div className={`w-fit rounded-xl bg-surface px-3 py-2 text-xs leading-4 text-ink-2 xl:hidden ${RING}`}>{readoutNote(readout, { short: true })}</div>}
+      {items.map(({ n, label, of, narrow }) => (
+        <div key={label} className={`rounded-xl bg-surface px-3 py-2 text-[13px] text-ink-2 max-[24rem]:flex max-[24rem]:flex-col max-[24rem]:py-[5px] max-[24rem]:text-[11px] max-[24rem]:leading-3.5 xl:flex xl:flex-col xl:px-3.5 xl:py-[5px] xl:text-[11px] xl:leading-3.5 ${narrow} ${RING}`}>
           <span className="max-[24rem]:text-[15px] max-[24rem]:leading-5 max-[24rem]:text-ink xl:text-[15px] xl:leading-5 xl:text-ink">
             <strong className="font-bold text-ink tabular-nums">{n ?? "—"}</strong> {of && <span className="tabular-nums">{of} </span>}
           </span>
@@ -166,8 +174,8 @@ export function Counts({ counts, total = null, note, readout = "ready" }: { coun
 
 /**
  * The wind from the airport's METAR, as the counts read: the wind always, then the visibility when it
- * is under 10 miles and the weather when there is any. On phones only the wind, shortened, fits beside
- * the map-style switch.
+ * is under 10 miles and the weather when there is any. Below the wide layout only the wind, shortened,
+ * at the right end of the counts' row, so the two take one row of the screen and not two.
  */
 export function WeatherReadout({ metar }: { metar: Metar | null }) {
   if (!metar?.wind) return null;
@@ -177,7 +185,7 @@ export function WeatherReadout({ metar }: { metar: Metar | null }) {
     <p
       data-weather
       title={metar.raw}
-      className={`absolute left-4 top-[184px] flex gap-1.5 whitespace-nowrap rounded-xl bg-surface px-2.5 py-2 text-xs text-ink-2 min-[400px]:px-3 min-[400px]:text-[13px] xl:left-8 xl:top-[108px] xl:max-[1500px]:top-[124px] xl:px-3.5 xl:py-2.5 ${RING}`}
+      className={`absolute right-4 top-[134px] flex gap-1.5 whitespace-nowrap rounded-xl bg-surface px-2.5 py-2 text-xs text-ink-2 max-[24rem]:top-[138px] min-[400px]:px-3 min-[400px]:text-[13px] xl:left-8 xl:right-auto xl:top-[108px] xl:max-[1500px]:top-[124px] xl:px-3.5 xl:py-2.5 ${RING}`}
     >
       <span>
         Wind <strong className="font-bold text-ink tabular-nums xl:hidden">{describeWind(metar.wind, { short: true })}</strong>
@@ -245,6 +253,9 @@ export function FlightCard({ card, procedure = null, here, status, following, on
     journey?.arrival ? ["ETA", journey.arrival] : ["Heading", card.heading],
     ["Altitude", card.altitude],
   ];
+  // The tail number ends the operator line, where a tracker's reader looks for who and what it is.
+  const tail = card.registration ? (card.operator ? `· ${card.registration}` : card.registration) : "";
+  const operator = [card.operator, tail].filter(Boolean).join(" ");
   // One name for the toggle in both states, so a screen reader hears "Follow this flight, pressed";
   // the tick and the selected colours (a picked movements row's) show the state.
   const toggle = following ? "bg-selected text-ink shadow-[0_0_0_1px_var(--color-selected-ring)]" : "bg-accent text-on-accent";
@@ -257,9 +268,12 @@ export function FlightCard({ card, procedure = null, here, status, following, on
       <div className="flex items-start justify-between gap-3">
         <div className="flex min-w-0 flex-col gap-1">
           <h2 className="truncate text-lg font-bold tracking-[-0.01em] xl:text-xl roomy:text-2xl">{card.callsign}</h2>
-          {card.operator && (
-            <p title={card.operator} className="line-clamp-2 text-[13px] text-muted xl:text-sm">
+          {operator && (
+            <p title={operator} className="line-clamp-2 text-[13px] text-muted xl:text-sm">
               {card.operator}
+              {card.operator && tail && " "}
+              {/* In one piece, so a narrow card moves the whole tail number to the next line rather than splitting it from its separator. */}
+              {tail && <span className="whitespace-nowrap">{tail}</span>}
             </p>
           )}
         </div>
@@ -321,6 +335,14 @@ export function FlightCard({ card, procedure = null, here, status, following, on
               <div key={label} title={label === "ETA" ? ESTIMATE : undefined} className="flex flex-col gap-0.5">
                 <dt className="text-xs text-muted">{label}</dt>
                 <dd className="whitespace-nowrap text-[15px] font-semibold tabular-nums roomy:text-base">{value}</dd>
+                {/* Under the height, whether it is climbing or descending: a line of its own, so the row is no wider with a gate beside it. */}
+                {label === "Altitude" && card.climb && (
+                  <dd data-climb className="whitespace-nowrap text-xs text-muted tabular-nums">
+                    {/* The arrows are read out as words. */}
+                    <span aria-hidden>{card.climb.shown}</span>
+                    <span className="sr-only">{card.climb.said}</span>
+                  </dd>
+                )}
               </div>
             ))}
             {/* A gate makes a fourth fact on the same row, so it never makes the card taller. */}
@@ -498,8 +520,10 @@ function Delays({ here, status, direction, far }: { here: string; status: NasSta
 /**
  * Turn, zoom and go back to the framed view: the buttons for what drags, the wheel, pinches and the
  * keyboard do. A column at the bottom left on wide screens, with the camera switch beside it along its
- * foot; on phones and tablets a row beside the wind, the map style first (MapStyleMenu, in `before`) and
- * Reset view folded into the row as one more button, the camera picker a row lower beside the traffic tabs.
+ * foot. On phones and tablets a column at the right, from the traffic tabs' row down: the camera and map
+ * style button first (MapStyleMenu, in `before`), then the view buttons, with Reset view as one more. A
+ * column, so the rows above the model are only the counts with the wind and the tabs; it steps aside while
+ * a sheet is open over it (globals.css). On the world map, a row at the foot.
  */
 export function ViewControls({
   moved,
@@ -528,16 +552,16 @@ export function ViewControls({
     // On the world map the stacked layout has no counts or column to sit under: the buttons go to the
     // foot, in one row with the map style above the time bar, clear of the map (MAP_FOOT).
     <div data-map-foot className={`view-controls absolute right-4 top-[184px] flex flex-col items-end gap-2 xl:bottom-[84px] xl:left-8 xl:right-auto xl:top-auto xl:items-start ${MAP_FOOT} max-xl:in-data-on-map:left-4 max-xl:in-data-on-map:right-auto`}>
-      <div className="flex items-center gap-2 xl:items-end xl:gap-3">
+      <div className="flex flex-col items-end gap-2 max-xl:in-data-on-map:flex-row max-xl:in-data-on-map:items-center xl:flex-row xl:gap-3">
         {before}
-        <div role="group" aria-label="View" className={`flex gap-0.5 rounded-full bg-surface p-1 xl:flex-col ${RAISED}`}>
+        <div role="group" aria-label="View" className={`flex flex-col gap-0.5 rounded-full bg-surface p-1 max-xl:in-data-on-map:flex-row ${RAISED}`}>
           <button type="button" aria-label="Zoom in" title="Zoom in (scroll, +)" className={btn} onClick={() => onZoom(ZOOM_STEP)}>
             {icon("M8 3v10M3 8h10")}
           </button>
           <button type="button" aria-label="Zoom out" title="Zoom out (scroll, -)" className={btn} onClick={() => onZoom(1 / ZOOM_STEP)}>
             {icon("M3 8h10")}
           </button>
-          {/* A phone turns the map with two fingers (and the keys Q and E turn it): on the map the row has room only for the map style, zoom and Reset view, and beside the wind a phone narrower than 28rem has none for the turn buttons at their 44 px. */}
+          {/* A phone turns the map with two fingers (and the keys Q and E turn it): on the map the row has room only for the map style, zoom and Reset view, and on a phone narrower than 28rem the column stays short enough to keep clear of the flight card without them. */}
           <button type="button" aria-label="Turn left" title="Turn left (right-drag, Q)" className={`${btn} max-[28rem]:hidden max-sm:in-data-on-map:hidden`} onClick={() => onTurn(-TURN_STEP)}>
             {icon("M5.5 3.5 2.5 6.5l3 3M2.5 6.5H10a3.5 3.5 0 0 1 0 7H7")}
           </button>
@@ -678,8 +702,8 @@ export function CameraMenu({ camera, available, onChange, className = "" }: Came
 /**
  * The selected flight and the traffic panel. On wide screens, the right-hand column: the flight
  * above the panel, the panel taking what height is left above the map-style switch. On phones and
- * tablets, the band between the traffic tabs and the legend: the tabs at its top (the camera picker
- * beside them), the flight at its foot, and the open panel only ever in the space between, so the two
+ * tablets, the band between the traffic tabs and the legend: the tabs at its top (the view buttons' column
+ * at their right), the flight at its foot, and the open panel only ever in the space between, so the two
  * can never overlap; where that space is too short for a useful list, or the movements list is expanded
  * to every moving aircraft, the card steps aside while the panel is open. On the world map the foot
  * holds the view buttons with the map style, and the map's credit above those, so the band ends above
@@ -692,7 +716,7 @@ export function SideColumn({ children, ref }: { children: ReactNode; ref?: Ref<H
   return (
     <div
       ref={ref}
-      className="side-column group/side pointer-events-none absolute inset-x-4 bottom-[132px] top-[244px] flex flex-col gap-2 max-xl:short:bottom-[76px] max-xl:in-data-on-map:bottom-[172px] max-xl:short:in-data-on-map:bottom-[172px] max-xl:short:in-data-on-map:top-[128px] md:max-w-[28rem] xl:bottom-[96px] xl:left-auto xl:right-8 xl:top-[104px] xl:w-[300px] xl:gap-3"
+      className="side-column group/side pointer-events-none absolute inset-x-4 bottom-[132px] top-[184px] flex flex-col gap-2 max-xl:short:bottom-[76px] max-xl:in-data-on-map:bottom-[172px] max-xl:short:in-data-on-map:bottom-[172px] max-xl:short:in-data-on-map:top-[128px] md:max-w-[28rem] xl:bottom-[96px] xl:left-auto xl:right-8 xl:top-[104px] xl:w-[300px] xl:gap-3"
     >
       {children}
     </div>
@@ -706,6 +730,34 @@ export const STATE_INK: Record<FlightState, string> = {
   parked: "text-badge-parked-ink",
 };
 
+/** The fade at the foot of a scrolling list while more of it is below: it reads as more to scroll to, where a row cut through the middle reads as clipped. */
+const FADE_BELOW = "data-more-below:[mask-image:linear-gradient(to_bottom,black_calc(100%-2.5rem),transparent)]";
+
+/**
+ * Whether a scrolling list has more below what shows, for FADE_BELOW: set on the list as `data-more-below`, and
+ * gone at the end of a scroll and on a list that fits, so its last row is never left dimmed.
+ */
+function useMoreBelow<T extends HTMLElement>(): [(el: T | null) => (() => void) | undefined, boolean] {
+  const [more, setMore] = useState(false);
+  const ref = useCallback((el: T | null) => {
+    if (!el) return;
+    const check = () => setMore(el.scrollTop + el.clientHeight < el.scrollHeight - 2);
+    check();
+    el.addEventListener("scroll", check, { passive: true });
+    // The list grows and shrinks as the sheet folds or the window changes, and its rows come and go with the traffic.
+    const resized = new ResizeObserver(check);
+    resized.observe(el);
+    const changed = new MutationObserver(check);
+    changed.observe(el, { childList: true, subtree: true });
+    return () => {
+      el.removeEventListener("scroll", check);
+      resized.disconnect();
+      changed.disconnect();
+    };
+  }, []);
+  return [ref, more];
+}
+
 /**
  * The aircraft moving now, as in the night ops mock's ACTIVE MOVEMENTS: callsign, type, what it is
  * doing, a state tag and speed, each row selecting its flight. `movements` is every moving aircraft:
@@ -715,6 +767,7 @@ export const STATE_INK: Record<FlightState, string> = {
  */
 export function Movements({ movements, onSelect, onChosen, filtered = false, readout = "ready" }: { movements: MovementsData | null; onSelect: (id: string) => void; onChosen: () => void; filtered?: boolean; readout?: TrafficReadout }) {
   const [expanded, setExpanded] = useState(false);
+  const [rowsRef, moreBelow] = useMoreBelow<HTMLUListElement>();
   if (!movements) return null;
   const { rows, more, atGates } = cutMovements(movements, expanded ? Infinity : MOVEMENT_ROWS);
   // No traffic at all (a fixture asked for at another airport, or an empty sky): one plain line, not a "0 at gates" pill.
@@ -722,7 +775,7 @@ export function Movements({ movements, onSelect, onChosen, filtered = false, rea
     return (
       <section aria-label="Active movements" className="movements flex min-h-0 flex-col">
         <p id="movements-list" className={`rounded-xl bg-surface px-3 py-2.5 text-[13px] text-ink-2 ${RING}`}>
-          {READOUT_NOTE[readout] ?? (filtered ? "No aircraft match the filters." : "No aircraft moving or at the gates.")}
+          {readoutNote(readout) ?? (filtered ? "No aircraft match the filters." : "No aircraft moving or at the gates.")}
         </p>
       </section>
     );
@@ -732,7 +785,7 @@ export function Movements({ movements, onSelect, onChosen, filtered = false, rea
   return (
     <section aria-label="Active movements" data-expanded={expanded || undefined} className="movements flex min-h-0 flex-col">
       <div id="movements-list" className="flex min-h-0 w-full flex-col gap-1.5">
-        <ul id="movements-rows" className="flex min-h-0 flex-col gap-1.5 overflow-y-auto">
+        <ul ref={rowsRef} id="movements-rows" data-more-below={moreBelow || undefined} className={`flex min-h-0 flex-col gap-1.5 overflow-y-auto ${FADE_BELOW}`}>
           {rows.map((r) => (
             <li key={r.id}>
               <button
@@ -795,10 +848,11 @@ const EVENT_INK: Record<OpsBoardRow["events"][number]["kind"], string> = {
 
 type ColumnTab = "movements" | "pulse" | "board";
 
-const COLUMN_TABS: { key: ColumnTab; label: string; short: string }[] = [
-  { key: "movements", label: "Movements", short: "Moving" },
-  { key: "pulse", label: "Pulse", short: "Pulse" },
-  { key: "board", label: "Board", short: "Board" },
+/** One name for each tab at every width: the tabs have their row to themselves (the view buttons' column at its end) down to 320 px. */
+const COLUMN_TABS: { key: ColumnTab; label: string }[] = [
+  { key: "movements", label: "Movements" },
+  { key: "pulse", label: "Pulse" },
+  { key: "board", label: "Board" },
 ];
 
 /**
@@ -844,11 +898,11 @@ export function ColumnPanel({ movements, ops, onSelect, filtered = false, readou
               aria-controls="column-tabpanel"
               tabIndex={on ? 0 : -1}
               onClick={() => choose(t.key)}
-              className={`flex min-h-11 flex-1 items-center justify-center gap-1.5 rounded-full px-3 text-[13px] font-semibold xl:min-h-8 ${on ? "bg-accent text-on-accent" : "bg-transparent text-ink-2"}`}
+              // Filled only while its panel shows: folded on a phone, the selected tab is the one a tap opens, not an open one.
+              className={`flex min-h-11 flex-1 items-center justify-center gap-1.5 rounded-full px-3 text-[13px] font-semibold max-[24rem]:gap-1 max-[24rem]:px-2 xl:min-h-8 ${on && shown ? "bg-accent text-on-accent" : "bg-transparent text-ink-2"}`}
             >
-              <span className="xl:hidden">{t.short}</span>
-              <span className="hidden xl:inline">{t.label}</span>
-              {t.key === "movements" && !!count && <span className="hidden tabular-nums opacity-80 xl:inline">{count}</span>}
+              {t.label}
+              {t.key === "movements" && !!count && <span className="tabular-nums opacity-80">{count}</span>}
             </button>
           );
         })}
@@ -878,6 +932,7 @@ export function ColumnPanel({ movements, ops, onSelect, filtered = false, readou
 
 /** The airport's pulse now: the runways in use with their hold queues, and this hour's movements and taxi times. */
 function PulseNow({ ops }: { ops: OpsView }) {
+  const [panelRef, moreBelow] = useMoreBelow<HTMLDivElement>();
   const figures: [string, string, string][] = [
     ["Arrivals", String(ops.arrivals), "Landings watched this hour"],
     ["Departures", String(ops.departures), "Takeoffs watched this hour"],
@@ -885,7 +940,7 @@ function PulseNow({ ops }: { ops: OpsView }) {
     ["Taxi in", ops.taxiIn ?? "—", "Median, landing to gate"],
   ];
   return (
-    <div data-pulse className={`flex min-h-0 flex-col gap-2.5 overflow-y-auto rounded-xl bg-surface p-3 ${RING}`}>
+    <div ref={panelRef} data-pulse data-more-below={moreBelow || undefined} className={`flex min-h-0 flex-col gap-2.5 overflow-y-auto rounded-xl bg-surface p-3 ${FADE_BELOW} ${RING}`}>
       <p className="flex justify-between text-[11px] text-muted">
         <span>Runways in use</span>
         <span>
@@ -919,7 +974,8 @@ function PulseNow({ ops }: { ops: OpsView }) {
 
 /** The observed board: what each flight was seen to do and when, the latest news first. */
 function Board({ ops, filtered, readout }: { ops: OpsView; filtered: boolean; readout: TrafficReadout }) {
-  const empty = READOUT_NOTE[readout] ?? (filtered ? "No flight on the board matches the filters." : null);
+  const [listRef, moreBelow] = useMoreBelow<HTMLOListElement>();
+  const empty = readoutNote(readout) ?? (filtered ? "No flight on the board matches the filters." : null);
   if (empty && ops.board.length === 0) {
     return (
       <p data-board className={`rounded-xl bg-surface px-3 py-2.5 text-[13px] text-ink-2 ${RING}`}>
@@ -928,7 +984,8 @@ function Board({ ops, filtered, readout }: { ops: OpsView; filtered: boolean; re
     );
   }
   return (
-    <ol data-board aria-label="Observed board" className="flex min-h-0 flex-col gap-1.5 overflow-y-auto">
+    // It runs to the flight card's edge, its last row cut there on a phone: the fade says the rest is a scroll away.
+    <ol ref={listRef} data-board data-more-below={moreBelow || undefined} aria-label="Observed board" className={`flex min-h-0 flex-col gap-1.5 overflow-y-auto ${FADE_BELOW}`}>
       {ops.board.map((f) => (
         <li key={f.id} className={`flex flex-col gap-0.5 rounded-lg bg-surface px-3 py-2 ${RING}`}>
           <span className="text-sm font-semibold text-ink">{f.callsign}</span>
@@ -944,9 +1001,12 @@ function Board({ ops, filtered, readout }: { ops: OpsView; filtered: boolean; re
   );
 }
 
+/** The state colours' key. Under 24rem its one line is wider than the screen, so it wraps into two, centred, across the width. */
 export function Legend() {
   return (
-    <ul className={`absolute bottom-[76px] left-1/2 flex max-xl:short:hidden -translate-x-1/2 gap-3 whitespace-nowrap rounded-xl bg-surface px-3.5 py-2.5 text-xs text-ink-2 xl:bottom-8 xl:left-8 xl:translate-x-0 xl:gap-4 xl:px-4 xl:py-3 xl:text-[13px] ${RING}`}>
+    <ul
+      className={`absolute bottom-[76px] left-1/2 flex max-xl:short:hidden -translate-x-1/2 gap-3 whitespace-nowrap rounded-xl bg-surface px-3.5 py-2.5 text-xs text-ink-2 max-[24rem]:inset-x-4 max-[24rem]:translate-x-0 max-[24rem]:flex-wrap max-[24rem]:justify-center max-[24rem]:gap-x-3 max-[24rem]:gap-y-1 max-[24rem]:py-2 xl:bottom-8 xl:left-8 xl:translate-x-0 xl:gap-4 xl:px-4 xl:py-3 xl:text-[13px] ${RING}`}
+    >
       {(Object.keys(STATE_LABEL) as FlightState[]).map((state) => (
         <li key={state} className="flex items-center gap-1.5">
           <span aria-hidden className={`h-[7px] w-[18px] rounded ${STATE_SWATCH[state]}`} />
@@ -1085,21 +1145,27 @@ export function TimeBar({
     >
       {/* On the map the dot is the map's region reads; in the diorama, the airport's feed. */}
       <LiveButton live={live} onLive={onLive} className={chip} channel={liveOnly ? "map" : "airport"} />
-      {!liveOnly && RATES.map((rate) => {
-        const on = !live && replay?.rate === rate;
-        return (
-          <button
-            key={rate}
-            type="button"
-            aria-pressed={on}
-            title={`Replay at ${rate} times speed`}
-            onClick={() => onRate?.(rate)}
-            className={`${chip} shrink-0 ${on ? "bg-chip font-semibold text-chip-ink" : "font-medium text-ink-2"}`}
-          >
-            {rate}x
-          </button>
-        );
-      })}
+      {/* With nothing to replay yet the speeds are off for the slider's reason, said on a wrapper as well: a disabled button shows no tooltip of its own in every browser. */}
+      {!liveOnly && (
+        <span title={idle ? IDLE : undefined} className="flex shrink-0 gap-1">
+          {RATES.map((rate) => {
+            const on = !live && replay?.rate === rate;
+            return (
+              <button
+                key={rate}
+                type="button"
+                aria-pressed={on}
+                disabled={idle}
+                title={idle ? IDLE : `Replay at ${rate} times speed`}
+                onClick={() => onRate?.(rate)}
+                className={`${chip} shrink-0 disabled:cursor-not-allowed disabled:opacity-50 ${on ? "bg-chip font-semibold text-chip-ink" : "font-medium text-ink-2"}`}
+              >
+                {rate}x
+              </button>
+            );
+          })}
+        </span>
+      )}
       {/* A phone narrower than 23rem has no room for a track (the bar's other controls take it all at 44 px), so it keeps the rate chips and LIVE, which replay and return; from 23rem the track has 60 px or more while the feed is current. The title sits on a wrapper as well: a disabled input shows no tooltip of its own. The track is short at 1280, where the bar, centred, has the legend on its left: "LIVE · 27 s" and the night theme's wider type leave the two 9 px apart at least. From 90rem it is 200 px, which with "LIVE · 27 s" still clears the legend by 16 px (the breakpoint is in rem so it sorts after xl's and wins). */}
       <span title={idle ? IDLE : `Since ${replay!.since}`} className={`mx-1 min-w-0 flex-1 max-[23rem]:hidden sm:mx-2 xl:w-[100px] xl:flex-none min-[90rem]:w-[200px] ${liveOnly ? "hidden" : "flex"}`}>
         <input
@@ -1142,13 +1208,23 @@ const THEME_OPTIONS: { key: ThemeKey; label: string; short?: string }[] = [
 ];
 
 /**
- * The map style folded into one button, in the view row on phones and tablets, where a row of three
+ * The map style folded into one button, in the view column on phones and tablets, where a row of three
  * named buttons cost the model room. It names the style it is on and opens a menu of the three; on the
- * world map, at the foot, the menu opens upward.
+ * world map, at the foot, the menu opens upward. In a diorama it holds the camera too (`camera`), above the
+ * styles: the platform's picker beside the tabs left them too little room at 320 px.
  */
-export function MapStyleMenu({ theme, onChange, up = false }: { theme: ThemeKey; onChange: (theme: ThemeKey) => void; up?: boolean }) {
+export function MapStyleMenu({ theme, onChange, up = false, camera }: { theme: ThemeKey; onChange: (theme: ThemeKey) => void; up?: boolean; camera?: CameraProps }) {
   const { open, setOpen, buttonRef, rootProps } = usePopover();
   const current = THEME_OPTIONS.find((o) => o.key === theme) ?? THEME_OPTIONS[0];
+  const view = camera ? CAMERA_OPTIONS.find((o) => o.key === camera.camera) : undefined;
+  const name = view ? `Camera and map style: ${view.label}, ${current.label}` : `Map style: ${current.label}`;
+  const choose = (pick: () => void) => {
+    pick();
+    setOpen(false);
+    buttonRef.current?.focus();
+  };
+  const option = (on: boolean) => `flex min-h-11 items-center justify-between gap-2 rounded-xl px-3.5 text-left text-sm font-semibold ${on ? "bg-accent text-on-accent" : "text-ink-2 hover:bg-well"}`;
+  const heading = "px-3.5 pb-0.5 pt-1.5 text-[11px] font-medium text-muted";
   return (
     <div {...rootProps} className="relative xl:hidden">
       <button
@@ -1156,8 +1232,8 @@ export function MapStyleMenu({ theme, onChange, up = false }: { theme: ThemeKey;
         type="button"
         aria-expanded={open}
         aria-controls="atc-map-style"
-        aria-label={`Map style: ${current.label}`}
-        title="Map style"
+        aria-label={name}
+        title={camera ? "Camera and map style" : "Map style"}
         onClick={() => setOpen(!open)}
         className={`flex size-[52px] items-center justify-center rounded-full bg-surface text-ink-2 ${RAISED}`}
       >
@@ -1166,23 +1242,41 @@ export function MapStyleMenu({ theme, onChange, up = false }: { theme: ThemeKey;
         </svg>
       </button>
       {open && (
-        <div id="atc-map-style" role="group" aria-label="Map style" className={`absolute left-0 z-50 flex w-36 flex-col gap-0.5 rounded-2xl bg-surface p-1 ${up ? "bottom-full mb-2" : "top-full mt-2"} ${RAISED}`}>
-          {THEME_OPTIONS.map(({ key, label }) => (
-            <button
-              key={key}
-              type="button"
-              aria-pressed={key === theme}
-              onClick={() => {
-                onChange(key);
-                setOpen(false);
-                buttonRef.current?.focus();
-              }}
-              className={`flex min-h-11 items-center justify-between rounded-xl px-3.5 text-left text-sm font-semibold ${key === theme ? "bg-accent text-on-accent" : "text-ink-2 hover:bg-well"}`}
-            >
-              {label}
-              {key === theme && CHECK}
-            </button>
-          ))}
+        // In the column at the right edge the menu hangs left from the button; on the map's foot row, right from it.
+        <div id="atc-map-style" className={`absolute z-50 flex flex-col gap-1 rounded-2xl bg-surface p-1 ${camera ? "right-0 w-56" : "left-0 w-36"} ${up ? "bottom-full mb-2" : "top-full mt-2"} ${RAISED}`}>
+          {camera && (
+            <div role="group" aria-label="Camera" className="flex flex-col gap-0.5">
+              <p aria-hidden className={heading}>
+                Camera
+              </p>
+              {CAMERA_OPTIONS.map(({ key, label, unavailable }) => {
+                const off = !camera.available.includes(key);
+                return (
+                  <button key={key} type="button" aria-pressed={key === camera.camera} disabled={off} onClick={() => choose(() => camera.onChange(key))} className={`${option(key === camera.camera)} disabled:cursor-not-allowed disabled:hover:bg-transparent`}>
+                    {/* A phone has no tooltip for why a view is off, so the reason is in the row. */}
+                    <span className="flex flex-col py-1.5">
+                      <span className={off ? "text-muted" : undefined}>{label}</span>
+                      {off && <span className="text-xs font-normal leading-4 text-muted">{unavailable}</span>}
+                    </span>
+                    {key === camera.camera && CHECK}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+          <div role="group" aria-label="Map style" className={`flex flex-col gap-0.5 ${camera ? "border-t border-hairline pt-1" : ""}`}>
+            {camera && (
+              <p aria-hidden className={heading}>
+                Map style
+              </p>
+            )}
+            {THEME_OPTIONS.map(({ key, label }) => (
+              <button key={key} type="button" aria-pressed={key === theme} onClick={() => choose(() => onChange(key))} className={option(key === theme)}>
+                {label}
+                {key === theme && CHECK}
+              </button>
+            ))}
+          </div>
         </div>
       )}
     </div>
