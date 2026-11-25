@@ -47,6 +47,15 @@ const recorder = (permission, opted) => `
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+/**
+ * Chrome's own note that the software GPU stalled ("[.WebGL-0x…]GL Driver Message (OpenGL, Performance,
+ * …): GPU stall due to ReadPixels"): it comes from the driver on a canvas screenshot, not from the page.
+ */
+const GL_DRIVER_NOTE = /^\[\.WebGL-0x[0-9a-f]+\]GL Driver Message \(OpenGL, Performance, /;
+
+/** A console message that counts against a clean console: an error or a warning, but for the driver's performance notes. */
+const consoleProblem = (m) => (m.type() === "error" || m.type() === "warning") && !GL_DRIVER_NOTE.test(m.text());
+
 async function waitFor(url, ms = 60_000) {
   const end = Date.now() + ms;
   while (Date.now() < end) {
@@ -123,7 +132,7 @@ try {
     const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
     const problems = [];
     page.on("console", (m) => {
-      if (m.type() === "error" || m.type() === "warning") problems.push(m.text());
+      if (consoleProblem(m)) problems.push(m.text());
     });
     page.on("pageerror", (e) => problems.push(String(e)));
     await page.goto(`${BASE}/?fixture=1${theme === "light" ? "" : `&theme=${theme}`}`);
@@ -140,7 +149,7 @@ try {
     const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
     const problems = [];
     page.on("console", (m) => {
-      if (m.type() === "error" || m.type() === "warning") problems.push(m.text());
+      if (consoleProblem(m)) problems.push(m.text());
     });
     page.on("pageerror", (e) => problems.push(String(e)));
     await page.goto(`${BASE}/?fixture=1`);
@@ -336,7 +345,7 @@ try {
     const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
     const problems = [];
     page.on("console", (m) => {
-      if (m.type() === "error" || m.type() === "warning") problems.push(m.text());
+      if (consoleProblem(m)) problems.push(m.text());
     });
     page.on("pageerror", (e) => problems.push(String(e)));
     await page.goto(`${BASE}/?fixture=1`);
@@ -488,7 +497,7 @@ try {
     const page = await context.newPage();
     const problems = [];
     page.on("console", (m) => {
-      if (m.type() === "error" || m.type() === "warning") problems.push(m.text());
+      if (consoleProblem(m)) problems.push(m.text());
     });
     await page.goto(`${BASE}/?fixture=1&airline=DAL&state=taxiing&theme=dark`);
     const card = page.locator("section[aria-label^='Selected flight']");
@@ -684,7 +693,7 @@ try {
     const page = await browser.newPage({ viewport: { width, height }, isMobile: width < 500, hasTouch: width < 500 });
     const problems = [];
     page.on("console", (m) => {
-      if (m.type() === "error" || m.type() === "warning") problems.push(m.text());
+      if (consoleProblem(m)) problems.push(m.text());
     });
     await page.goto(`${BASE}/?fixture=1${theme === "dark" ? "&theme=dark" : ""}#map=6.5/33.5/-84.4`);
     await page.locator("main[data-on-map]").waitFor({ timeout: 30_000 }).catch(() => {});
@@ -866,7 +875,8 @@ try {
     }
     {
       const page = await open("&alerts=all", "granted", true);
-      await page.waitForFunction(() => window.__notes.length >= 5, null, { timeout: 20_000 }).catch(() => {});
+      // Sixty-odd steps a quarter second apart, which a software GPU can stretch past twenty seconds.
+      await page.waitForFunction(() => window.__notes.length >= 5, null, { timeout: 40_000 }).catch(() => {});
       await sleep(2000);
       check("alerts: all five kinds, in turn, once each", (await notes(page)).length === 5, JSON.stringify(await notes(page)));
       await page.close();
@@ -902,7 +912,7 @@ try {
     const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
     const problems = [];
     page.on("console", (m) => {
-      if (m.type() === "error" || m.type() === "warning") problems.push(m.text());
+      if (consoleProblem(m)) problems.push(m.text());
     });
     page.on("pageerror", (e) => problems.push(String(e)));
     // Alerts on, to see the live path (the poll, not a script) tell of the followed flight.
