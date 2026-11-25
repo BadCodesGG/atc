@@ -201,7 +201,10 @@ try {
     };
     const settled = await settle();
     await page.getByRole("button", { name: "Zoom in" }).click();
-    await sleep(1500);
+    // Until a frame drawn after the zoom has moved the label: a software renderer can take seconds to draw one.
+    await page
+      .waitForFunction((before) => (document.querySelector(".scene-label")?.style.transform ?? "") !== before, settled, { timeout: 20_000 })
+      .catch(() => {});
     check("Zoom in works while following, and Follow holds", settled !== null && (await labelAt()) !== settled && (await pressed()));
     await page.mouse.move(500, 500);
     await page.mouse.down();
