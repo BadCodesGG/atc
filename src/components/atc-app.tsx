@@ -2060,9 +2060,9 @@ function Viewer({ airport, theme, onTheme, onAirport, filters, onFilters, focusP
   // journey: the followed flight's panel, in its card in a diorama and in a card of its own on the map.
   const journeyPanel = journey ? journeyView(journey) : null;
   const readout = useTrafficReadout(heard, chrome.counts?.tracked ?? 0);
-  // The DOM follows what is seen, so the keyboard goes where the eye does: on a phone the view buttons are above the tabs and the flight card below
-  // them, on a wide screen the card is above the tabs and the column is read before the buttons at its foot. Keyed, so a window resized across
-  // the breakpoint moves the controls rather than rebuilding them.
+  // The DOM follows what is seen, so the keyboard goes where the eye does. On a phone the view buttons' column starts level with the tabs and runs
+  // down the right past them, so it is read before the tabs and the flight card below them. On a wide screen the card is above the tabs, and the
+  // column is read before the buttons at its foot. Keyed, so a window resized across the breakpoint moves the controls rather than rebuilding them.
   const wide = useMedia(WIDE);
   // Stacked on the server too: most first loads are phones, and a wide screen draws the same either way (the
   // stacked-only controls are xl:hidden), where a phone would otherwise paint the short landscape's controls over its own.
@@ -2110,9 +2110,15 @@ function Viewer({ airport, theme, onTheme, onAirport, filters, onFilters, focusP
       onTurn={turnBy}
       onZoom={zoomBy}
       onReset={resetView}
-      // Stacked, the map style leads the row (opening upward at the map's foot) and the camera picker has the tabs' row.
+      // Stacked, the map style leads the column (opening upward at the map's foot), with the camera in its menu.
       // cameras: the diorama's only, so not offered on the map
-      before={stacked ? <MapStyleMenu theme={theme} onChange={onTheme} up={onMap} /> : !onMap && <CameraMenu camera={chrome.camera} available={chrome.cameras} onChange={chooseCamera} />}
+      before={
+        stacked ? (
+          <MapStyleMenu theme={theme} onChange={onTheme} up={onMap} camera={onMap ? undefined : { camera: chrome.camera, available: chrome.cameras, onChange: chooseCamera }} />
+        ) : (
+          !onMap && <CameraMenu camera={chrome.camera} available={chrome.cameras} onChange={chooseCamera} />
+        )
+      }
     >
       {!onMap && <CameraSwitch camera={chrome.camera} available={chrome.cameras} onChange={chooseCamera} />}
     </ViewControls>
@@ -2196,7 +2202,7 @@ function Viewer({ airport, theme, onTheme, onAirport, filters, onFilters, focusP
       {!onMap && <WeatherReadout metar={metar} />}
       {onMap && <RadarToggle radar={radar} />}
       {stacked
-        ? [...mapCards, viewControls, !onMap && <CameraMenu key="camera" camera={chrome.camera} available={chrome.cameras} onChange={chooseCamera} className="absolute right-4 top-[248px]" />, dioramaColumn]
+        ? [...mapCards, viewControls, dioramaColumn]
         : [phoneTheme, dioramaColumn, ...mapCards, viewControls]}
       {!onMap && <Legend />}
       <TimeBar clock={chrome.clock} zone={chrome.zone} replay={chrome.replay} onLive={replayLive} onRate={replayRate} onSeek={replaySeek} liveOnly={onMap} share={<ShareControl getLink={shareThisView} replaying={!onMap && !!chrome.replay && !chrome.replay.live} />} />

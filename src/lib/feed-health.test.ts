@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { FIRST_ANSWER_MAX_S, feedStatus, liveDot, recordFeedAnswer, recordFeedFailure, startFeed, subscribeFeed, summariseReads, trafficReadout } from "./feed-health";
+import { FIRST_ANSWER_MAX_S, feedStatus, liveDot, readoutNote, recordFeedAnswer, recordFeedFailure, startFeed, subscribeFeed, summariseReads, trafficReadout } from "./feed-health";
 
 describe("the LIVE dot", () => {
   const live = (ageS: number | null, failed = false) => liveDot({ ageS, failed }, false);
@@ -191,5 +191,30 @@ describe("what the counts and lists can say", () => {
   it("is offline when the feed went dark after an answer and the last aircraft have gone", () => {
     expect(readout(true, 0, null, true)).toBe("offline");
     expect(readout(true, 0, 120)).toBe("offline");
+  });
+});
+
+describe("what the counts and lists say in place of figures", () => {
+  it("says the traffic is being read while the first answer is on its way", () => {
+    expect(readoutNote("loading")).toBe("Reading traffic…");
+  });
+
+  it("says the flight data cannot be reached, and that the page keeps trying by itself, while offline", () => {
+    const note = readoutNote("offline")!;
+    expect(note).toMatch(/can't be reached right now/);
+    expect(note).toMatch(/keeps trying on its own/);
+  });
+
+  it("says nothing once traffic is read, so the lists' own empty lines show", () => {
+    expect(readoutNote("ready")).toBeUndefined();
+    expect(readoutNote("ready", { short: true })).toBeUndefined();
+  });
+
+  it("has a short form for a phone's counts row, which says the same in fewer words", () => {
+    expect(readoutNote("loading", { short: true })).toBe("Reading traffic…");
+    const note = readoutNote("offline", { short: true })!;
+    expect(note).toMatch(/Can't reach flight data/);
+    expect(note).toMatch(/trying/);
+    expect(note.length).toBeLessThan(readoutNote("offline")!.length);
   });
 });
