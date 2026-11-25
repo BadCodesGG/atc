@@ -985,6 +985,8 @@ try {
     // A phone has no camera picker of its own (it is in the map style button's menu); a short window has no legend.
     check(`${size}: every control is on screen`, names.length === 11 && (short ? !b.legend : !b.camera), `missing: ${Object.keys(b).filter((k) => !b[k]).join(", ") || "none"}`);
     check(`${size}: nothing overlaps`, clashes.length === 0, clashes.join(", "));
+    // The counts and the wind share a row and the view buttons are a column beside the tabs, so the tabs (and the model under them) start one row higher than they did at 244 px.
+    if (width < 500) check(`${size}: the tabs start under the counts' row`, !!b.tabs && b.tabs.y <= 190, String(b.tabs?.y));
     if (short) {
       const row = await page.evaluate(() => {
         const edge = (sel, side) => document.querySelector(sel).getBoundingClientRect()[side];

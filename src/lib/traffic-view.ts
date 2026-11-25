@@ -32,8 +32,8 @@ export interface FlightCard {
   altitude: string;
   /** The tail number, "N301DV", when the feed carries one. Optional: the world map's card (globe/map-flight.ts) has none to give. */
   registration?: string | null;
-  /** In the air, the vertical rate: "↑ 1,830 fpm", "↓ 640 fpm", or "Level" under LEVEL_FPM; null on the ground or when the feed sends none. */
-  climb?: string | null;
+  /** In the air, the vertical rate as shown ("↑ 1,830 fpm", "↓ 640 fpm", or "Level" under LEVEL_FPM) and as read out ("Climbing 1,830 fpm"); null on the ground or when the feed sends none. */
+  climb?: { shown: string; said: string } | null;
   /** Where it flies from and to, when known (this airport is always one end). */
   route: FlightRoute | null;
   /** Leaving this airport or coming in: from the route, else from what it is doing; null when neither says. */
@@ -87,12 +87,12 @@ interface LastPlace {
  */
 const LEVEL_FPM = 250;
 
-/** The vertical rate as the card prints it, to the nearest 10 ft/min; null on the ground or with no rate sent. */
-function climbOf(a: TrackedAircraft, vehicle: boolean | undefined): string | null {
+/** The vertical rate as the card prints it and reads it out, to the nearest 10 ft/min; null on the ground or with no rate sent. */
+function climbOf(a: TrackedAircraft, vehicle: boolean | undefined): FlightCard["climb"] {
   if (a.onGround || vehicle || a.verticalRateFpm === null) return null;
-  if (Math.abs(a.verticalRateFpm) < LEVEL_FPM) return "Level";
-  const fpm = Math.round(Math.abs(a.verticalRateFpm) / 10) * 10;
-  return `${a.verticalRateFpm > 0 ? "↑" : "↓"} ${fpm.toLocaleString("en-US")} fpm`;
+  if (Math.abs(a.verticalRateFpm) < LEVEL_FPM) return { shown: "Level", said: "Level" };
+  const rate = `${(Math.round(Math.abs(a.verticalRateFpm) / 10) * 10).toLocaleString("en-US")} fpm`;
+  return a.verticalRateFpm > 0 ? { shown: `↑ ${rate}`, said: `Climbing ${rate}` } : { shown: `↓ ${rate}`, said: `Descending ${rate}` };
 }
 
 function card(a: TrackedAircraft, s: Situation, route: FlightRoute | null, here: string, last: LastPlace | undefined): FlightCard {

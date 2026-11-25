@@ -215,18 +215,16 @@ describe("TrafficView tail number and vertical rate", () => {
   it("gives the fixture's featured flight its tail number and its descent", () => {
     const { frame } = fixtureFrame();
     // DAL3104 is N301DV, reporting 640 ft/min down.
-    expect(frame.featured?.card).toMatchObject({ registration: "N301DV", climb: "↓ 640 fpm" });
+    expect(frame.featured?.card).toMatchObject({ registration: "N301DV", climb: { shown: "↓ 640 fpm", said: "Descending 640 fpm" } });
   });
 
   it("says a climb with an up arrow, to the nearest 10 ft/min with a thousands separator", () => {
-    expect(air(1834).climb).toBe("↑ 1,830 fpm");
-    expect(air(-905).climb).toBe("↓ 910 fpm");
+    expect(air(1834).climb).toEqual({ shown: "↑ 1,830 fpm", said: "Climbing 1,830 fpm" });
+    expect(air(-905).climb).toEqual({ shown: "↓ 910 fpm", said: "Descending 910 fpm" });
   });
 
   it("calls an aircraft in the air under 250 ft/min either way level", () => {
-    expect(air(240).climb).toBe("Level");
-    expect(air(-120).climb).toBe("Level");
-    expect(air(0).climb).toBe("Level");
+    for (const fpm of [240, -120, 0]) expect(air(fpm).climb).toEqual({ shown: "Level", said: "Level" });
   });
 
   it("gives no vertical rate on the ground, or when the feed sends none", () => {

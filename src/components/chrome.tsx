@@ -143,24 +143,25 @@ export function Counts({ counts, total = null, note, readout = "ready" }: { coun
   // Until the feed has answered, or with nothing to read it from, the figures are a dash: a zero would say the airfield is empty.
   const counted = readout === "ready" ? counts : null;
   const filtered = counted !== null && total !== null && counted.tracked !== total;
-  const items: [number | undefined, string, string | undefined, string?][] = [
-    [counted?.tracked, "tracked", filtered ? `of ${total}` : undefined],
-    [counted?.onGround, "on the ground", undefined],
-    [counted?.moving, "moving", undefined, "max-xl:hidden!"],
+  const reason = readoutNote(readout);
+  // Below the wide layout a tile can be left out: the moving count always (the Movements tab gives it), the others while the reason takes their place.
+  const narrowHidden = "max-xl:hidden!";
+  const items: { n: number | undefined; label: string; of?: string; narrow: string }[] = [
+    { n: counted?.tracked, label: "tracked", of: filtered ? `of ${total}` : undefined, narrow: reason ? narrowHidden : "" },
+    { n: counted?.onGround, label: "on the ground", narrow: reason ? narrowHidden : "" },
+    { n: counted?.moving, label: "moving", narrow: narrowHidden },
   ];
-  const gap = readoutNote(readout);
   // Without figures, a wide screen keeps the dashes, with the reason as their tooltip and read out (the movements list beside them says it too).
   // Below it the list is folded and a phone has no tooltip, so the reason, in its short form, takes the dashes' place, left of the wind as `note` is.
-  const hide = gap ? "max-xl:hidden!" : "";
   return (
     // On a wide screen the row is right-anchored and grows left toward the filter button, so it is held to the room between them (COUNTS_ROOM)
     // and each count is a two-line tile (the figure over its label), which keeps the widest readout narrower than that room at 1280 in every theme.
     // A phone narrower than 24rem has the same tiles: in one line each, the two and the wind beside them are wider than the screen.
-    <div aria-live="polite" aria-busy={readout === "loading"} title={gap} className={`counts absolute left-4 top-[132px] flex gap-2 xl:left-auto xl:right-8 xl:top-7 xl:flex-wrap xl:justify-end ${gap ? "max-xl:right-[9rem]" : ""} ${COUNTS_ROOM}`}>
-      {gap && <span className="sr-only max-xl:hidden">{gap}</span>}
-      {gap && <div className={`w-fit rounded-xl bg-surface px-3 py-2 text-xs leading-4 text-ink-2 xl:hidden ${RING}`}>{readoutNote(readout, { short: true })}</div>}
-      {items.map(([n, label, of, only = hide]) => (
-        <div key={label} className={`rounded-xl bg-surface px-3 py-2 text-[13px] text-ink-2 max-[24rem]:flex max-[24rem]:flex-col max-[24rem]:py-[5px] max-[24rem]:text-[11px] max-[24rem]:leading-3.5 xl:flex xl:flex-col xl:px-3.5 xl:py-[5px] xl:text-[11px] xl:leading-3.5 ${only} ${RING}`}>
+    <div aria-live="polite" aria-busy={readout === "loading"} title={reason} className={`counts absolute left-4 top-[132px] flex gap-2 xl:left-auto xl:right-8 xl:top-7 xl:flex-wrap xl:justify-end ${reason ? "max-xl:right-[9rem]" : ""} ${COUNTS_ROOM}`}>
+      {reason && <span className="sr-only max-xl:hidden">{reason}</span>}
+      {reason && <div className={`w-fit rounded-xl bg-surface px-3 py-2 text-xs leading-4 text-ink-2 xl:hidden ${RING}`}>{readoutNote(readout, { short: true })}</div>}
+      {items.map(({ n, label, of, narrow }) => (
+        <div key={label} className={`rounded-xl bg-surface px-3 py-2 text-[13px] text-ink-2 max-[24rem]:flex max-[24rem]:flex-col max-[24rem]:py-[5px] max-[24rem]:text-[11px] max-[24rem]:leading-3.5 xl:flex xl:flex-col xl:px-3.5 xl:py-[5px] xl:text-[11px] xl:leading-3.5 ${narrow} ${RING}`}>
           <span className="max-[24rem]:text-[15px] max-[24rem]:leading-5 max-[24rem]:text-ink xl:text-[15px] xl:leading-5 xl:text-ink">
             <strong className="font-bold text-ink tabular-nums">{n ?? "—"}</strong> {of && <span className="tabular-nums">{of} </span>}
           </span>
@@ -253,8 +254,8 @@ export function FlightCard({ card, procedure = null, here, status, following, on
     ["Altitude", card.altitude],
   ];
   // The tail number ends the operator line, where a tracker's reader looks for who and what it is.
-  const operator = [card.operator, card.registration].filter(Boolean).join(" · ");
   const tail = card.registration ? (card.operator ? `· ${card.registration}` : card.registration) : "";
+  const operator = [card.operator, tail].filter(Boolean).join(" ");
   // One name for the toggle in both states, so a screen reader hears "Follow this flight, pressed";
   // the tick and the selected colours (a picked movements row's) show the state.
   const toggle = following ? "bg-selected text-ink shadow-[0_0_0_1px_var(--color-selected-ring)]" : "bg-accent text-on-accent";
@@ -338,8 +339,8 @@ export function FlightCard({ card, procedure = null, here, status, following, on
                 {label === "Altitude" && card.climb && (
                   <dd data-climb className="whitespace-nowrap text-xs text-muted tabular-nums">
                     {/* The arrows are read out as words. */}
-                    <span aria-hidden>{card.climb}</span>
-                    <span className="sr-only">{card.climb.replace("↑", "Climbing").replace("↓", "Descending")}</span>
+                    <span aria-hidden>{card.climb.shown}</span>
+                    <span className="sr-only">{card.climb.said}</span>
                   </dd>
                 )}
               </div>
