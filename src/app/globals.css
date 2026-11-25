@@ -192,9 +192,12 @@
    map style take the row under the search, so the model has the left of the window from there down to the view controls. Unlayered, so these
    win over the utilities they replace; the map's own layout keeps the stacked one. chrome.tsx COLUMN_BESIDE tells the scene where its edge is. */
 @media (48rem <= width < 80rem) and (max-height: 40rem) {
-  /* Over the title row, which satellite gives a panel of its own (z-index 40). */
+  /* Over the title row, which satellite gives a panel of its own (z-index 40). The wind is not on this row here (it is under the search),
+     so the counts drop the right edge the stacked layout holds them to, left of the wind (chrome.tsx Counts): as wide as their text, they
+     end well before the airport picker. */
   main:not([data-on-map]) .counts {
     left: 260px;
+    right: auto;
     top: 16px;
     z-index: 45;
   }
