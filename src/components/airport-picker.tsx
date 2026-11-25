@@ -89,7 +89,7 @@ function AirportSearch({ current, anchor, onClose, onPick }: { current: Airport;
   const listId = `${id}-list`;
   const optionId = (code: string) => `${id}-option-${code}`;
   const [query, setQuery] = useState("");
-  const groups = useMemo(() => groupAirports(matchAirports(AIRPORTS, query)), [query]);
+  const groups = useMemo(() => groupAirports(matchAirports(AIRPORTS, query), query), [query]);
   const flat = useMemo(() => groups.flatMap((group) => group.airports), [groups]);
   // Opens on the airport being shown, so a reader who wants a neighbour in the list starts there.
   const [active, setActive] = useState(() => Math.max(0, flat.findIndex((a) => a.code === current.code)));

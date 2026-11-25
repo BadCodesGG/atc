@@ -112,8 +112,27 @@ export function matchAirports(airports: readonly Airport[], query: string): Airp
   });
 }
 
-/** Airports under their region, regions in alphabetical order of their full names, airports by city then code. */
-export function groupAirports(airports: readonly Airport[]): AirportGroup[] {
+/**
+ * How well an airport's own codes (IATA, ICAO and any former pair, not the state's) answer a query: 0 when
+ * a word of it is a whole code, 1 when one starts a code, 2 otherwise. A query matched only by name, city
+ * or state, or no query, ranks 2.
+ */
+function codeRank(airport: Airport, terms: readonly string[]): number {
+  const codes = [airport.code, airport.icao, ...(airport.formerly ? [airport.formerly.code, airport.formerly.icao] : [])].map(fold);
+  if (terms.some((term) => codes.includes(term))) return 0;
+  if (terms.some((term) => codes.some((code) => code.startsWith(term)))) return 1;
+  return 2;
+}
+
+/**
+ * Airports under their region, regions in alphabetical order of their full names, airports by city then code.
+ * Given the query the airports matched, an airport whose code is the query comes first, then those whose code
+ * starts with it, so the first row (the one Enter picks) is "pit" for "pit" and not Pittsburgh-Butler: within a
+ * region by that rank before the city, and regions by their best rank before the name.
+ */
+export function groupAirports(airports: readonly Airport[], query = ""): AirportGroup[] {
+  const terms = fold(query).split(" ").filter(Boolean);
+  const rank = new Map(airports.map((a) => [a, codeRank(a, terms)]));
   const groups = new Map<string, AirportGroup>();
   for (const airport of airports) {
     const key = `${airport.country}-${airport.state}`;
@@ -125,6 +144,7 @@ export function groupAirports(airports: readonly Airport[]): AirportGroup[] {
     group.airports.push(airport);
   }
   const byText = (a: string, b: string) => a.localeCompare(b, "en");
-  for (const group of groups.values()) group.airports.sort((a, b) => byText(a.city, b.city) || byText(a.code, b.code));
-  return [...groups.values()].sort((a, b) => byText(a.name, b.name));
+  const best = (group: AirportGroup) => Math.min(...group.airports.map((a) => rank.get(a)!));
+  for (const group of groups.values()) group.airports.sort((a, b) => rank.get(a)! - rank.get(b)! || byText(a.city, b.city) || byText(a.code, b.code));
+  return [...groups.values()].sort((a, b) => best(a) - best(b) || byText(a.name, b.name));
 }

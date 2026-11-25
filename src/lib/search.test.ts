@@ -117,6 +117,22 @@ describe("airports", () => {
     expect(airportsOf("sea")[0]).toBe("sea");
   });
 
+  it("ranks an exact code above another airport's name or city that starts with it", () => {
+    expect(airportsOf("pit")[0]).toBe("pit");
+    expect(airportsOf("pit")).toContain("btp");
+    expect(airportsOf("kpit")[0]).toBe("pit");
+    expect(airportsOf("btp")[0]).toBe("btp");
+  });
+
+  it("puts every airport first for its own IATA and ICAO code", () => {
+    for (const a of AIRPORTS) {
+      // The airport on screen is left out, so look for each from another one.
+      const first = (q: string) => search(q, { here: a.code === "atl" ? "jfk" : "atl", places: [], flights: [] }).groups.find((g) => g.kind === "airports")?.hits[0];
+      expect(first(a.code), a.code).toMatchObject({ code: a.code });
+      expect(first(a.icao), a.icao).toMatchObject({ code: a.code });
+    }
+  });
+
   it("leaves out the airport on screen", () => {
     expect(airportsOf("atlanta")).toEqual([]);
     expect(airportsOf("georgia")).toEqual([]);

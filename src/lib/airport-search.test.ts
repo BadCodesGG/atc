@@ -106,3 +106,43 @@ describe("groupAirports", () => {
     expect(groupAirports([])).toEqual([]);
   });
 });
+
+describe("the picker's rows for a query", () => {
+  // What the picker lists, in order; its first row is the one Enter picks.
+  const rows = (query: string) => groupAirports(matchAirports(AIRPORTS, query), query).flatMap((g) => g.airports.map((a) => a.code));
+
+  it("puts the airport whose code is the query first, above a name or city that starts with it", () => {
+    expect(rows("pit")[0]).toBe("pit");
+    expect(rows("pit")).toContain("btp");
+    expect(rows("PIT")[0]).toBe("pit");
+    expect(rows("kpit")[0]).toBe("pit");
+    expect(rows("btp")[0]).toBe("btp");
+  });
+
+  it("puts every airport first for its own IATA and ICAO code, and a renamed one for its old codes", () => {
+    for (const a of AIRPORTS) {
+      expect(rows(a.code)[0], a.code).toBe(a.code);
+      expect(rows(a.icao)[0], a.icao).toBe(a.code);
+      if (a.formerly) {
+        expect(rows(a.formerly.code)[0], a.formerly.code).toBe(a.code);
+        expect(rows(a.formerly.icao)[0], a.formerly.icao).toBe(a.code);
+      }
+    }
+  });
+
+  it("puts a code that starts with the query above a name or city that does", () => {
+    // "pi" starts PIT's code and Pittsburgh-Butler's name: the code match comes first.
+    const list = rows("pi");
+    expect(list).toEqual(expect.arrayContaining(["pit", "btp"]));
+    expect(list.indexOf("pit")).toBeLessThan(list.indexOf("btp"));
+    // Across states too: CHS (South Carolina) leads Chicago (Illinois), SAN leads the rest of California and San Antonio.
+    expect(rows("ch")[0]).toBe("chs");
+    expect(rows("ch")).toEqual(expect.arrayContaining(["mdw", "ord"]));
+    expect(rows("sa")[0]).toBe("san");
+  });
+
+  it("keeps the state and city order when no code matches", () => {
+    expect(rows("pittsburgh")).toEqual(["btp", "pit"]);
+    expect(rows("")).toEqual(groupAirports(AIRPORTS).flatMap((g) => g.airports.map((a) => a.code)));
+  });
+});
