@@ -6,7 +6,7 @@ import { regionName } from "./airport-search";
 import { AIRPORTS, DEFAULT_AIRPORT } from "./airports";
 import routes from "./__fixtures__/routes_atl.json";
 import raw from "./__fixtures__/adsblol_atl.json";
-import { buildPlaces, flightDocs, nearestAirport, remoteSummary, search, type SearchData } from "./search";
+import { buildPlaces, flightDocs, nearestAirport, remoteOffer, remoteSummary, search, type SearchData } from "./search";
 import { Tracker } from "./tracker";
 import { parseTraffic } from "./traffic";
 import { fixtureTime, TrafficView } from "./traffic-view";
@@ -242,5 +242,28 @@ describe("nearestAirport and remoteSummary", () => {
   it("names what picking it selects: its broadcast callsign, else its hex", () => {
     expect(remoteSummary({ ...base, latitude: 37, longitude: -100 }, "atl").selectBy).toBe("AAL100");
     expect(remoteSummary({ ...base, callsign: null, latitude: 37, longitude: -100 }, "atl").selectBy).toBe("A1B2C3");
+  });
+});
+
+describe("remoteOffer", () => {
+  const base = { hex: "a1b2c3", callsign: "AAL100", registration: null, typeCode: "A321", altitudeFt: 4200, groundSpeedKt: 190, route: null };
+  const far = remoteSummary({ ...base, latitude: 37, longitude: -100 }, "atl");
+  const close = remoteSummary({ ...base, latitude: 33.4, longitude: -112.2 }, "atl");
+  const here = remoteSummary({ ...base, latitude: 33.4, longitude: -112.2 }, "phx");
+
+  it("offers to follow a far flight on the map only while the map can follow it", () => {
+    expect(remoteOffer(far, true)).toEqual({ label: "Follow on map", enabled: true });
+    expect(remoteOffer(far, false)).toEqual({ label: "Map unavailable", enabled: false });
+  });
+
+  it("offers the airport a flight is near, and the diorama on screen, whatever the map can do", () => {
+    expect(remoteOffer(close, false)).toEqual({ label: "Open PHX", enabled: true });
+    expect(remoteOffer(here, false)).toEqual({ label: "Show", enabled: true });
+  });
+
+  it("finds a flight with neither callsign nor hex on the map, having nothing to pick it by at an airport", () => {
+    const anonymous = remoteSummary({ ...base, hex: null, callsign: null, latitude: 33.4, longitude: -112.2 }, "atl");
+    expect(anonymous.opens).toBe("map");
+    expect(remoteOffer(anonymous, true)).toEqual({ label: "Follow on map", enabled: true });
   });
 });

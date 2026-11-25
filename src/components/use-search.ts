@@ -53,7 +53,7 @@ export interface SearchHost {
   onAirport: (code: Airport["code"], flight?: string) => void;
 }
 
-export function useSearch({ map, entriesRef, sceneRef, labelsRef, goalRef, viewRef, followRef, refreshRef, onFlight, leaveCamera, onAirport }: SearchHost): Omit<SearchProps, "onRemote"> {
+export function useSearch({ map, entriesRef, sceneRef, labelsRef, goalRef, viewRef, followRef, refreshRef, onFlight, leaveCamera, onAirport }: SearchHost): Omit<SearchProps, "onRemote" | "mapFollows"> {
   const places = useMemo(() => (map ? buildPlaces(map) : []), [map]);
   const [lit, setLit] = useState<{ place: PlaceDoc; goal: Goal } | null>(null);
   // The page's own action, which it makes anew each render; the arrival below reads the latest.

@@ -292,6 +292,7 @@ export interface RemoteSummary {
 export function remoteSummary(flight: FlightAnswer, here: Airport["code"]): RemoteSummary {
   const { airport, nm } = nearestAirport(flight.latitude, flight.longitude);
   const code = airport.code.toUpperCase();
+  const selectBy = flight.callsign ?? flight.hex?.toUpperCase() ?? null;
   return {
     callsign: flight.callsign,
     aircraft: [typeName(flight.typeCode), flight.registration].filter(Boolean).join(" · "),
@@ -299,7 +300,19 @@ export function remoteSummary(flight: FlightAnswer, here: Airport["code"]): Remo
     route: flight.route ? `${flight.route.origin.code} → ${flight.route.destination.code}` : "",
     nearest: airport.code,
     nearness: nm < 1 ? `over ${code}` : `${Math.round(nm).toLocaleString("en-US")} nm from ${code}`,
-    opens: nm > RADIUS_NM ? "map" : airport.code === here ? "here" : "airport",
-    selectBy: flight.callsign ?? flight.hex?.toUpperCase() ?? null,
+    // A flight with nothing to pick it by at an airport (no callsign, no hex) is found on the map, where it was seen.
+    opens: nm > RADIUS_NM || !selectBy ? "map" : airport.code === here ? "here" : "airport",
+    selectBy,
   };
+}
+
+/**
+ * What a flight elsewhere's row offers: the words for what choosing it does, and whether that can
+ * work. Following on the world map needs the map there and able to take the camera (`mapFollows`);
+ * opening an airport, or showing the flight in the diorama on screen, does not.
+ */
+export function remoteOffer(summary: RemoteSummary, mapFollows: boolean): { label: string; enabled: boolean } {
+  if (summary.opens === "airport") return { label: `Open ${summary.nearest.toUpperCase()}`, enabled: true };
+  if (summary.opens === "here") return { label: "Show", enabled: true };
+  return mapFollows ? { label: "Follow on map", enabled: true } : { label: "Map unavailable", enabled: false };
 }

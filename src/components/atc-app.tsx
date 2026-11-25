@@ -169,6 +169,8 @@ interface World {
   alerts: AlertsControl;
   /** The flight selected on the map, which outlives each airport's diorama like the map does; null with none. */
   mapFlight: MapFlight | null;
+  /** Whether the world map has been made (WebGL2, and its code loaded): a flight can be followed on it. */
+  globeReady: boolean;
   /** The map's flight card, which the selected aircraft is kept clear of. */
   mapCardRef: RefObject<HTMLDivElement | null>;
   /** The journey's card on the map. */
@@ -321,6 +323,7 @@ export function AtcApp({ initialTheme, initialAirport, initialFilters }: { initi
   const leadRef = useRef<Lead>({ by: "scene", armed: false, land: false });
   const [onMap, setOnMap] = useState(false);
   const [mapFlight, setMapFlight] = useState<MapFlight | null>(null);
+  const [globeReady, setGlobeReady] = useState(false);
   const mapCardRef = useRef<HTMLDivElement>(null);
   const journeyCardRef = useRef<HTMLDivElement>(null);
   /** The theme and airport for the map, which is made once, outside React's render. */
@@ -440,6 +443,7 @@ export function AtcApp({ initialTheme, initialAirport, initialFilters }: { initi
       const named = mapHashCamera(hash) !== null;
       globe = new GlobeMap(container, { theme: themeRef.current, airport: airportRef.current, fixture });
       globeRef.current = globe;
+      setGlobeReady(true);
       globe.setFilters(filtersRef.current);
       globe.setSelectionListener(setMapFlight);
       globe.setCardRect(() => mapCardRef.current?.firstElementChild?.getBoundingClientRect() ?? null);
@@ -466,6 +470,7 @@ export function AtcApp({ initialTheme, initialAirport, initialFilters }: { initi
     return () => {
       stopped = true;
       if (globeRef.current === globe) globeRef.current = null;
+      setGlobeReady(false);
       globe?.dispose();
     };
   }, [hasWebGL2]);
@@ -534,7 +539,7 @@ export function AtcApp({ initialTheme, initialAirport, initialFilters }: { initi
     setSwitched(true);
   };
 
-  const world: World = { globeRef, leadRef, mapRef, setLead, onMap, source, journeyRef, journey, journeyHexRef, startJourney, stopJourney, journeyToMap, journeyLanded, showMap: setOnMap, radar, alerts, mapFlight, mapCardRef, journeyCardRef };
+  const world: World = { globeRef, leadRef, mapRef, setLead, onMap, source, journeyRef, journey, journeyHexRef, startJourney, stopJourney, journeyToMap, journeyLanded, showMap: setOnMap, radar, alerts, mapFlight, globeReady, mapCardRef, journeyCardRef };
   return (
     <main data-theme={theme} data-on-map={onMap || undefined} className="relative h-dvh w-full overflow-clip bg-paper font-sans text-ink">
       {/* The world map, under the diorama; shown once the page knows which of the two leads. MapLibre's
@@ -562,7 +567,7 @@ interface ViewerProps {
 }
 
 function Viewer({ airport, theme, onTheme, onAirport, filters, onFilters, focusPicker, world, hasWebGL2 }: ViewerProps) {
-  const { globeRef, leadRef, mapRef, setLead, onMap, source, journeyRef, journey, journeyHexRef, radar, alerts, mapFlight, mapCardRef, journeyCardRef } = world;
+  const { globeRef, leadRef, mapRef, setLead, onMap, source, journeyRef, journey, journeyHexRef, radar, alerts, mapFlight, globeReady, mapCardRef, journeyCardRef } = world;
   const feedAlerts = alerts.feed;
   const viewAlerts = alerts.view;
   /** The layer holding the diorama and everything pinned to it, faded in over the map as the camera closes on the airport. */
@@ -770,10 +775,12 @@ function Viewer({ airport, theme, onTheme, onAirport, filters, onFilters, focusP
    * pick of another airport has it), flies to the flight and selects it once its traffic shows it; the
    * flight is then followed as the map card's Follow does (followMapFlight), from wherever it is.
    */
+  // The map can take the camera for it: made, and either leading already or with the diorama there to hand over from (toMap).
+  const mapFollows = globeReady && (onMap || status === "ready");
   const soughtRef = useRef<FlightIdentity | null>(null);
   const followOnMap = (flight: FlightAnswer, summary: RemoteSummary) => {
     const globe = globeRef.current;
-    if (!globe) return;
+    if (!globe || !mapFollows) return;
     world.stopJourney();
     if (leadRef.current.by === "scene") toMap();
     const sought: FlightIdentity = { hex: flight.hex, callsign: summary.selectBy };
@@ -1043,6 +1050,7 @@ function Viewer({ airport, theme, onTheme, onAirport, filters, onFilters, focusP
       else if (summary.opens === "here" && flight.hex && entriesRef.current.some((e) => e.aircraft.id === flight.hex)) onSearchFlight(flight.hex, true);
       else followOnMap(flight, summary);
     },
+    mapFollows,
   };
   // /search
 
