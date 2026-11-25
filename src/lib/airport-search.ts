@@ -88,11 +88,21 @@ function fold(text: string): string {
     .trim();
 }
 
+/** The words of a query, folded; none for a blank one. */
+function termsOf(query: string): string[] {
+  return fold(query).split(" ").filter(Boolean);
+}
+
+/** An airport's own codes, folded: IATA, ICAO and a renamed airport's old pair. */
+function ownCodes(airport: Airport): string[] {
+  return [airport.code, airport.icao, ...(airport.formerly ? [airport.formerly.code, airport.formerly.icao] : [])].map(fold);
+}
+
 /** What a query is matched against: codes by their start (a renamed airport's old ones too), words by the start of any word. */
 function fields(airport: Airport): { codes: string[]; words: string[][] } {
   const region = regionName(airport.country, airport.state);
   return {
-    codes: [airport.code, airport.icao, airport.state, ...(airport.formerly ? [airport.formerly.code, airport.formerly.icao] : [])].map(fold),
+    codes: [...ownCodes(airport), fold(airport.state)],
     words: [airport.city, region, airport.name].map((text) => fold(text).split(" ")),
   };
 }
@@ -104,7 +114,7 @@ function fields(airport: Airport): { codes: string[]; words: string[][] } {
  * "ohare" finds O'Hare). An empty query matches everything.
  */
 export function matchAirports(airports: readonly Airport[], query: string): Airport[] {
-  const terms = fold(query).split(" ").filter(Boolean);
+  const terms = termsOf(query);
   if (!terms.length) return [...airports];
   return airports.filter((airport) => {
     const { codes, words } = fields(airport);
@@ -118,7 +128,7 @@ export function matchAirports(airports: readonly Airport[], query: string): Airp
  * or state, or no query, ranks 2.
  */
 function codeRank(airport: Airport, terms: readonly string[]): number {
-  const codes = [airport.code, airport.icao, ...(airport.formerly ? [airport.formerly.code, airport.formerly.icao] : [])].map(fold);
+  const codes = ownCodes(airport);
   if (terms.some((term) => codes.includes(term))) return 0;
   if (terms.some((term) => codes.some((code) => code.startsWith(term)))) return 1;
   return 2;
@@ -131,8 +141,9 @@ function codeRank(airport: Airport, terms: readonly string[]): number {
  * region by that rank before the city, and regions by their best rank before the name.
  */
 export function groupAirports(airports: readonly Airport[], query = ""): AirportGroup[] {
-  const terms = fold(query).split(" ").filter(Boolean);
+  const terms = termsOf(query);
   const rank = new Map(airports.map((a) => [a, codeRank(a, terms)]));
+  const rankOf = (airport: Airport) => rank.get(airport)!;
   const groups = new Map<string, AirportGroup>();
   for (const airport of airports) {
     const key = `${airport.country}-${airport.state}`;
@@ -144,7 +155,12 @@ export function groupAirports(airports: readonly Airport[], query = ""): Airport
     group.airports.push(airport);
   }
   const byText = (a: string, b: string) => a.localeCompare(b, "en");
-  const best = (group: AirportGroup) => Math.min(...group.airports.map((a) => rank.get(a)!));
-  for (const group of groups.values()) group.airports.sort((a, b) => rank.get(a)! - rank.get(b)! || byText(a.city, b.city) || byText(a.code, b.code));
+  const best = (group: AirportGroup) => Math.min(...group.airports.map(rankOf));
+  for (const group of groups.values()) group.airports.sort((a, b) => rankOf(a) - rankOf(b) || byText(a.city, b.city) || byText(a.code, b.code));
   return [...groups.values()].sort((a, b) => best(a) - best(b) || byText(a.name, b.name));
+}
+
+/** The picker's list for a query: the airports it matches, grouped and ranked by that same query. */
+export function searchAirports(airports: readonly Airport[], query: string): AirportGroup[] {
+  return groupAirports(matchAirports(airports, query), query);
 }

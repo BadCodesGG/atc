@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { groupAirports, matchAirports, placeOf, regionName } from "./airport-search";
+import { groupAirports, matchAirports, placeOf, regionName, searchAirports } from "./airport-search";
 import { AIRPORTS } from "./airports";
 
 const codes = (list: readonly { code: string }[]) => list.map((a) => a.code).sort();
@@ -109,7 +109,7 @@ describe("groupAirports", () => {
 
 describe("the picker's rows for a query", () => {
   // What the picker lists, in order; its first row is the one Enter picks.
-  const rows = (query: string) => groupAirports(matchAirports(AIRPORTS, query), query).flatMap((g) => g.airports.map((a) => a.code));
+  const rows = (query: string) => searchAirports(AIRPORTS, query).flatMap((g) => g.airports.map((a) => a.code));
 
   it("puts the airport whose code is the query first, above a name or city that starts with it", () => {
     expect(rows("pit")[0]).toBe("pit");
@@ -117,6 +117,7 @@ describe("the picker's rows for a query", () => {
     expect(rows("PIT")[0]).toBe("pit");
     expect(rows("kpit")[0]).toBe("pit");
     expect(rows("btp")[0]).toBe("btp");
+    expect(rows("pit pa")[0]).toBe("pit");
   });
 
   it("puts every airport first for its own IATA and ICAO code, and a renamed one for its old codes", () => {
