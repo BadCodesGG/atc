@@ -64,7 +64,7 @@ export interface FlightAnswer extends RemoteFlight {
 const num = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);
 const str = (v: unknown): string | null => (typeof v === "string" && v.trim() ? v.trim() : null);
 
-/** The first aircraft in an upstream answer that is in the air and has a position, or null when none is. */
+/** The first aircraft in an upstream answer (to a callsign or a tail number) that is in the air and has a position, or null when none is. */
 export function parseCallsignResponse(json: unknown): RemoteFlight | null {
   if (typeof json !== "object" || json === null) return null;
   const list = (json as Record<string, unknown>).ac;
@@ -96,7 +96,7 @@ const defaultFetcher: Fetcher = async (url) => {
 export type FlightLookup = { kind: "bad" } | { kind: "none" } | { kind: "found"; flight: FlightAnswer };
 
 /** The aircraft in the air an upstream query lists, or null when it lists none (a 404 included); throws when no provider can answer. */
-async function airborne(read: Read, query: Query): Promise<RemoteFlight | null> {
+async function firstAirborne(read: Read, query: Query): Promise<RemoteFlight | null> {
   let body: unknown;
   try {
     body = JSON.parse((await read(query)).body);
@@ -117,9 +117,9 @@ export async function findFlight(input: string, read: Read = upstream.read, get:
   const callsign = lookupCallsign(input);
   const registration = lookupRegistration(input);
   if (!callsign && !registration) return { kind: "bad" };
-  let flight = callsign ? await airborne(read, { kind: "callsign", callsign }) : null;
+  let flight = callsign ? await firstAirborne(read, { kind: "callsign", callsign }) : null;
   const byCallsign = flight !== null;
-  if (!flight && registration) flight = await airborne(read, { kind: "registration", registration });
+  if (!flight && registration) flight = await firstAirborne(read, { kind: "registration", registration });
   if (!flight) return { kind: "none" };
   // Found by its tail, the route is the one the callsign it sends flies: that came from the feed, so it is checked as typing is.
   const routeCallsign = byCallsign ? callsign : flight.callsign && lookupCallsign(flight.callsign);

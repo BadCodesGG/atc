@@ -26,6 +26,18 @@ export interface MapFlight {
   lostAt: number | null;
 }
 
+/** A flight named from outside the map (a link, the search): its hex where known, else the callsign it sends or its hex upper-cased. */
+export interface FlightIdentity {
+  hex: string | null;
+  callsign: string | null;
+}
+
+/** Whether an aircraft on the map is the flight `wanted` names: by hex where one is given, else as the traffic names it (its callsign, or its hex upper-cased). */
+export function isFlight(aircraft: { id: string; callsign: string | null }, wanted: FlightIdentity): boolean {
+  if (wanted.hex) return aircraft.id === wanted.hex;
+  return wanted.callsign !== null && (aircraft.callsign ?? aircraft.id.toUpperCase()) === wanted.callsign.toUpperCase();
+}
+
 /** The flight as it was last seen, now gone from the feed since `atMs`; the same object once it is already lost. */
 export function markLost(flight: MapFlight, atMs: number): MapFlight {
   return flight.lostAt === null ? { ...flight, lostAt: atMs } : flight;

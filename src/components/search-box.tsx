@@ -351,7 +351,7 @@ function Row({ option, onFollow }: { option: Option; onFollow: () => void }) {
         <span className="truncate text-xs text-muted">{[summary.aircraft, summary.altitude, summary.route].filter(Boolean).join(" · ")}</span>
       </span>
       <span aria-hidden className="shrink-0 text-xs text-muted">
-        {summary.opens === "airport" ? `Open ${summary.nearest.toUpperCase()}` : summary.opens === "here" ? "Show" : "Track on map"}
+        {summary.opens === "airport" ? `Open ${summary.nearest.toUpperCase()}` : summary.opens === "here" ? "Show" : "Follow on map"}
       </span>
     </>
   );

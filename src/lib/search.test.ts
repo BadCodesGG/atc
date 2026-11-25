@@ -197,7 +197,7 @@ describe("nearestAirport and remoteSummary", () => {
   });
 
   it("names what picking it selects: its broadcast callsign, else its hex", () => {
-    expect(remoteSummary({ ...base, latitude: 37, longitude: -100 }, "atl").select).toBe("AAL100");
-    expect(remoteSummary({ ...base, callsign: null, latitude: 37, longitude: -100 }, "atl").select).toBe("A1B2C3");
+    expect(remoteSummary({ ...base, latitude: 37, longitude: -100 }, "atl").selectBy).toBe("AAL100");
+    expect(remoteSummary({ ...base, callsign: null, latitude: 37, longitude: -100 }, "atl").selectBy).toBe("A1B2C3");
   });
 });

@@ -315,8 +315,8 @@ export interface RemoteSummary {
    * fly the world map to it, select it and follow it.
    */
   opens: "airport" | "here" | "map";
-  /** What it is selected by where it opens: the callsign it sends, else its hex upper-cased, as the traffic names it. */
-  select: string | null;
+  /** The name it is selected by where it opens: the callsign it sends, else its hex upper-cased, as the traffic names it. */
+  selectBy: string | null;
 }
 
 export function remoteSummary(flight: FlightAnswer, here: Airport["code"]): RemoteSummary {
@@ -330,6 +330,6 @@ export function remoteSummary(flight: FlightAnswer, here: Airport["code"]): Remo
     nearest: airport.code,
     nearness: nm < 1 ? `over ${code}` : `${Math.round(nm).toLocaleString("en-US")} nm from ${code}`,
     opens: nm > RADIUS_NM ? "map" : airport.code === here ? "here" : "airport",
-    select: flight.callsign ?? flight.hex?.toUpperCase() ?? null,
+    selectBy: flight.callsign ?? flight.hex?.toUpperCase() ?? null,
   };
 }

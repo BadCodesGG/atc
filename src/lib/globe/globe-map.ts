@@ -17,7 +17,7 @@ import { shiftClearOfCard } from "./clear-of-card";
 import { airportFeatures, type ProcedurePiece, procedureFeatures } from "./features";
 import { frameShift, freeBand } from "./journey-frame";
 import { type Band, globeCapable, Guide } from "./handover";
-import { type MapFlight, markLost } from "./map-flight";
+import { type FlightIdentity, isFlight, type MapFlight, markLost } from "./map-flight";
 import { aircraftOpacity, arcOpacities, buildingHeight, FLOW_DASHES, mapStyle, PALETTES, radarLayer, radarSource, ripple, SELECTION_DIM } from "./map-style";
 import { pickAircraft, REACH_PX } from "./pick";
 import { isEstimated, selectedPath, selectionFeatures } from "./selected-path";
@@ -55,8 +55,8 @@ const PAGE_FRAMES = 2;
 const TRACK_STEP_S = 8;
 /** How long the page waits for a flight a link names to appear in the traffic, ms. */
 const WANTED_MS = 30_000;
-/** How low the map comes down over a flight found anywhere (track): well inside REGION_ZOOM, the airport picker's height. */
-const TRACK_ZOOM = 9;
+/** How low the map comes down over a flight found anywhere (flyToFlight): well inside REGION_ZOOM, the airport picker's height. */
+const FOUND_ZOOM = 9;
 /** The map eases the selected aircraft clear of the card no more often than this, ms. */
 const EASE_EVERY_MS = 1_500;
 /** One beat of an airport's ripple, and one step of the routes' flow, ms. */
@@ -199,7 +199,7 @@ export class GlobeMap {
   /** What the card last printed: kept when the aircraft leaves the feed, which it then marks lost. */
   private lastFlight: MapFlight | null = null;
   /** A flight a link or the search names (its hex where known, else its callsign), selected once the traffic shows it, until this time (ms). */
-  private wanted: { callsign: string; hex: string | null; until: number } | null = null;
+  private wanted: { flight: FlightIdentity; until: number } | null = null;
   /** The aircraft under the pointer, who is not selected: a ring is drawn round it. */
   private hoverId: string | null = null;
   /** Whether the reader has moved the map since the selection: the map then leaves the camera alone. */
@@ -347,18 +347,19 @@ export class GlobeMap {
 
   /** Selects the flight with this callsign (or hex, upper case, where it has none) as soon as the traffic shows it: a link's flight. */
   selectCallsign(callsign: string): void {
-    this.wanted = { callsign: callsign.toUpperCase(), hex: null, until: Date.now() + WANTED_MS };
+    this.wanted = { flight: { hex: null, callsign }, until: Date.now() + WANTED_MS };
   }
 
   /**
    * A flight found anywhere (the search's flight elsewhere): the map lets go of what it had selected,
    * flies to where the flight is, low enough to read the traffic there, and selects it as soon as the
-   * traffic shows it, by its hex where it has one, else by `callsign` as selectCallsign does.
+   * traffic shows it (isFlight); with nothing to know it by, the map only flies there.
    */
-  track(flight: { hex: string | null; callsign: string; latitude: number; longitude: number }): void {
+  flyToFlight(flight: FlightIdentity & { latitude: number; longitude: number }): void {
     this.select(null);
-    this.wanted = { callsign: flight.callsign.toUpperCase(), hex: flight.hex, until: Date.now() + WANTED_MS };
-    this.map.flyTo({ center: [flight.longitude, flight.latitude], zoom: TRACK_ZOOM, bearing: 0, pitch: 45, duration: 2500 });
+    const { hex, callsign } = flight;
+    if (hex || callsign) this.wanted = { flight: { hex, callsign }, until: Date.now() + WANTED_MS };
+    this.map.flyTo({ center: [flight.longitude, flight.latitude], zoom: FOUND_ZOOM, bearing: 0, pitch: 45, duration: 2500 });
   }
 
   /** Where the flight card is on screen, so the selected aircraft is kept clear of it; null stops that. */
@@ -804,8 +805,8 @@ export class GlobeMap {
       this.history.sweep(now);
     }
     if (this.wanted && !this.selectedId) {
-      const { callsign: wanted, hex } = this.wanted;
-      const i = tracked.findIndex((a) => (hex ? a.id === hex : (a.callsign ?? a.id.toUpperCase()) === wanted));
+      const wanted = this.wanted.flight;
+      const i = tracked.findIndex((a) => isFlight(a, wanted));
       if (i >= 0) this.select(tracked[i].id);
       else if (Date.now() > this.wanted.until) this.wanted = null;
     }

@@ -9,7 +9,7 @@ import type { SearchProps } from "./search-box";
 
 /**
  * What the header search does to the page: select or follow a flight, ease the camera to a gate or
- * runway and label it, and switch airports. A flight found elsewhere is the page's own (atc-app.tsx). The page hands over the refs its own buttons drive and its
+ * runway and label it, and switch airports. The page hands over the refs its own buttons drive and its
  * own actions, so a search pick behaves like a click on the model.
  */
 
