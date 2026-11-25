@@ -3,12 +3,16 @@ import { type AirportCount, type Cell, cellOf, countsNear, fetchRegion, type Reg
 import { type FeedAnswer, LastGoodFeed } from "./traffic-feed";
 import { type Read, upstream, UpstreamBusyError } from "./upstream";
 
-/** Cells one /api/counts request may read from adsb.lol that the feed does not already hold; the rest wait for later requests. */
-export const COLD_CELLS_PER_COUNTS = 2;
+/**
+ * Cells one /api/counts request may read from adsb.lol that the feed does not already hold; the rest wait
+ * for later requests. The listed airports sit in 40 cells, so at the map's one request a minute a round of
+ * them takes 10 minutes, inside COUNTS_KEEP_MS with time to spare (2 a request took 20, and markers went blank).
+ */
+export const COLD_CELLS_PER_COUNTS = 4;
 /**
  * Cells held at once, the one asked about longest ago forgotten first. The cell comes from the request, so
  * left unbounded a loop over the world's 4,050 cells would grow the feed without end; a map view reads a few
- * dozen at most, and the airports' own cells are about a hundred.
+ * dozen at most, and the airports' own cells are 40.
  */
 export const MAX_CELLS_HELD = 300;
 /** A count is shown this long (ms) after the read it came from: the markers move slowly, and the cells are filled in a few at a time. */

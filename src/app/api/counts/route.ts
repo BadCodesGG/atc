@@ -7,7 +7,7 @@ import { UpstreamBusyError } from "@/lib/upstream";
  * Every listed airport's live count (aircraft within 20 NM, and how many are on the ground), for the
  * world map's airport markers. Read off the same region cells as /api/region, so the counts cost one
  * upstream read per cell, not one per airport, and a request reads only the cells the feed already holds
- * plus a couple of others, one after another (see RegionFeed.counts), so the markers fill in over a few
+ * plus a few others, one after another (see RegionFeed.counts), so the markers fill in over a few
  * minutes instead of bursting on adsb.lol. A count moves slowly at world zoom, so the CDN keeps it for a
  * minute and serves it stale for five more while it refreshes. An airport with no count yet is left out
  * rather than shown as zero.
