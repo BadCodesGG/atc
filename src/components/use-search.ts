@@ -53,7 +53,7 @@ export interface SearchHost {
   onAirport: (code: Airport["code"], flight?: string) => void;
 }
 
-export function useSearch({ map, entriesRef, sceneRef, labelsRef, goalRef, viewRef, followRef, refreshRef, onFlight, leaveCamera, onAirport }: SearchHost): SearchProps {
+export function useSearch({ map, entriesRef, sceneRef, labelsRef, goalRef, viewRef, followRef, refreshRef, onFlight, leaveCamera, onAirport }: SearchHost): Omit<SearchProps, "onRemote" | "mapFollows"> {
   const places = useMemo(() => (map ? buildPlaces(map) : []), [map]);
   const [lit, setLit] = useState<{ place: PlaceDoc; goal: Goal } | null>(null);
   // The page's own action, which it makes anew each render; the arrival below reads the latest.
@@ -164,5 +164,5 @@ export function useSearch({ map, entriesRef, sceneRef, labelsRef, goalRef, viewR
     return () => window.clearInterval(timer);
   }, [map, entriesRef]);
 
-  return { read, onFlight, onPlace, onAirport: (code) => onAirport(code), onRemote: (callsign, code) => onAirport(code, callsign) };
+  return { read, onFlight, onPlace, onAirport: (code) => onAirport(code) };
 }

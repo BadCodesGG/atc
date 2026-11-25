@@ -8,6 +8,7 @@ Glossary for ATC. Terms are used as defined here in code, tests and UI copy.
 - **World map**: the MapLibre view showing each airport with its live aircraft count; zooming in hands over to the diorama. Code in `src/lib/globe/`.
 - **Handover**: the continuous zoom from the world map into an airport's diorama, with no page change.
 - **Journey**: following one flight gate to gate: out of its origin's diorama, across the map, into its destination's.
+- **Flight elsewhere**: a flight the search finds on the feed when nothing on screen matches, by callsign, flight number or **tail number** (its registration: N3596W, G-ZBKJ). Picking it opens the built airport it is near, or flies the world map to it and follows it there.
 - **Feed**: a public ADS-B source (adsb.lol, with adsb.fi as fallback) read on request. **Feed health** is its online/offline status.
 - **Tracker**: turns feed snapshots into tracked aircraft with a state (parked, pushing back, taxiing, holding, climbing, on approach).
 - **Movements**: departures and arrivals observed by the feed since the page opened; the basis of the board.

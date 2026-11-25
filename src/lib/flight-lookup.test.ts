@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { readViaLol } from "./__fixtures__/lol-read";
-import { findFlight, lookupCallsign, parseCallsignResponse } from "./flight-lookup";
+import { findFlight, flightKey, lookupCallsign, lookupRegistration, parseCallsignResponse } from "./flight-lookup";
 import { Upstream, UpstreamStatusError } from "./upstream";
 
 describe("lookupCallsign", () => {
@@ -15,11 +15,42 @@ describe("lookupCallsign", () => {
   });
 });
 
+describe("lookupRegistration", () => {
+  it.each([
+    ["n3596w", "N3596W"],
+    [" N820DX ", "N820DX"],
+    ["N1", "N1"],
+    ["g-zbkj", "G-ZBKJ"],
+    ["EI-NSG", "EI-NSG"],
+    ["9h-abc", "9H-ABC"],
+    ["B-1234", "B-1234"],
+    ["ja8089", "JA8089"],
+    ["HL7611", "HL7611"],
+  ])("reads %j as the tail %j", (typed, tail) => {
+    expect(lookupRegistration(typed)).toBe(tail);
+  });
+
+  it.each(["", "N", "N0123", "N123456", "DAL3104", "SWA77", "BAD-17", "G-", "-ABC", "G--ABC", "G-ABCDEF", "G-AB/C", "../etc", "G-AB?x=1", "G-AB#", "G-AB%2F", "ÉÉ-12", "G AB"])("rejects %j", (bad) => {
+    expect(lookupRegistration(bad)).toBeNull();
+  });
+});
+
+describe("flightKey", () => {
+  it("is the callsign a value names, else the tail it names, else null", () => {
+    expect(flightKey("dl3104")).toBe("DAL3104");
+    expect(flightKey("n3596w")).toBe("N3596W");
+    expect(flightKey("g-zbkj")).toBe("G-ZBKJ");
+    expect(flightKey("bad-17")).toBeNull();
+    expect(flightKey("../x")).toBeNull();
+  });
+});
+
 describe("parseCallsignResponse", () => {
   const ac = { hex: "a1b2c3", flight: "DAL3104 ", r: "N820DX", t: "B752", lat: 33.5, lon: -84.4, alt_baro: 12000, gs: 310.4 };
 
   it("reads the first aircraft with a position", () => {
     expect(parseCallsignResponse({ ac: [{ hex: "x", flight: "DAL3104" }, ac] })).toEqual({
+      hex: "a1b2c3",
       callsign: "DAL3104",
       registration: "N820DX",
       typeCode: "B752",
@@ -36,6 +67,12 @@ describe("parseCallsignResponse", () => {
     expect(parseCallsignResponse({ ac: [{ ...ac, alt_baro: "ground" }] })).toBeNull();
     expect(parseCallsignResponse({})).toBeNull();
     expect(parseCallsignResponse(null)).toBeNull();
+  });
+
+  it("keeps only a hex that is one", () => {
+    expect(parseCallsignResponse({ ac: [{ ...ac, hex: "A1B2C3" }] })?.hex).toBe("a1b2c3");
+    expect(parseCallsignResponse({ ac: [{ ...ac, hex: "~a1b2c3" }] })?.hex).toBeNull();
+    expect(parseCallsignResponse({ ac: [{ ...ac, hex: "../x" }] })?.hex).toBeNull();
   });
 
   it("falls back to the geometric altitude and tolerates missing fields", () => {
@@ -77,6 +114,73 @@ describe("findFlight", () => {
     const found = await findFlight("dl3104", read, get);
     expect(urls).toEqual(["https://api.adsb.lol/v2/callsign/DAL3104", "https://api.adsbdb.com/v0/callsign/DAL3104"]);
     expect(found).toMatchObject({ kind: "found", flight: { callsign: "DAL3104", altitudeFt: 12000, route: { origin: { code: "SRQ" }, destination: { code: "ATL" } } } });
+  });
+
+  describe("by tail number", () => {
+    const pa32 = { hex: "a4097b", flight: "N3596W  ", r: "N3596W", t: "PA32", lat: 35.92, lon: -81.82, alt_baro: 7575, gs: 136 };
+    const airliner = { hex: "a1b2c3", flight: "DAL3104 ", r: "N820DX", t: "B752", lat: 33.5, lon: -84.4, alt_baro: 12000, gs: 310 };
+    const asking = (answers: Record<string, unknown>) => {
+      const urls: string[] = [];
+      const read = readViaLol(async (url) => {
+        urls.push(url);
+        const answer = Object.entries(answers).find(([path]) => url.endsWith(path))?.[1] ?? { ac: [] };
+        if (answer instanceof Error) throw answer;
+        return JSON.stringify(answer);
+      });
+      return { read, urls };
+    };
+
+    it("finds a GA aircraft by its callsign, which is its tail, without asking for the tail", async () => {
+      const { read, urls } = asking({ "/v2/callsign/N3596W": { ac: [pa32] } });
+      expect(await findFlight("n3596w", read, noRoute)).toMatchObject({ kind: "found", flight: { hex: "a4097b", registration: "N3596W", latitude: 35.92 } });
+      expect(urls).toEqual(["https://api.adsb.lol/v2/callsign/N3596W"]);
+    });
+
+    it("falls back to the tail when no aircraft sends it as a callsign, and looks the route up by the callsign it does send", async () => {
+      const { read, urls } = asking({ "/v2/reg/N820DX": { ac: [airliner] } });
+      const get = vi.fn(async (url: string) => {
+        urls.push(url);
+        return { status: 404, body: null };
+      });
+      expect(await findFlight("n820dx", read, get)).toMatchObject({ kind: "found", flight: { callsign: "DAL3104", registration: "N820DX" } });
+      expect(urls).toEqual(["https://api.adsb.lol/v2/callsign/N820DX", "https://api.adsb.lol/v2/reg/N820DX", "https://api.adsbdb.com/v0/callsign/DAL3104"]);
+    });
+
+    it("falls back to the tail when the callsign is a 404", async () => {
+      const { read } = asking({ "/v2/callsign/N820DX": new UpstreamStatusError(404, null, "https://example.test"), "/v2/reg/N820DX": { ac: [airliner] } });
+      expect(await findFlight("N820DX", read, noRoute)).toMatchObject({ kind: "found", flight: { registration: "N820DX" } });
+    });
+
+    it("asks for a hyphenated tail as a tail only: no callsign carries a hyphen", async () => {
+      const { read, urls } = asking({ "/v2/reg/G-ZBKJ": { ac: [{ ...airliner, flight: "BAW117 ", r: "G-ZBKJ" }] } });
+      expect(await findFlight("g-zbkj", read, noRoute)).toMatchObject({ kind: "found", flight: { callsign: "BAW117", registration: "G-ZBKJ" } });
+      expect(urls[0]).toBe("https://api.adsb.lol/v2/reg/G-ZBKJ");
+      expect(urls).toHaveLength(1);
+    });
+
+    it("does not spend a second read on a miss that cannot be a tail", async () => {
+      const { read, urls } = asking({});
+      expect(await findFlight("SWA77", read, noRoute)).toEqual({ kind: "none" });
+      expect(urls).toEqual(["https://api.adsb.lol/v2/callsign/SWA77"]);
+    });
+
+    it("is none when neither the callsign nor the tail is airborne", async () => {
+      const { read, urls } = asking({});
+      expect(await findFlight("N3596W", read, noRoute)).toEqual({ kind: "none" });
+      expect(urls).toEqual(["https://api.adsb.lol/v2/callsign/N3596W", "https://api.adsb.lol/v2/reg/N3596W"]);
+    });
+
+    it("throws when the tail lookup fails, so an outage never reads as not airborne", async () => {
+      const { read } = asking({ "/v2/reg/N3596W": new UpstreamStatusError(503, null, "https://example.test") });
+      await expect(findFlight("N3596W", read, noRoute)).rejects.toThrow();
+    });
+
+    it("never builds a route URL from a broadcast callsign that is not one", async () => {
+      const { read } = asking({ "/v2/reg/N820DX": { ac: [{ ...airliner, flight: "../../x" }] } });
+      const get = vi.fn(async () => ({ status: 404, body: null }));
+      expect(await findFlight("N820DX", read, get)).toMatchObject({ kind: "found", flight: { route: null } });
+      expect(get).not.toHaveBeenCalled();
+    });
   });
 
   it("still finds the flight when the route lookup fails", async () => {

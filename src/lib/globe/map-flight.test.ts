@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { lostNote, type MapFlight, mapFlightCard, markLost } from "./map-flight";
+import { isFlight, lostNote, type MapFlight, mapFlightCard, markLost, soughtStep } from "./map-flight";
 
 const flight: MapFlight = {
   id: "a0540a",
@@ -59,5 +59,46 @@ describe("markLost", () => {
     expect(lostNote(flight, atlanta)).toBeNull();
     // 18:25 UTC on 1 October is 14:25 in Atlanta (EDT).
     expect(lostNote(markLost(flight, Date.UTC(2026, 9, 1, 18, 25)), atlanta)).toBe("Not in the feed now. Last seen 14:25.");
+  });
+});
+
+describe("isFlight", () => {
+  const aircraft = { id: "a4097b", callsign: "N3596W" };
+
+  it("knows a flight by its hex where it has one, whatever it sends", () => {
+    expect(isFlight(aircraft, { hex: "a4097b", callsign: "OTHER1" })).toBe(true);
+    expect(isFlight(aircraft, { hex: "a1b2c3", callsign: "N3596W" })).toBe(false);
+  });
+
+  it("knows it by the callsign it sends, or its hex upper-cased where it sends none, when no hex is given", () => {
+    expect(isFlight(aircraft, { hex: null, callsign: "n3596w" })).toBe(true);
+    expect(isFlight({ id: "a4097b", callsign: null }, { hex: null, callsign: "A4097B" })).toBe(true);
+    expect(isFlight(aircraft, { hex: null, callsign: "DAL1" })).toBe(false);
+  });
+
+  it("knows nothing by nothing", () => {
+    expect(isFlight(aircraft, { hex: null, callsign: null })).toBe(false);
+  });
+});
+
+describe("soughtStep", () => {
+  const sought = { hex: "a4097b", callsign: "N3596W" };
+  const found = { id: "a4097b", callsign: "N3596W" };
+
+  it("does nothing while nothing is sought, or nothing is selected yet", () => {
+    expect(soughtStep(null, found, true)).toBe("idle");
+    expect(soughtStep(sought, null, true)).toBe("idle");
+  });
+
+  it("lets go when the reader has selected another flight", () => {
+    expect(soughtStep(sought, { id: "a1b2c3", callsign: "DAL1" }, true)).toBe("drop");
+  });
+
+  it("waits, to look again, while the sought flight is selected but not drawn yet", () => {
+    expect(soughtStep(sought, found, false)).toBe("wait");
+  });
+
+  it("follows the sought flight once it is selected and drawn", () => {
+    expect(soughtStep(sought, found, true)).toBe("follow");
   });
 });

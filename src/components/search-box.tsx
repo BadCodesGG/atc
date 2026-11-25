@@ -1,7 +1,7 @@
 import { type KeyboardEvent, useEffect, useMemo, useRef, useState } from "react";
 import type { Airport } from "@/lib/airports";
 import type { FlightAnswer } from "@/lib/flight-lookup";
-import { type AirportHit, type FlightHit, type PlaceDoc, type PlaceHit, type RemoteSummary, remoteSummary, search, type SearchData } from "@/lib/search";
+import { type AirportHit, type FlightHit, type PlaceDoc, type PlaceHit, type RemoteOffer, type RemoteSummary, remoteOffer, remoteSummary, search, type SearchData } from "@/lib/search";
 import { STATE_INK, STATE_LABEL, STATE_SWATCH } from "./chrome";
 import { RAISED } from "./shadows";
 
@@ -24,8 +24,10 @@ export interface SearchProps {
   onPlace: (place: PlaceDoc) => void;
   /** Switch to another airport. */
   onAirport: (code: Airport["code"]) => void;
-  /** Open the airport a flight elsewhere is near and select the flight there. */
-  onRemote: (callsign: string, airport: Airport["code"]) => void;
+  /** Show a flight found elsewhere as `summary.opens` says: at the airport it is near, in the diorama on screen, or on the world map, followed. */
+  onRemote: (flight: FlightAnswer, summary: RemoteSummary) => void;
+  /** Whether the world map is there and can take the camera, to follow a flight on it. */
+  mapFollows: boolean;
 }
 
 type Remote = "none" | "error" | { flight: FlightAnswer };
@@ -34,7 +36,7 @@ type Option =
   | { id: string; kind: "flight"; hit: FlightHit }
   | { id: string; kind: "place"; hit: PlaceHit }
   | { id: string; kind: "airport"; hit: AirportHit }
-  | { id: string; kind: "remote"; callsign: string; summary: RemoteSummary };
+  | { id: string; kind: "remote"; callsign: string; flight: FlightAnswer; summary: RemoteSummary; offer: RemoteOffer };
 
 interface Section {
   key: string;
@@ -55,7 +57,7 @@ function typing(target: EventTarget | null): boolean {
   return !!el && (el.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(el.tagName));
 }
 
-export function Search({ read, onFlight, onPlace, onAirport, onRemote }: SearchProps) {
+export function Search({ read, onFlight, onPlace, onAirport, onRemote, mapFollows }: SearchProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const [query, setQuery] = useState("");
@@ -127,10 +129,14 @@ export function Search({ read, onFlight, onPlace, onAirport, onRemote }: SearchP
       });
     }
     if (wanted && remoteOutcome && remoteOutcome !== "none" && remoteOutcome !== "error" && here) {
-      out.push({ key: "remote", heading: "Flight elsewhere", options: [{ id: id(), kind: "remote", callsign: wanted, summary: remoteSummary(remoteOutcome.flight, here) }] });
+      const { flight } = remoteOutcome;
+      const summary = remoteSummary(flight, here);
+      // As the diorama draws it, so "Show" can select it there (onRemote asks the same of the frame).
+      const onScreen = !!flight.hex && !!data?.flights.some((f) => f.id === flight.hex);
+      out.push({ key: "remote", heading: "Flight elsewhere", options: [{ id: id(), kind: "remote", callsign: wanted, flight, summary, offer: remoteOffer(summary, mapFollows, onScreen) }] });
     }
     return out;
-  }, [results, wanted, remoteOutcome, here]);
+  }, [results, wanted, remoteOutcome, here, mapFollows, data]);
   const options = useMemo(() => sections.flatMap((s) => s.options), [sections]);
 
   const index = cursor.query === debounced ? Math.min(cursor.index, options.length - 1) : 0;
@@ -147,8 +153,9 @@ export function Search({ read, onFlight, onPlace, onAirport, onRemote }: SearchP
   };
   const choose = (option: Option, follow: boolean) => {
     if (option.kind === "remote") {
-      if (!option.summary.openable) return;
-      onRemote(option.callsign, option.summary.nearest);
+      // A row that cannot work says why, and choosing it leaves the list as it is.
+      if (!option.offer.enabled) return;
+      onRemote(option.flight, option.summary);
     } else if (option.kind === "flight") onFlight(option.hit.id, follow);
     else if (option.kind === "place") onPlace(option.hit.place);
     else onAirport(option.hit.code);
@@ -270,7 +277,7 @@ export function Search({ read, onFlight, onPlace, onAirport, onRemote }: SearchP
 }
 
 function OptionRow({ option, active, onHover, onChoose }: { option: Option; active: boolean; onHover: () => void; onChoose: (follow: boolean) => void }) {
-  const disabled = option.kind === "remote" && !option.summary.openable;
+  const disabled = option.kind === "remote" && !option.offer.enabled;
   return (
     <div
       id={option.id}
@@ -281,7 +288,7 @@ function OptionRow({ option, active, onHover, onChoose }: { option: Option; acti
       onMouseDown={(e) => e.preventDefault()}
       onPointerMove={onHover}
       onClick={() => onChoose(false)}
-      className={`flex min-h-11 cursor-pointer items-center gap-3 rounded-lg px-3 py-1.5 text-left ${active ? "bg-selected shadow-[0_0_0_1px_var(--color-selected-ring)]" : ""} ${disabled ? "cursor-default" : ""}`}
+      className={`flex min-h-11 ${disabled ? "cursor-default" : "cursor-pointer"} items-center gap-3 rounded-lg px-3 py-1.5 text-left ${active ? "bg-selected shadow-[0_0_0_1px_var(--color-selected-ring)]" : ""}`}
     >
       <Row option={option} onFollow={() => onChoose(true)} />
     </div>
@@ -354,7 +361,7 @@ function Row({ option, onFollow }: { option: Option; onFollow: () => void }) {
         <span className="truncate text-xs text-muted">{[summary.aircraft, summary.altitude, summary.route].filter(Boolean).join(" · ")}</span>
       </span>
       <span aria-hidden className="shrink-0 text-xs text-muted">
-        {summary.openable ? `Open ${summary.nearest.toUpperCase()}` : "Out of range"}
+        {option.offer.label}
       </span>
     </>
   );

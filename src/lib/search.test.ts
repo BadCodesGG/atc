@@ -2,10 +2,11 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import type { AirportMap } from "./airport-map";
-import { DEFAULT_AIRPORT } from "./airports";
+import { regionName } from "./airport-search";
+import { AIRPORTS, DEFAULT_AIRPORT } from "./airports";
 import routes from "./__fixtures__/routes_atl.json";
 import raw from "./__fixtures__/adsblol_atl.json";
-import { buildPlaces, flightDocs, nearestAirport, remoteSummary, search, type SearchData } from "./search";
+import { buildPlaces, flightDocs, nearestAirport, remoteOffer, remoteSummary, search, type SearchData } from "./search";
 import { Tracker } from "./tracker";
 import { parseTraffic } from "./traffic";
 import { fixtureTime, TrafficView } from "./traffic-view";
@@ -108,11 +109,38 @@ describe("airports", () => {
     expect(airportsOf("arizona")).toEqual(["phx"]);
     expect(airportsOf("sky harbor")).toEqual(["phx"]);
     expect(airportsOf("KJFK")).toEqual(["jfk"]);
-    expect(airportsOf("TX")).toEqual(expect.arrayContaining(["dfw", "iah", "aus"]));
+    // Six airports are in Texas; the group shows its first four.
+    expect(airportsOf("TX")).toEqual(["aus", "dal", "dfw", "hou"]);
   });
 
   it("ranks the code above the city", () => {
     expect(airportsOf("sea")[0]).toBe("sea");
+  });
+
+  it("ranks an exact code above another airport's name or city that starts with it", () => {
+    expect(airportsOf("pit")[0]).toBe("pit");
+    expect(airportsOf("pit")).toContain("btp");
+    expect(airportsOf("kpit")[0]).toBe("pit");
+    expect(airportsOf("btp")[0]).toBe("btp");
+  });
+
+  it("puts every airport first for its own IATA and ICAO code", () => {
+    for (const a of AIRPORTS) {
+      // The airport on screen is left out, so look for each from another one.
+      const first = (q: string) => search(q, { here: a.code === "atl" ? "jfk" : "atl", places: [], flights: [] }).groups.find((g) => g.kind === "airports")?.hits[0];
+      expect(first(a.code), a.code).toMatchObject({ code: a.code });
+      expect(first(a.icao), a.icao).toMatchObject({ code: a.code });
+    }
+  });
+
+  it("finds a renamed airport by its former codes, as the picker does", () => {
+    expect(airportsOf("pbi")[0]).toBe("djt");
+    expect(airportsOf("kpbi")[0]).toBe("djt");
+    for (const a of AIRPORTS.filter((x) => x.formerly)) {
+      const first = (q: string) => search(q, { here: a.code === "atl" ? "jfk" : "atl", places: [], flights: [] }).groups.find((g) => g.kind === "airports")?.hits[0];
+      expect(first(a.formerly!.code), a.formerly!.code).toMatchObject({ code: a.code });
+      expect(first(a.formerly!.icao), a.formerly!.icao).toMatchObject({ code: a.code });
+    }
   });
 
   it("leaves out the airport on screen", () => {
@@ -123,6 +151,21 @@ describe("airports", () => {
   it("describes the airport", () => {
     const hit = run("phx").groups.find((g) => g.kind === "airports")?.hits[0];
     expect(hit).toMatchObject({ kind: "airport", title: "PHX", where: "Phoenix, Arizona" });
+  });
+
+  it("takes every airport's state from the airport list", () => {
+    for (const a of AIRPORTS.filter((x) => x.code !== "atl")) {
+      const hit = run(a.code).groups.find((g) => g.kind === "airports")?.hits[0];
+      expect(hit, a.code).toMatchObject({ code: a.code, where: `${a.city}, ${regionName(a.country, a.state)}` });
+    }
+  });
+
+  it("finds an airport by its state's code or name, DC and Puerto Rico included", () => {
+    expect(airportsOf("DC")).toEqual(["dca"]);
+    expect(airportsOf("district of columbia")).toEqual(["dca"]);
+    expect(airportsOf("puerto rico")).toEqual(["sju"]);
+    expect(airportsOf("virginia")).toEqual(expect.arrayContaining(["iad", "orf", "ric"]));
+    expect(airportsOf("virginia")).not.toContain("dca");
   });
 });
 
@@ -148,6 +191,12 @@ describe("remote", () => {
     expect(run("N123AB").remote).toBe("N123AB");
   });
 
+  it("asks about a tail number, hyphen and all, though it carries no digit", () => {
+    expect(run("n3596w").remote).toBe("N3596W");
+    expect(run("g-zbkj").remote).toBe("G-ZBKJ");
+    expect(run("ei-nsg").remote).toBe("EI-NSG");
+  });
+
   it("does not ask when something here matches", () => {
     expect(run("DL3104").remote).toBeNull();
     expect(run("E15").remote).toBeNull();
@@ -171,12 +220,55 @@ describe("nearestAirport and remoteSummary", () => {
     expect(nearestAirport(40.7, -74.2).airport.code).toBe("ewr");
   });
 
-  it("offers to open an airport only for a flight within the scene's range of it", () => {
-    const base = { callsign: "AAL100", registration: null, typeCode: "A321", altitudeFt: 4200, groundSpeedKt: 190, route: null };
+  const base = { hex: "a1b2c3", callsign: "AAL100", registration: null, typeCode: "A321", altitudeFt: 4200, groundSpeedKt: 190, route: null };
+
+  it("opens the airport a flight is within the scene's range of", () => {
     const close = remoteSummary({ ...base, latitude: 33.4, longitude: -112.2 }, "atl");
-    expect(close).toMatchObject({ nearest: "phx", openable: true, altitude: "4,200 ft" });
+    expect(close).toMatchObject({ nearest: "phx", opens: "airport", altitude: "4,200 ft" });
+  });
+
+  it("shows a flight within range of the airport on screen in its diorama, rather than reopening it", () => {
+    expect(remoteSummary({ ...base, latitude: 33.4, longitude: -112.2 }, "phx").opens).toBe("here");
+  });
+
+  it("tracks a flight out of range of every built airport on the world map, wherever it is", () => {
     const far = remoteSummary({ ...base, latitude: 37.0, longitude: -100.0, altitudeFt: 35_000 }, "atl");
-    expect(far.openable).toBe(false);
+    expect(far.opens).toBe("map");
     expect(far.altitude).toBe("35,000 ft");
+    // N3596W, a PA-32 57 nm from CLT, with CLT on screen.
+    expect(remoteSummary({ ...base, latitude: 35.82, longitude: -81.85 }, "clt").opens).toBe("map");
+  });
+
+  it("names what picking it selects: its broadcast callsign, else its hex", () => {
+    expect(remoteSummary({ ...base, latitude: 37, longitude: -100 }, "atl").selectBy).toBe("AAL100");
+    expect(remoteSummary({ ...base, callsign: null, latitude: 37, longitude: -100 }, "atl").selectBy).toBe("A1B2C3");
+  });
+});
+
+describe("remoteOffer", () => {
+  const base = { hex: "a1b2c3", callsign: "AAL100", registration: null, typeCode: "A321", altitudeFt: 4200, groundSpeedKt: 190, route: null };
+  const far = remoteSummary({ ...base, latitude: 37, longitude: -100 }, "atl");
+  const close = remoteSummary({ ...base, latitude: 33.4, longitude: -112.2 }, "atl");
+  const here = remoteSummary({ ...base, latitude: 33.4, longitude: -112.2 }, "phx");
+
+  it("offers to follow a far flight on the map only while the map can follow it", () => {
+    expect(remoteOffer(far, true, false)).toEqual({ label: "Follow on map", enabled: true });
+    expect(remoteOffer(far, false, false)).toEqual({ label: "Map unavailable", enabled: false });
+  });
+
+  it("offers the airport a flight is near, and the diorama on screen where it is drawn, whatever the map can do", () => {
+    expect(remoteOffer(close, false, false)).toEqual({ label: "Open PHX", enabled: true });
+    expect(remoteOffer(here, false, true)).toEqual({ label: "Show", enabled: true });
+  });
+
+  it("follows a flight near the airport on screen on the map when the diorama does not draw it, as far as the map can", () => {
+    expect(remoteOffer(here, true, false)).toEqual({ label: "Follow on map", enabled: true });
+    expect(remoteOffer(here, false, false)).toEqual({ label: "Map unavailable", enabled: false });
+  });
+
+  it("finds a flight with neither callsign nor hex on the map, having nothing to pick it by at an airport", () => {
+    const anonymous = remoteSummary({ ...base, hex: null, callsign: null, latitude: 33.4, longitude: -112.2 }, "atl");
+    expect(anonymous.opens).toBe("map");
+    expect(remoteOffer(anonymous, true, false)).toEqual({ label: "Follow on map", enabled: true });
   });
 });

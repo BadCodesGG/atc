@@ -74,6 +74,12 @@ describe("providerUrl", () => {
     expect(providerUrl("adsb.lol", { kind: "squawk", code: "7700" })).toBe("https://api.adsb.lol/v2/sqk/7700");
     expect(providerUrl("adsb.fi", { kind: "squawk", code: "7700" })).toBe("https://opendata.adsb.fi/api/v2/sqk/7700");
   });
+
+  it("asks each provider for a tail number at its own path: adsb.lol's reg, adsb.fi's registration", () => {
+    expect(providerUrl("adsb.lol", { kind: "registration", registration: "N3596W" })).toBe("https://api.adsb.lol/v2/reg/N3596W");
+    expect(providerUrl("adsb.fi", { kind: "registration", registration: "N3596W" })).toBe("https://opendata.adsb.fi/api/v2/registration/N3596W");
+    expect(providerUrl("adsb.lol", { kind: "registration", registration: "G-ZBKJ" })).toBe("https://api.adsb.lol/v2/reg/G-ZBKJ");
+  });
 });
 
 describe("Upstream", () => {

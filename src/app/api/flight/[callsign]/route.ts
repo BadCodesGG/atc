@@ -1,14 +1,16 @@
 import { busy, clientError, redirectToCanonical } from "@/lib/api-response";
-import { findFlight, type FlightLookup, lookupCallsign } from "@/lib/flight-lookup";
+import { findFlight, flightKey, type FlightLookup } from "@/lib/flight-lookup";
 import { UpstreamBusyError } from "@/lib/upstream";
 
 /**
- * One flight anywhere, by callsign or flight number ("DAL3104", "DL3104"): where it is now, and its
- * route where adsbdb knows it. The search box asks this when nothing at the airport on screen matches.
+ * One flight anywhere, by callsign, flight number or tail number ("DAL3104", "DL3104", "N3596W",
+ * "G-ZBKJ"): where it is now, and its route where adsbdb knows it. The search box asks this when
+ * nothing at the airport on screen matches.
  *
- * The value comes from a person's typing, so it is validated (`lookupCallsign`) before anything is
- * remembered or any URL is built: a value that is not a callsign is a 400 that touches nothing, and
- * the memo is keyed by the callsign it names, so "dl3104" and "DAL3104" share an entry. The CDN keys on
+ * The value comes from a person's typing, so it is validated (`flightKey`) before anything is
+ * remembered or any URL is built: a value that is neither a callsign nor a tail number is a 400 that
+ * touches nothing, and the memo is keyed by the spelling it names (`callsign` below, a tail included),
+ * so "dl3104" and "DAL3104" share an entry. The CDN keys on
  * the URL as typed, so every spelling ("dl3104", "Dal3104", "DAL3104") would be an entry of its own: only
  * the callsign itself is answered, and any other spelling is a permanent redirect to it (the search box
  * and the journey ask for it already normalised). Answers are held
@@ -29,7 +31,7 @@ const memo = new Map<string, { at: number; lookup: Promise<Settled> }>();
 
 export async function GET(req: Request, ctx: RouteContext<"/api/flight/[callsign]">) {
   const { callsign: typed } = await ctx.params;
-  const callsign = typed.length <= MAX_TYPED ? lookupCallsign(typed) : null;
+  const callsign = typed.length <= MAX_TYPED ? flightKey(typed) : null;
   if (!callsign) return clientError("not a callsign");
   const redirect = redirectToCanonical(req, `/api/flight/${callsign}`);
   if (redirect) return redirect;

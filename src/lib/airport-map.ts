@@ -270,6 +270,17 @@ function heightOf(tags: Record<string, string>, fallback: number): number {
 }
 
 const BOUNDARY_SLACK_M = 300;
+/** With no outline of its own, a runway with a vertex this close to the ARP is the airport's, and its outline is their box grown by OUTLINE_MARGIN_M. */
+const OWN_RUNWAY_M = 3000;
+const OUTLINE_MARGIN_M = 400;
+
+/** The axis-aligned box around some points, grown by `margin` metres on every side, wound counter-clockwise. */
+function boxAround(points: Point[], margin: number): Ring {
+  let [w, s, e, n] = [Infinity, Infinity, -Infinity, -Infinity];
+  for (const [x, y] of points) [w, s, e, n] = [Math.min(w, x), Math.min(s, y), Math.max(e, x), Math.max(n, y)];
+  [w, s, e, n] = [w - margin, s - margin, e + margin, n + margin].map(round1);
+  return [[w, s], [e, s], [e, n], [w, n]];
+}
 const MARKING_MAX_M = 300;
 const RUNWAY_MARKINGS = new Set(["displaced_threshold", "blast_pad", "stopway"]);
 
@@ -407,18 +418,29 @@ export function buildAirportMap(json: OverpassJson, airport: Airport, options: B
     return [ring.reduce((s, p) => s + p[0], 0) / ring.length, ring.reduce((s, p) => s + p[1], 0) / ring.length];
   };
 
-  // The aerodrome outline first: a matching ICAO wins, then whichever contains the ARP, then the largest.
+  // The aerodrome outline first: a matching ICAO wins, then whichever contains the ARP, then the largest. An outline
+  // that is neither is a neighbour's (MCAS Beaufort, beside Beaufort Executive, which OSM maps as a point). With
+  // none of its own (Pittsburgh-Butler has no area at all), the airport's outline is the box around its own runways,
+  // those within OWN_RUNWAY_M of the ARP.
   let boundary: Ring[] = [];
   {
+    const arp: Point = [0, 0];
     const candidates: Array<{ icao: boolean; rings: Ring[] }> = [];
     for (const el of json.elements) {
       if (el.tags?.aeroway !== "aerodrome") continue;
       for (const rings of polygonsOf(el)) candidates.push({ icao: el.tags.icao === airport.icao, rings });
     }
-    const arp: Point = [0, 0];
     const score = (c: { icao: boolean; rings: Ring[] }) => (c.icao ? 2 : 0) + (pointInRing(arp, c.rings[0]) ? 1 : 0);
     candidates.sort((a, b) => score(b) - score(a) || Math.abs(signedArea(b.rings[0])) - Math.abs(signedArea(a.rings[0])));
-    if (candidates.length) boundary = cleanRings(candidates[0].rings) ?? [];
+    if (candidates.length && score(candidates[0]) > 0) boundary = cleanRings(candidates[0].rings) ?? [];
+    else {
+      const ownRunwayPoints = json.elements
+        .filter((el) => el.type === "way" && el.tags?.aeroway === "runway")
+        .map((el) => wayPoints(el))
+        .filter((pts) => pts.some(([x, y]) => Math.hypot(x, y) <= OWN_RUNWAY_M))
+        .flat();
+      if (ownRunwayPoints.length) boundary = [boxAround(ownRunwayPoints, OUTLINE_MARGIN_M)];
+    }
   }
   const insideBoundary = (p: Point) => !boundary.length || pointInRing(p, boundary[0]);
 
@@ -607,7 +629,7 @@ export function buildAirportMap(json: OverpassJson, airport: Airport, options: B
   }
   runways.sort((p, q) => (p.ref ?? "").localeCompare(q.ref ?? ""));
 
-  // Paving that belongs to a neighbouring field (a naval air station's taxiways) can sit inside the query box. Keep a
+  // Paving and hangars that belong to a neighbouring field (a naval air station's) can sit inside the query box. Keep a
   // feature when any vertex is within BOUNDARY_SLACK_M of the aerodrome outline's bounding box; with no outline, keep all.
   const bounds = boundary.length ? boundary[0].reduce((b, [x, y]) => [Math.min(b[0], x), Math.min(b[1], y), Math.max(b[2], x), Math.max(b[3], y)], [Infinity, Infinity, -Infinity, -Infinity]) : null;
   const nearAirport = (pts: Point[]) =>
@@ -623,7 +645,7 @@ export function buildAirportMap(json: OverpassJson, airport: Airport, options: B
     taxiways: taxiways.filter((t) => nearAirport(t.line)),
     aprons: aprons.filter((a) => nearAirport(a.rings[0])),
     terminals: terminals.filter((t) => nearAirport(t.rings[0])),
-    buildings,
+    buildings: buildings.filter((b) => nearAirport(b.rings[0])),
     gates,
     stands,
     holdingPositions,

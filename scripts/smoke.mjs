@@ -54,7 +54,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const GL_DRIVER_NOTE = /^\[\.WebGL-0x[0-9a-f]+\]GL Driver Message \(OpenGL, Performance, /;
 
 /** A console message that counts against a clean console: an error or a warning, but for the driver's performance notes. */
-const consoleProblem = (m) => (m.type() === "error" || m.type() === "warning") && !GL_DRIVER_NOTE.test(m.text());
+const isConsoleProblem = (m) => (m.type() === "error" || m.type() === "warning") && !GL_DRIVER_NOTE.test(m.text());
 
 async function waitFor(url, ms = 60_000) {
   const end = Date.now() + ms;
@@ -132,7 +132,7 @@ try {
     const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
     const problems = [];
     page.on("console", (m) => {
-      if (consoleProblem(m)) problems.push(m.text());
+      if (isConsoleProblem(m)) problems.push(m.text());
     });
     page.on("pageerror", (e) => problems.push(String(e)));
     await page.goto(`${BASE}/?fixture=1${theme === "light" ? "" : `&theme=${theme}`}`);
@@ -149,7 +149,7 @@ try {
     const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
     const problems = [];
     page.on("console", (m) => {
-      if (consoleProblem(m)) problems.push(m.text());
+      if (isConsoleProblem(m)) problems.push(m.text());
     });
     page.on("pageerror", (e) => problems.push(String(e)));
     await page.goto(`${BASE}/?fixture=1`);
@@ -348,7 +348,7 @@ try {
     const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
     const problems = [];
     page.on("console", (m) => {
-      if (consoleProblem(m)) problems.push(m.text());
+      if (isConsoleProblem(m)) problems.push(m.text());
     });
     page.on("pageerror", (e) => problems.push(String(e)));
     await page.goto(`${BASE}/?fixture=1`);
@@ -500,7 +500,7 @@ try {
     const page = await context.newPage();
     const problems = [];
     page.on("console", (m) => {
-      if (consoleProblem(m)) problems.push(m.text());
+      if (isConsoleProblem(m)) problems.push(m.text());
     });
     await page.goto(`${BASE}/?fixture=1&airline=DAL&state=taxiing&theme=dark`);
     const card = page.locator("section[aria-label^='Selected flight']");
@@ -701,7 +701,7 @@ try {
     const page = await browser.newPage({ viewport: { width, height }, isMobile: width < 500, hasTouch: width < 500 });
     const problems = [];
     page.on("console", (m) => {
-      if (consoleProblem(m)) problems.push(m.text());
+      if (isConsoleProblem(m)) problems.push(m.text());
     });
     await page.goto(`${BASE}/?fixture=1${theme === "dark" ? "&theme=dark" : ""}#map=6.5/33.5/-84.4`);
     await page.locator("main[data-on-map]").waitFor({ timeout: 30_000 }).catch(() => {});
@@ -876,7 +876,8 @@ try {
       ["military", "Military aircraft in the area"],
     ]) {
       const page = await open(`&alerts=${kind}`, "granted", true);
-      await page.waitForFunction(() => window.__notes.length > 0, null, { timeout: 10_000 }).catch(() => {});
+      // Pushback's script waits out thirty-odd steps before the aircraft moves, which a software GPU can stretch past ten seconds.
+      await page.waitForFunction(() => window.__notes.length > 0, null, { timeout: 30_000 }).catch(() => {});
       await sleep(3000);
       check(`alerts: ${kind} is notified exactly once`, JSON.stringify(await notes(page)) === JSON.stringify([title]), JSON.stringify(await notes(page)));
       await page.close();
@@ -920,7 +921,7 @@ try {
     const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
     const problems = [];
     page.on("console", (m) => {
-      if (consoleProblem(m)) problems.push(m.text());
+      if (isConsoleProblem(m)) problems.push(m.text());
     });
     page.on("pageerror", (e) => problems.push(String(e)));
     // Alerts on, to see the live path (the poll, not a script) tell of the followed flight.

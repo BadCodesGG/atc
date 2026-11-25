@@ -46,6 +46,14 @@ describe("parseRoute", () => {
     expect(r?.destination.code).toBe("CYUL");
   });
 
+  it("knows a renamed airport by the codes adsbdb still gives it, and names that end by its new code", () => {
+    const djt = { code: "djt" as const, icao: "KDJT", formerly: { code: "pbi", icao: "KPBI" } };
+    const r = parseRoute(answer(["PBI", "KPBI", "West Palm Beach"], ["JFK", "KJFK", "New York"]), djt);
+    expect(r?.origin.code).toBe("DJT");
+    expect(r?.destination.code).toBe("JFK");
+    expect(parseRoute(answer(["", "KPBI", "West Palm Beach"], ["JFK", "KJFK", "New York"]), djt)?.origin.code).toBe("DJT");
+  });
+
   it("keeps where each end is, when adsbdb gives it, so the map can draw the route", () => {
     const a = answer(["ATL", "KATL", "Atlanta"], ["PHX", "KPHX", "Phoenix"]);
     Object.assign(a.response.flightroute.origin, { latitude: 33.6367, longitude: -84.428101 });

@@ -1,9 +1,10 @@
 import { designator, type FlightState } from "./aircraft-state";
 import { iataFlight } from "./airline-codes";
 import type { AirportMap, Point } from "./airport-map";
+import { regionName } from "./airport-search";
 import { AIRPORTS, type Airport } from "./airports";
 import { airlineName, typeName } from "./flight-names";
-import { type FlightAnswer, lookupCallsign } from "./flight-lookup";
+import { type FlightAnswer, flightKey, lookupRegistration } from "./flight-lookup";
 import { toLocal } from "./geo";
 import type { FlightRoute } from "./routes";
 import { RADIUS_NM } from "./traffic";
@@ -88,42 +89,6 @@ export interface SearchResults {
 }
 
 const LIMIT = { flights: 6, places: 6, airports: 4 };
-
-/** The state each airport is in, abbreviation and name: the airport list does not carry one. */
-const STATES: Record<string, [string, string]> = {
-  atl: ["GA", "Georgia"],
-  pit: ["PA", "Pennsylvania"],
-  jfk: ["NY", "New York"],
-  dfw: ["TX", "Texas"],
-  ord: ["IL", "Illinois"],
-  den: ["CO", "Colorado"],
-  lax: ["CA", "California"],
-  mco: ["FL", "Florida"],
-  las: ["NV", "Nevada"],
-  mia: ["FL", "Florida"],
-  sfo: ["CA", "California"],
-  clt: ["NC", "North Carolina"],
-  sea: ["WA", "Washington"],
-  phx: ["AZ", "Arizona"],
-  ewr: ["NJ", "New Jersey"],
-  iah: ["TX", "Texas"],
-  bos: ["MA", "Massachusetts"],
-  msp: ["MN", "Minnesota"],
-  dtw: ["MI", "Michigan"],
-  lga: ["NY", "New York"],
-  fll: ["FL", "Florida"],
-  phl: ["PA", "Pennsylvania"],
-  iad: ["VA", "Virginia"],
-  slc: ["UT", "Utah"],
-  san: ["CA", "California"],
-  bna: ["TN", "Tennessee"],
-  bwi: ["MD", "Maryland"],
-  tpa: ["FL", "Florida"],
-  dca: ["VA", "Virginia"],
-  aus: ["TX", "Texas"],
-  hnl: ["HI", "Hawaii"],
-  cle: ["OH", "Ohio"],
-};
 
 // ---------------------------------------------------------------- what is on screen
 
@@ -241,27 +206,35 @@ function airportHits(query: string, here: Airport["code"]): AirportHit[] {
   const hits: AirportHit[] = [];
   for (const a of AIRPORTS) {
     if (a.code === here) continue;
-    const [abbr, state] = STATES[a.code] ?? ["", ""];
+    // The state's code and full name, from the airport list ("DC", "District of Columbia").
+    const abbr = a.state;
+    const state = regionName(a.country, a.state);
     const score = overall(query, (t) =>
       Math.max(
         tiered(a.code, t, [100, 80]),
         tiered(a.icao.toLowerCase(), t, [95, 70]),
+        // A renamed airport still answers to its old codes, as the picker does ("pbi" for DJT).
+        a.formerly ? tiered(a.formerly.code, t, [100, 80]) : 0,
+        a.formerly ? tiered(a.formerly.icao.toLowerCase(), t, [95, 70]) : 0,
         tiered(a.city.toLowerCase(), t, [90, 72, 60]),
         t === abbr.toLowerCase() ? 68 : 0,
         tiered(state.toLowerCase(), t, [66, 58]),
         tiered(a.name.toLowerCase(), t, [0, 55, 50]),
       ),
     );
-    if (score) hits.push({ kind: "airport", score, code: a.code, title: a.code.toUpperCase(), name: a.name, where: state ? `${a.city}, ${state}` : a.city });
+    if (score) hits.push({ kind: "airport", score, code: a.code, title: a.code.toUpperCase(), name: a.name, where: `${a.city}, ${state}` });
   }
   return hits.sort((a, b) => b.score - a.score || a.title.localeCompare(b.title));
 }
 
-/** Whether the query could be a callsign or flight number worth asking the network about. */
+/** Whether the query could be a callsign, flight number or tail number worth asking the network about, and the spelling to ask by. */
 function remoteCallsign(query: string): string | null {
   const compact = query.replace(/\s+/g, "");
+  // A tail may carry no digit ("G-ZBKJ"); a callsign worth asking about carries both.
+  const registration = lookupRegistration(compact);
+  if (registration && compact.includes("-")) return registration;
   if (!/[a-z]/i.test(compact) || !/\d/.test(compact)) return null;
-  return lookupCallsign(compact);
+  return flightKey(compact);
 }
 
 export function search(input: string, data: SearchData): SearchResults {
@@ -306,13 +279,20 @@ export interface RemoteSummary {
   nearest: Airport["code"];
   /** "34 nm from PHX", or "over PHX" within a mile. */
   nearness: string;
-  /** Whether it is within the scene's range of a listed airport other than `here`, so opening that airport can show it. */
-  openable: boolean;
+  /**
+   * What picking it does: open the listed airport it is within the scene's range of (`nearest`) and
+   * select it there; select it in the diorama on screen, when that airport is `here`; or, anywhere else,
+   * fly the world map to it, select it and follow it.
+   */
+  opens: "airport" | "here" | "map";
+  /** The name it is selected by where it opens: the callsign it sends, else its hex upper-cased, as the traffic names it. */
+  selectBy: string | null;
 }
 
 export function remoteSummary(flight: FlightAnswer, here: Airport["code"]): RemoteSummary {
   const { airport, nm } = nearestAirport(flight.latitude, flight.longitude);
   const code = airport.code.toUpperCase();
+  const selectBy = flight.callsign ?? flight.hex?.toUpperCase() ?? null;
   return {
     callsign: flight.callsign,
     aircraft: [typeName(flight.typeCode), flight.registration].filter(Boolean).join(" · "),
@@ -320,6 +300,26 @@ export function remoteSummary(flight: FlightAnswer, here: Airport["code"]): Remo
     route: flight.route ? `${flight.route.origin.code} → ${flight.route.destination.code}` : "",
     nearest: airport.code,
     nearness: nm < 1 ? `over ${code}` : `${Math.round(nm).toLocaleString("en-US")} nm from ${code}`,
-    openable: nm <= RADIUS_NM && airport.code !== here,
+    // A flight with nothing to pick it by at an airport (no callsign, no hex) is found on the map, where it was seen.
+    opens: nm > RADIUS_NM || !selectBy ? "map" : airport.code === here ? "here" : "airport",
+    selectBy,
   };
+}
+
+/** What a flight elsewhere's row offers: the words for what choosing it does, and whether that can work. */
+export interface RemoteOffer {
+  label: string;
+  enabled: boolean;
+}
+
+/**
+ * The offer for a flight elsewhere. Following on the world map needs the map there and able to take
+ * the camera (`mapFollows`); opening an airport does not, nor showing the flight in the diorama on
+ * screen where the diorama draws it (`onScreen`). A flight near the airport on screen that the diorama
+ * does not draw is followed on the map instead.
+ */
+export function remoteOffer(summary: RemoteSummary, mapFollows: boolean, onScreen: boolean): RemoteOffer {
+  if (summary.opens === "airport") return { label: `Open ${summary.nearest.toUpperCase()}`, enabled: true };
+  if (summary.opens === "here" && onScreen) return { label: "Show", enabled: true };
+  return mapFollows ? { label: "Follow on map", enabled: true } : { label: "Map unavailable", enabled: false };
 }

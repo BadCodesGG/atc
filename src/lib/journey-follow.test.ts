@@ -95,7 +95,7 @@ describe("the journey's origin as the panel says it", () => {
   });
 
   it("is the route's origin when that is not built and the journey's own frame is the nearest built airport", () => {
-    // A flight picked on the map out of Greenville-Spartanburg: ATL is only the nearest of the 32.
+    // A flight picked on the map out of Greenville-Spartanburg, which is not one of the 67: the frame is a built airport near it.
     expect(follow({ route: route("GSP", "ATL"), originKnown: false }).status(0).from).toBe("GSP");
   });
 

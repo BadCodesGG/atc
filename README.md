@@ -1,13 +1,13 @@
 # ATC
 
-**Every aircraft at 32 US airports, live, from a world map down to the gate.**
+**Every aircraft at 67 US airports, live, from a world map down to the gate.**
 Each airport's real runways, taxiways, aprons and terminals are drawn as a 3D diorama under a map that flies down into it, and the traffic from the open ADS-B feeds moves on it as it happens.
 
 **Live: [atc.badcodes.dev](https://atc.badcodes.dev)**
 
 https://github.com/user-attachments/assets/7eec05ea-d3fb-420a-b132-29508b34eba6
 
-The airport layouts come from OpenStreetMap, the aircraft from [adsb.lol](https://adsb.lol) (with [adsb.fi](https://adsb.fi) as a fallback), the weather from each airport's own METAR, and the light from the sun's real position at that airport. Follow one flight and the camera carries it gate to gate: out of its origin's diorama, across the map and into its destination's.
+The airport layouts come from OpenStreetMap, the aircraft from [adsb.lol](https://adsb.lol) (with [adsb.fi](https://adsb.fi) as a fallback), the weather from each airport's own METAR (or the nearest station's, at a field that issues none), and the light from the sun's real position at that airport. Follow one flight and the camera carries it gate to gate: out of its origin's diorama, across the map and into its destination's.
 
 The app keeps no database. The airport layouts and procedures are committed JSON, and everything live is read from public feeds on request.
 
@@ -16,7 +16,7 @@ The app keeps no database. The airport layouts and procedures are committed JSON
 | | |
 |---|---|
 | **Fly in** | Start on the world map, where each airport shows its live aircraft count, and scroll into one. The map tilts and the airport's ground plan rises out of it. |
-| **Pick an airport** | Any of the 32 in the picker, or by URL (`?airport=atl`). |
+| **Pick an airport** | Any of the 67 in the picker, or by URL (`?airport=atl`). |
 | **Select a flight** | Click an aircraft for its card: callsign, type, route, altitude, speed, state (parked, pushing back, taxiing, holding, climbing, on approach) and, where Planespotters has one, a photo. |
 | **See where it is going** | The predicted taxi route along the airport's taxiway graph, and the FAA's published approach or departure drawn for the runway in use. |
 | **Follow a journey** | The camera follows a flight from its origin diorama over the map and into the destination's diorama. |

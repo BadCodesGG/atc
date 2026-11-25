@@ -102,8 +102,13 @@ export const defaultFetcher: Fetcher = async (url) => {
 
 export type SourceName = "adsb.lol" | "adsb.fi";
 
-/** What a caller wants: the aircraft within a radius of a point, or one by its ICAO address, or those sending a callsign or squawking a code. */
-export type Query = { kind: "point"; latitude: number; longitude: number; radiusNm: number } | { kind: "hex"; hex: string } | { kind: "callsign"; callsign: string } | { kind: "squawk"; code: string };
+/** What a caller wants: the aircraft within a radius of a point, or one by its ICAO address, or those sending a callsign, registered as a tail number, or squawking a code. */
+export type Query =
+  | { kind: "point"; latitude: number; longitude: number; radiusNm: number }
+  | { kind: "hex"; hex: string }
+  | { kind: "callsign"; callsign: string }
+  | { kind: "registration"; registration: string }
+  | { kind: "squawk"; code: string };
 
 /** A point query; throws on a radius the upstream would refuse. */
 export function pointQuery(latitude: number, longitude: number, radiusNm: number): Query {
@@ -134,19 +139,23 @@ interface Provider {
   gapMs: number;
 }
 
-/** The path after the host, the same on both: the two speak the same v2 API for these. */
-const lookupPath = (q: Exclude<Query, { kind: "point" }>) => (q.kind === "hex" ? `v2/hex/${q.hex}` : q.kind === "callsign" ? `v2/callsign/${q.callsign}` : `v2/sqk/${q.code}`);
+/**
+ * The path after the host: the two speak the same v2 API for these, but for a tail number, which
+ * adsb.lol serves at `reg` and adsb.fi at `registration` (`registrationPath`).
+ */
+const lookupPath = (q: Exclude<Query, { kind: "point" }>, registrationPath: string) =>
+  q.kind === "hex" ? `v2/hex/${q.hex}` : q.kind === "callsign" ? `v2/callsign/${q.callsign}` : q.kind === "registration" ? `v2/${registrationPath}/${q.registration}` : `v2/sqk/${q.code}`;
 
-/** In the order they are tried. A hex, callsign or squawk reaches a URL only after readHex, lookupCallsign or readSquawk has checked it. */
+/** In the order they are tried. A hex, callsign, tail number or squawk reaches a URL only after readHex, lookupCallsign, lookupRegistration or readSquawk has checked it. */
 const PROVIDERS: readonly Provider[] = [
   {
     name: "adsb.lol",
-    url: (q) => (q.kind === "point" ? `https://api.adsb.lol/v2/point/${q.latitude}/${q.longitude}/${q.radiusNm}` : `https://api.adsb.lol/${lookupPath(q)}`),
+    url: (q) => (q.kind === "point" ? `https://api.adsb.lol/v2/point/${q.latitude}/${q.longitude}/${q.radiusNm}` : `https://api.adsb.lol/${lookupPath(q, "reg")}`),
     gapMs: 0,
   },
   {
     name: "adsb.fi",
-    url: (q) => (q.kind === "point" ? `https://opendata.adsb.fi/api/v3/lat/${q.latitude}/lon/${q.longitude}/dist/${q.radiusNm}` : `https://opendata.adsb.fi/api/${lookupPath(q)}`),
+    url: (q) => (q.kind === "point" ? `https://opendata.adsb.fi/api/v3/lat/${q.latitude}/lon/${q.longitude}/dist/${q.radiusNm}` : `https://opendata.adsb.fi/api/${lookupPath(q, "registration")}`),
     gapMs: ADSB_FI_GAP_MS,
   },
 ];

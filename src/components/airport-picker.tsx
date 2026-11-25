@@ -1,6 +1,6 @@
 import { type CSSProperties, type KeyboardEvent, useEffect, useId, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { groupAirports, matchAirports, placeOf } from "@/lib/airport-search";
+import { placeOf, searchAirports } from "@/lib/airport-search";
 import { type Airport, AIRPORTS } from "@/lib/airports";
 import { RAISED, RING } from "./shadows";
 
@@ -89,7 +89,7 @@ function AirportSearch({ current, anchor, onClose, onPick }: { current: Airport;
   const listId = `${id}-list`;
   const optionId = (code: string) => `${id}-option-${code}`;
   const [query, setQuery] = useState("");
-  const groups = useMemo(() => groupAirports(matchAirports(AIRPORTS, query)), [query]);
+  const groups = useMemo(() => searchAirports(AIRPORTS, query), [query]);
   const flat = useMemo(() => groups.flatMap((group) => group.airports), [groups]);
   // Opens on the airport being shown, so a reader who wants a neighbour in the list starts there.
   const [active, setActive] = useState(() => Math.max(0, flat.findIndex((a) => a.code === current.code)));

@@ -43,7 +43,7 @@ import { quietArrival } from "@/lib/journey-arrival";
 import { journeyFrame, type ReaderAction, releasesJourney } from "@/lib/journey-release";
 import { arrivedCard, selectedOf } from "@/lib/journey-card";
 import { flightPhase, journeyView } from "@/lib/journey-view";
-import { lostNote, type MapFlight, mapFlightCard } from "@/lib/globe/map-flight";
+import { type FlightIdentity, lostNote, type MapFlight, mapFlightCard, soughtStep } from "@/lib/globe/map-flight";
 // weather
 import type { Metar } from "@/lib/metar";
 import { atmosphere, backdropOver } from "@/lib/scene/atmosphere";
@@ -54,6 +54,9 @@ import type { Replay, ReplayRate } from "@/lib/replay";
 // /replay
 // search
 import { useSearch } from "./use-search";
+import type { SearchProps } from "./search-box";
+import type { FlightAnswer } from "@/lib/flight-lookup";
+import type { RemoteSummary } from "@/lib/search";
 import { type RadarControl, useRadar } from "./use-radar";
 // alerts
 import { inBounds } from "@/lib/alerts";
@@ -103,6 +106,13 @@ const MAP_FOLLOW_MS = 250;
 const SCRIM_ROW_PX = 56;
 /** A flight followed from the map this near its origin, metres, brings that airport's diorama up first. */
 const FOLLOW_NEAR_M = 150_000;
+/**
+ * How long a flight the search sent the map to may take to be selected there and still be followed,
+ * ms: the fly there, and a few reads of its traffic.
+ */
+const FOUND_WAIT_MS = 40_000;
+/** How soon to look again for a found flight selected on the map but not drawn yet, ms. */
+const FOUND_RETRY_MS = 250;
 /**
  * The followed flight's beacon shows where its model is shorter on screen than BEACON_UNTIL_PX, fully
  * from BEACON_FADE_PX shorter than that; the model's length is measured as a typical airliner's.
@@ -161,6 +171,8 @@ interface World {
   alerts: AlertsControl;
   /** The flight selected on the map, which outlives each airport's diorama like the map does; null with none. */
   mapFlight: MapFlight | null;
+  /** Whether the world map has been made (WebGL2, and its code loaded): a flight can be followed on it. */
+  globeReady: boolean;
   /** The map's flight card, which the selected aircraft is kept clear of. */
   mapCardRef: RefObject<HTMLDivElement | null>;
   /** The journey's card on the map. */
@@ -313,6 +325,7 @@ export function AtcApp({ initialTheme, initialAirport, initialFilters }: { initi
   const leadRef = useRef<Lead>({ by: "scene", armed: false, land: false });
   const [onMap, setOnMap] = useState(false);
   const [mapFlight, setMapFlight] = useState<MapFlight | null>(null);
+  const [globeReady, setGlobeReady] = useState(false);
   const mapCardRef = useRef<HTMLDivElement>(null);
   const journeyCardRef = useRef<HTMLDivElement>(null);
   /** The theme and airport for the map, which is made once, outside React's render. */
@@ -432,6 +445,7 @@ export function AtcApp({ initialTheme, initialAirport, initialFilters }: { initi
       const named = mapHashCamera(hash) !== null;
       globe = new GlobeMap(container, { theme: themeRef.current, airport: airportRef.current, fixture });
       globeRef.current = globe;
+      setGlobeReady(true);
       globe.setFilters(filtersRef.current);
       globe.setSelectionListener(setMapFlight);
       globe.setCardRect(() => mapCardRef.current?.firstElementChild?.getBoundingClientRect() ?? null);
@@ -458,6 +472,7 @@ export function AtcApp({ initialTheme, initialAirport, initialFilters }: { initi
     return () => {
       stopped = true;
       if (globeRef.current === globe) globeRef.current = null;
+      setGlobeReady(false);
       globe?.dispose();
     };
   }, [hasWebGL2]);
@@ -526,7 +541,7 @@ export function AtcApp({ initialTheme, initialAirport, initialFilters }: { initi
     setSwitched(true);
   };
 
-  const world: World = { globeRef, leadRef, mapRef, setLead, onMap, source, journeyRef, journey, journeyHexRef, startJourney, stopJourney, journeyToMap, journeyLanded, showMap: setOnMap, radar, alerts, mapFlight, mapCardRef, journeyCardRef };
+  const world: World = { globeRef, leadRef, mapRef, setLead, onMap, source, journeyRef, journey, journeyHexRef, startJourney, stopJourney, journeyToMap, journeyLanded, showMap: setOnMap, radar, alerts, mapFlight, globeReady, mapCardRef, journeyCardRef };
   return (
     <main data-theme={theme} data-on-map={onMap || undefined} className="relative h-dvh w-full overflow-clip bg-paper font-sans text-ink">
       {/* The world map, under the diorama; shown once the page knows which of the two leads. MapLibre's
@@ -554,7 +569,7 @@ interface ViewerProps {
 }
 
 function Viewer({ airport, theme, onTheme, onAirport, filters, onFilters, focusPicker, world, hasWebGL2 }: ViewerProps) {
-  const { globeRef, leadRef, mapRef, setLead, onMap, source, journeyRef, journey, journeyHexRef, radar, alerts, mapFlight, mapCardRef, journeyCardRef } = world;
+  const { globeRef, leadRef, mapRef, setLead, onMap, source, journeyRef, journey, journeyHexRef, radar, alerts, mapFlight, globeReady, mapCardRef, journeyCardRef } = world;
   const feedAlerts = alerts.feed;
   const viewAlerts = alerts.view;
   /** The layer holding the diorama and everything pinned to it, faded in over the map as the camera closes on the airport. */
@@ -756,6 +771,55 @@ function Viewer({ airport, theme, onTheme, onAirport, filters, onFilters, focusP
       world.journeyToMap(globe.view, airportByCode(globe.airportCode) ?? origin, performance.now());
     });
   };
+
+  // The map can take the camera for a flight the search found: made, and either leading already or with
+  // the diorama there to hand over from (toMap). The search offers "Follow on map" on this.
+  const mapFollows = globeReady && (onMap || status === "ready");
+  /**
+   * A flight the search found anywhere, out of range of a built airport: the map takes the camera (as a
+   * pick of another airport has it), flies to the flight and selects it once its traffic shows it; the
+   * flight is then followed as the map card's Follow does (followMapFlight), from wherever it is.
+   */
+  const soughtRef = useRef<FlightIdentity | null>(null);
+  const soughtTimerRef = useRef(0);
+  const followOnMap = (flight: FlightAnswer, summary: RemoteSummary) => {
+    const globe = globeRef.current;
+    // As toMap needs: with the diorama leading, its scene to hand the camera over from.
+    if (!globe || !mapFollows || (leadRef.current.by === "scene" && !sceneRef.current)) return;
+    world.stopJourney();
+    if (leadRef.current.by === "scene") toMap();
+    const sought: FlightIdentity = { hex: flight.hex, callsign: summary.selectBy };
+    globe.flyToFlight({ ...sought, latitude: flight.latitude, longitude: flight.longitude });
+    soughtRef.current = sought;
+    // Selected later than this (the reader's own click on it, say), it is not followed on the search's behalf.
+    window.clearTimeout(soughtTimerRef.current);
+    soughtTimerRef.current = window.setTimeout(() => {
+      if (soughtRef.current === sought) soughtRef.current = null;
+    }, FOUND_WAIT_MS);
+  };
+  useEffect(() => () => window.clearTimeout(soughtTimerRef.current), []);
+  // Every render, as actionsRef is kept: followMapFlight is made anew each render.
+  useEffect(() => {
+    const sought = soughtRef.current;
+    const step = soughtStep(sought, mapFlight, !!globeRef.current?.selectedAt);
+    if (step === "drop") soughtRef.current = null;
+    if (step === "follow") {
+      soughtRef.current = null;
+      followMapFlight(true);
+    }
+    // Selected before the map draws it: looked at again every so often, without a render, until it is drawn
+    // (then followed) or the search's wait ends (the timer above lets go of it). A new selection reruns this.
+    if (step !== "wait") return;
+    const timer = window.setInterval(() => {
+      if (soughtRef.current !== sought) window.clearInterval(timer);
+      else if (globeRef.current?.selectedAt) {
+        window.clearInterval(timer);
+        soughtRef.current = null;
+        followMapFlight(true);
+      }
+    }, FOUND_RETRY_MS);
+    return () => window.clearInterval(timer);
+  });
   // /map-select
 
   // journey
@@ -985,14 +1049,22 @@ function Viewer({ airport, theme, onTheme, onAirport, filters, onFilters, focusP
     onAirport: pickAirport,
   });
   // On the map, a flight or place here lands on the diorama first; its own frames would undo the pick before then.
-  const searchProps = {
+  const onSearchFlight = (id: string, follow: boolean) => afterLanding(() => search.onFlight(id, follow));
+  const searchProps: SearchProps = {
     ...search,
-    onFlight: (id: string, follow: boolean) => afterLanding(() => search.onFlight(id, follow)),
+    onFlight: onSearchFlight,
     onPlace: (place: Parameters<typeof search.onPlace>[0]) =>
       afterLanding(() => {
         clearFollow({ kind: "slide" }); // journey: the camera goes to the place, away from the flight
         search.onPlace(place);
       }),
+    // A flight elsewhere: the airport it is near opens on it; one near this airport is followed in its diorama while the diorama draws it; anywhere else the world map follows it.
+    onRemote: (flight, summary) => {
+      if (summary.opens === "airport" && summary.selectBy) pickAirport(summary.nearest, summary.selectBy);
+      else if (summary.opens === "here" && flight.hex && entriesRef.current.some((e) => e.aircraft.id === flight.hex)) onSearchFlight(flight.hex, true);
+      else followOnMap(flight, summary);
+    },
+    mapFollows,
   };
   // /search
 
