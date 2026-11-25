@@ -51,11 +51,14 @@ function end(raw: unknown): (RouteEnd & { icao: string | null }) | null {
   return { code, city, country: str(r.country_iso_name), icao, ...placed };
 }
 
+/** What a route is matched against: the airport's codes, and the ones it had before a rename. */
+export type RouteAirport = Pick<Airport, "code" | "icao" | "formerly">;
+
 /**
  * The route in an adsbdb answer, or null when there is none, it is malformed, or neither end is
  * `airport`. With no `airport` (a flight looked up from anywhere) any route is kept.
  */
-export function parseRoute(json: unknown, airport?: Pick<Airport, "code" | "icao" | "formerly">): FlightRoute | null {
+export function parseRoute(json: unknown, airport?: RouteAirport): FlightRoute | null {
   if (typeof json !== "object" || json === null) return null;
   const response = (json as Record<string, unknown>).response;
   if (typeof response !== "object" || response === null) return null;
@@ -113,11 +116,11 @@ export class RouteBook {
   private readonly pending = new Set<string>();
   private pausedUntil = 0;
 
-  private readonly airport: Pick<Airport, "code" | "icao" | "formerly">;
+  private readonly airport: RouteAirport;
   private readonly get: Fetcher;
   private readonly now: () => number;
 
-  constructor(airport: Pick<Airport, "code" | "icao" | "formerly">, get: Fetcher = defaultFetcher, now: () => number = Date.now) {
+  constructor(airport: RouteAirport, get: Fetcher = defaultFetcher, now: () => number = Date.now) {
     this.airport = airport;
     this.get = get;
     this.now = now;

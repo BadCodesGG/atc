@@ -199,14 +199,8 @@ const defaultFetcher: Fetcher = async (url) => {
 export async function fetchMetar(airport: Airport, get: Fetcher = defaultFetcher): Promise<Metar> {
   const stations = [airport.icao, ...(airport.metarFallback ?? [])];
   const json = await get(metarUrl(stations.join(",")));
-  for (const station of stations.slice(0, -1)) {
-    try {
-      return parseMetarResponse(json, station);
-    } catch {
-      // No report from this one: the next station stands in.
-    }
-  }
-  return parseMetarResponse(json, stations[stations.length - 1]);
+  const reported = (station: string) => Array.isArray(json) && json.some((e) => typeof e === "object" && e !== null && e.icaoId === station && typeof e.rawOb === "string");
+  return parseMetarResponse(json, stations.find(reported) ?? airport.icao);
 }
 
 /** "270° 15 kt, gusts 28", "Variable 3 kt", "Calm"; `short` for a phone. */

@@ -171,6 +171,11 @@ export function airportByCode(code: string): Airport | undefined {
   return AIRPORTS.find((a) => a.code === code) ?? AIRPORTS.find((a) => a.formerly?.code === code);
 }
 
+/** The airport with this ICAO code, or with it as its ICAO code before a rename ("KPBI" is DJT). */
+export function airportByIcao(icao: string): Airport | undefined {
+  return AIRPORTS.find((a) => a.icao === icao) ?? AIRPORTS.find((a) => a.formerly?.icao === icao);
+}
+
 const zoneFormats = new Map<string, Intl.DateTimeFormat>();
 
 /** The time zone's short name at a moment, "EDT" or "MST", for the clock that shows the airport's own time. */

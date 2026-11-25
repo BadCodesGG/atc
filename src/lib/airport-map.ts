@@ -273,6 +273,14 @@ const BOUNDARY_SLACK_M = 300;
 /** With no outline of its own, a runway with a vertex this close to the ARP is the airport's, and its outline is their box grown by OUTLINE_MARGIN_M. */
 const OWN_RUNWAY_M = 3000;
 const OUTLINE_MARGIN_M = 400;
+
+/** The axis-aligned box around some points, grown by `margin` metres on every side, wound counter-clockwise. */
+function boxAround(points: Point[], margin: number): Ring {
+  let [w, s, e, n] = [Infinity, Infinity, -Infinity, -Infinity];
+  for (const [x, y] of points) [w, s, e, n] = [Math.min(w, x), Math.min(s, y), Math.max(e, x), Math.max(n, y)];
+  [w, s, e, n] = [w - margin, s - margin, e + margin, n + margin].map(round1);
+  return [[w, s], [e, s], [e, n], [w, n]];
+}
 const MARKING_MAX_M = 300;
 const RUNWAY_MARKINGS = new Set(["displaced_threshold", "blast_pad", "stopway"]);
 
@@ -426,17 +434,12 @@ export function buildAirportMap(json: OverpassJson, airport: Airport, options: B
     candidates.sort((a, b) => score(b) - score(a) || Math.abs(signedArea(b.rings[0])) - Math.abs(signedArea(a.rings[0])));
     if (candidates.length && score(candidates[0]) > 0) boundary = cleanRings(candidates[0].rings) ?? [];
     else {
-      const own = json.elements
+      const ownRunwayPoints = json.elements
         .filter((el) => el.type === "way" && el.tags?.aeroway === "runway")
         .map((el) => wayPoints(el))
         .filter((pts) => pts.some(([x, y]) => Math.hypot(x, y) <= OWN_RUNWAY_M))
         .flat();
-      if (own.length) {
-        const xs = own.map(([x]) => x);
-        const ys = own.map(([, y]) => y);
-        const [w, s, e, n] = [Math.min(...xs) - OUTLINE_MARGIN_M, Math.min(...ys) - OUTLINE_MARGIN_M, Math.max(...xs) + OUTLINE_MARGIN_M, Math.max(...ys) + OUTLINE_MARGIN_M].map(round1);
-        boundary = [[[w, s], [e, s], [e, n], [w, n]]];
-      }
+      if (ownRunwayPoints.length) boundary = [boxAround(ownRunwayPoints, OUTLINE_MARGIN_M)];
     }
   }
   const insideBoundary = (p: Point) => !boundary.length || pointInRing(p, boundary[0]);

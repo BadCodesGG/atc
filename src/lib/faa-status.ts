@@ -4,7 +4,7 @@
  * is airport-wide, not per flight: a flight's own delay needs a schedule, which no free feed gives.
  */
 
-import { AIRPORTS, airportByCode } from "./airports";
+import { airportByCode, airportByIcao } from "./airports";
 
 export const FAA_STATUS_URL = "https://nasstatus.faa.gov/api/airport-status-information";
 
@@ -131,7 +131,7 @@ const US_ICAO = /^[KP][A-Z0-9]{3}$/;
  */
 export function faaCode(code: string): string {
   const c = code.toUpperCase();
-  const listed = airportByCode(c.toLowerCase()) ?? AIRPORTS.find((a) => a.icao === c || a.formerly?.icao === c);
+  const listed = airportByCode(c.toLowerCase()) ?? airportByIcao(c);
   if (listed) return /^K[A-Z0-9]{3}$/.test(listed.icao) ? listed.icao.slice(1) : listed.code.toUpperCase();
   return US_ICAO.test(c) ? c.slice(1) : c;
 }
