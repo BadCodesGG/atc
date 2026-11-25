@@ -379,6 +379,42 @@ describe("points and labels", () => {
     const out = build([way(1, { aeroway: "aerodrome", icao: "KXXX" }, big), way(2, { aeroway: "aerodrome", icao: ATL.icao }, small)]);
     expect(signedArea(out.boundary[0])).toBeCloseTo(40_000, 0);
   });
+
+  it("does not take a neighbour's outline: with none of its own, the outline is drawn around the airport's runways", () => {
+    // Beaufort Executive is mapped as a node; MCAS Beaufort's area is the only one in its query box.
+    const neighbour = [...square(3000, 3000, 6000), square(3000, 3000, 6000)[0]];
+    const out = build([
+      way(1, { aeroway: "aerodrome", icao: "KNBC" }, neighbour),
+      node(2, { aeroway: "aerodrome", icao: ATL.icao }, [0, 0]),
+      way(3, { aeroway: "runway", ref: "07/25" }, [[-500, -150], [500, 150]]),
+      way(4, { aeroway: "runway", ref: "05/23" }, [[5000, 5000], [7000, 6500]]),
+      way(5, { aeroway: "taxiway", ref: "A" }, [[-400, -250], [400, 50]]),
+      way(6, { aeroway: "taxiway", ref: "N1" }, [[5000, 4800], [7000, 6300]]),
+      way(7, { aeroway: "hangar" }, [...square(200, -400, 30), square(200, -400, 30)[0]]),
+      way(8, { aeroway: "hangar" }, [...square(5000, 4000, 30), square(5000, 4000, 30)[0]]),
+    ]);
+    expect(out.runways.map((r) => r.ref)).toEqual(["07/25"]);
+    expect(out.taxiways.map((t) => t.ref)).toEqual(["A"]);
+    expect(out.buildings).toHaveLength(1);
+    const ring = out.boundary[0];
+    expect(signedArea(ring)).toBeGreaterThan(0);
+    // Around the runway, with room for the field beside it, and nowhere near the neighbour.
+    for (const [x, y] of [[-500, -150], [500, 150], [215, -385]]) expect(ring.some(([rx]) => rx <= x) && ring.some(([rx]) => rx >= x) && ring.some(([, ry]) => ry <= y) && ring.some(([, ry]) => ry >= y)).toBe(true);
+    expect(Math.max(...ring.map(([x]) => x))).toBeLessThan(3000);
+  });
+
+  it("draws the outline around the runways of a field OSM maps with no aerodrome area at all", () => {
+    // Pittsburgh-Butler Regional: runways, taxiways and aprons, but no aerodrome area.
+    const out = build([way(1, { aeroway: "runway", ref: "08/26" }, [[-700, 0], [700, 0]]), way(2, { aeroway: "taxiway", ref: "A" }, [[-600, 100], [600, 100]])]);
+    expect(out.boundary).toEqual([[[-1100, -400], [1100, -400], [1100, 400], [-1100, 400]]]);
+    expect(out.runways.map((r) => r.ref)).toEqual(["08/26"]);
+  });
+
+  it("keeps the old outline rule when the airport has an outline of its own around the ARP", () => {
+    const own = [...square(-1000, -1000, 2000), square(-1000, -1000, 2000)[0]];
+    const out = build([way(1, { aeroway: "aerodrome" }, own), way(2, { aeroway: "runway", ref: "09/27" }, [[-800, 0], [800, 0]])]);
+    expect(signedArea(out.boundary[0])).toBeCloseTo(4_000_000, -3);
+  });
 });
 
 describe("the generated airport files", () => {
@@ -388,6 +424,8 @@ describe("the generated airport files", () => {
     pit: ["10C/28C", "10L/28R", "10R/28L", "14/32"],
     jfk: ["04L/22R", "04R/22L", "13L/31R", "13R/31L"],
   };
+  /** General aviation fields, asked for by name: OSM maps no terminal or gates at them, and they need none. Every hub keeps the full check. */
+  const SMALL_FIELDS = new Set(["btp", "bft"]);
 
   for (const airport of AIRPORTS) {
     it(`${airport.code} has its runways, taxiways, aprons and terminals, sane winding and fits the size budget`, () => {
@@ -405,12 +443,13 @@ describe("the generated airport files", () => {
         expect(r.ends).toHaveLength(2);
         expect(Math.hypot(r.ends[1].x - r.ends[0].x, r.ends[1].y - r.ends[0].y)).toBeGreaterThan(known ? 1500 : 500);
       }
-      for (const layer of [map.taxiways, map.aprons, map.terminals]) expect(layer.length).toBeGreaterThan(0);
+      const small = SMALL_FIELDS.has(airport.code);
+      for (const layer of small ? [map.taxiways, map.aprons] : [map.taxiways, map.aprons, map.terminals]) expect(layer.length).toBeGreaterThan(0);
       for (const f of [...map.aprons, ...map.terminals, ...map.buildings]) {
         f.rings.forEach((ring, i) => expect(i === 0 ? signedArea(ring) > 0 : signedArea(ring) < 0).toBe(true));
       }
       expect(signedArea(map.boundary[0])).toBeGreaterThan(1_000_000);
-      expect(map.gates.length).toBeGreaterThan(0);
+      if (!small) expect(map.gates.length).toBeGreaterThan(0);
       if (known) expect(map.towers.length).toBeGreaterThan(0);
     });
   }
