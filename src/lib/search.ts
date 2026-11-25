@@ -213,6 +213,9 @@ function airportHits(query: string, here: Airport["code"]): AirportHit[] {
       Math.max(
         tiered(a.code, t, [100, 80]),
         tiered(a.icao.toLowerCase(), t, [95, 70]),
+        // A renamed airport still answers to its old codes, as the picker does ("pbi" for DJT).
+        a.formerly ? tiered(a.formerly.code, t, [100, 80]) : 0,
+        a.formerly ? tiered(a.formerly.icao.toLowerCase(), t, [95, 70]) : 0,
         tiered(a.city.toLowerCase(), t, [90, 72, 60]),
         t === abbr.toLowerCase() ? 68 : 0,
         tiered(state.toLowerCase(), t, [66, 58]),

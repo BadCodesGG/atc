@@ -133,6 +133,16 @@ describe("airports", () => {
     }
   });
 
+  it("finds a renamed airport by its former codes, as the picker does", () => {
+    expect(airportsOf("pbi")[0]).toBe("djt");
+    expect(airportsOf("kpbi")[0]).toBe("djt");
+    for (const a of AIRPORTS.filter((x) => x.formerly)) {
+      const first = (q: string) => search(q, { here: a.code === "atl" ? "jfk" : "atl", places: [], flights: [] }).groups.find((g) => g.kind === "airports")?.hits[0];
+      expect(first(a.formerly!.code), a.formerly!.code).toMatchObject({ code: a.code });
+      expect(first(a.formerly!.icao), a.formerly!.icao).toMatchObject({ code: a.code });
+    }
+  });
+
   it("leaves out the airport on screen", () => {
     expect(airportsOf("atlanta")).toEqual([]);
     expect(airportsOf("georgia")).toEqual([]);
