@@ -33,6 +33,17 @@ export interface TrafficFeed {
   at(time: number): TrackedAircraft[];
 }
 
+/** The World map's feed: a TrafficFeed that also says how many aircraft it holds (none until a read lists one). */
+export interface MapFeed extends TrafficFeed {
+  readonly size: number;
+}
+
+/** One followed flight's own reads: its snapshots in, that flight out (null while it is not drawn). */
+export interface FlightFeed {
+  add(snapshot: Pick<TrafficSnapshot, "time" | "aircraft">): void;
+  at(time: number): TrackedAircraft | null;
+}
+
 /**
  * When the frame being drawn began, ms: one stamp for every view drawing it, and for anything that reads
  * between two frames. Null outside a page, or in a hidden one, which draws nothing.
@@ -59,7 +70,8 @@ export function oncePerFrame(read: () => number, stamp: () => number | null = fr
 }
 
 export class SharedSky {
-  readonly tracker = new Tracker({ geographic: true });
+  /** The one tracker. Each view reaches it through a feed of its own (airport, worldMap, flight), never directly. */
+  private readonly tracker = new Tracker({ geographic: true });
   /**
    * The moment the views draw, on the feed's clock: read once a frame, so every view drawing it reads the
    * tracker at the same moment, the poses agree to the last digit, and no view ever reads it at a moment
@@ -90,6 +102,27 @@ export class SharedSky {
     return {
       add: (snapshot) => this.tracker.add(snapshot, { feed, reckon: AIRPORT_RECKON }),
       at: (time) => this.tracker.at(time, { frame: origin, feeds: [feed] }),
+    };
+  }
+
+  /** The World map's feed as it fills and reads it: its region reads in; every aircraft the tracker holds out, whichever feed lists it, in `origin`'s metres. */
+  worldMap(origin: Origin): MapFeed {
+    const { tracker } = this;
+    return {
+      add: (snapshot) => tracker.add(snapshot, REGION_LISTING),
+      at: (time) => tracker.at(time, { frame: origin }),
+      get size() {
+        return tracker.size;
+      },
+    };
+  }
+
+  /** A followed flight's own reads (the Journey's hex poll) as it fills and reads them: in, as a feed of their own; out, that flight wherever any feed has it. */
+  flight(hex: string): FlightFeed {
+    const listing = hexListing(hex);
+    return {
+      add: (snapshot) => this.tracker.add(snapshot, listing),
+      at: (time) => this.tracker.one(hex, time),
     };
   }
 }

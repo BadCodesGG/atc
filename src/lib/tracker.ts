@@ -88,7 +88,7 @@ const ONE_FEED = "feed";
 
 /** Which poll a snapshot came from, and how long an aircraft it lists is flown on once it stops listing it. */
 export interface Listing {
-  /** Each poll's snapshots are a feed of their own: `airport:atl`, `region`, `hex`. */
+  /** Each poll's snapshots are a feed of their own (shared-sky.ts): `airport:<code>`, `region`, `hex:<hex>`. */
   feed?: string;
   /** Seconds an aircraft is flown on past this feed's last listing (the tracker's deadReckonMax by default). */
   reckon?: number;

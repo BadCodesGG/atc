@@ -2,10 +2,10 @@ import { afterEach, describe, expect, it } from "vitest";
 import { airportByCode } from "./airports";
 import type { FeedSource } from "./feed-source";
 import { toGeo, toLocal } from "./geo";
-import { MAP_ORIGIN, mergeRegions, skyFeatures } from "./globe/sky";
+import { MAP_ORIGIN, mergeRegions, skyFeatures } from "./globe/map-traffic";
 import { Journey } from "./journey-follow";
 import type { RegionAircraft } from "./region";
-import { oncePerFrame, REGION_LISTING, SharedSky } from "./shared-sky";
+import { oncePerFrame, SharedSky } from "./shared-sky";
 import { PLAYBACK_DELAY } from "./tracker";
 
 const ATL = airportByCode("atl")!;
@@ -86,6 +86,7 @@ describe("one tracker for the Diorama, the World map and the Journey", () => {
   it("draws a followed flight at the same place in all three at the same instant, whichever poll last heard it", async () => {
     const p = page();
     const airport = p.sky.airport(ATL.code, ATL);
+    const worldMap = p.sky.worldMap(MAP_ORIGIN);
     const j = new Journey(p.source, { hex: HEX, callsign: "DAL1947", origin: ATL, route: null }, p.sky);
     journeys.push(j);
     const start = p.time;
@@ -96,12 +97,12 @@ describe("one tracker for the Diorama, the World map and the Journey", () => {
       p.time = start + s;
       const flown = 200 * s;
       if (s % 5 === 0) airport.add(mergeRegions([{ cell: { latitude: 0, longitude: 0 }, time: p.time, aircraft: [climbing(flown)] }], ATL));
-      if (s % 10 === 3) p.sky.tracker.add(mergeRegions([{ cell: { latitude: 0, longitude: 0 }, time: p.time + 0.6, aircraft: [climbing(flown, 0.6)] }], MAP_ORIGIN), REGION_LISTING);
+      if (s % 10 === 3) worldMap.add(mergeRegions([{ cell: { latitude: 0, longitude: 0 }, time: p.time + 0.6, aircraft: [climbing(flown, 0.6)] }], MAP_ORIGIN));
       if (s % 5 === 2) await p.hexRead(climbing(flown));
       if (s < PLAYBACK_DELAY + 2) continue;
       // The diorama's frame, the map's and the journey's, all at this frame's one moment.
       const inDiorama = airport.at(p.sky.time()).find((a) => a.id === HEX)!;
-      const onMap = skyFeatures(p.sky.tracker.at(p.sky.time(), { frame: MAP_ORIGIN }), MAP_ORIGIN, [ATL], 75).aircraft.features.find((f) => f.properties.id === HEX)!;
+      const onMap = skyFeatures(worldMap.at(p.sky.time()), MAP_ORIGIN, [ATL], 75).aircraft.features.find((f) => f.properties.id === HEX)!;
       const inJourney = j.fix()!;
       const [dLat, dLon] = toGeo(ATL, inDiorama.x, inDiorama.y);
       const [mLon, mLat] = onMap.geometry.coordinates;
@@ -113,6 +114,31 @@ describe("one tracker for the Diorama, the World map and the Journey", () => {
       compared++;
     }
     expect(compared).toBeGreaterThan(40);
+  });
+
+  it("gives each view a feed of its own: the map reads every aircraft, as long as its region reads list them; a flight's reads, that flight", () => {
+    const p = page();
+    const airport = p.sky.airport(ATL.code, ATL);
+    const worldMap = p.sky.worldMap(MAP_ORIGIN);
+    const flight = p.sky.flight(HEX);
+    const other = { ...climbing(0), id: "a00001", callsign: "N1" };
+    expect(worldMap.size).toBe(0);
+    airport.add(mergeRegions([{ cell: { latitude: 0, longitude: 0 }, time: p.time, aircraft: [other] }], ATL));
+    worldMap.add(mergeRegions([{ cell: { latitude: 0, longitude: 0 }, time: p.time, aircraft: [climbing(0)] }], MAP_ORIGIN));
+    expect(worldMap.size).toBe(2);
+    p.time += PLAYBACK_DELAY + 2;
+    // The map reads both, whichever feed listed them; the Diorama only its own feed's.
+    expect(worldMap.at(p.sky.time()).map((a) => a.id).sort()).toEqual(["a00001", HEX]);
+    expect(airport.at(p.sky.time()).map((a) => a.id)).toEqual(["a00001"]);
+    expect(flight.at(p.sky.time())?.id).toBe(HEX);
+    // A region read flies an aircraft on for REGION_RECKON (30 s) after its last listing, the airport feed for 15 s.
+    p.time += 25;
+    expect(worldMap.at(p.sky.time()).map((a) => a.id)).toEqual([HEX]);
+    // The flight's own reads list it as a feed of their own, flown on for a minute.
+    flight.add(mergeRegions([{ cell: { latitude: 0, longitude: 0 }, time: p.time, aircraft: [climbing(5_000)] }], MAP_ORIGIN));
+    p.time += 50;
+    expect(flight.at(p.sky.time())?.id).toBe(HEX);
+    expect(worldMap.at(p.sky.time()).map((a) => a.id)).toEqual([HEX]);
   });
 
   it("draws the journey's flight from the airport feed's fixes before its own poll has heard it", () => {
