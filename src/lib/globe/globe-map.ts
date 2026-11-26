@@ -16,7 +16,7 @@ import { type EnRouteCamera, type Insets } from "./en-route";
 import { EnRouteController } from "./en-route-controller";
 import { AIRCRAFT_GLYPH, GLYPH_BOX } from "./aircraft-glyph";
 import { withMapHash } from "../share-link";
-import { finiteCamera, groundView, type Lens, type MapCamera, mapHashCamera, mapToOrbit, MAX_PITCH, orbitToMap, paddingFor, worldFloor } from "./camera";
+import { finiteCamera, type GroundBounds, groundView, type Lens, type MapCamera, mapHashCamera, mapToOrbit, MAX_PITCH, orbitToMap, paddingFor, viewArea, worldFloor } from "./camera";
 import { shiftClearOfCard } from "./clear-of-card";
 import { airportFeatures, type ProcedurePiece, procedureFeatures } from "./features";
 import { frameShift, freeBand, type Rect } from "./journey-frame";
@@ -363,10 +363,24 @@ export class GlobeMap {
     return mapToOrbit(this.camera, this.airport, this.lens);
   }
 
-  /** The ground in view, as its edges in degrees (east runs past 180 across the antimeridian). */
-  viewBounds(): { west: number; south: number; east: number; north: number } {
+  /**
+   * The ground in view, as its edges in degrees (east runs past 180 across the antimeridian): the one seam every
+   * "in view" reads (the header's count, the filters' options, the alerts, the region's traffic). On Map the map's
+   * own bounds; while an En-route 3D camera has the flight, the ground the journey's flat Map shot would show
+   * (viewArea), so the count and the alerts are as on Map.
+   */
+  viewBounds(): GroundBounds {
     const b = this.map.getBounds();
-    return { west: b.getWest(), south: b.getSouth(), east: b.getEast(), north: b.getNorth() };
+    const own = { west: b.getWest(), south: b.getSouth(), east: b.getEast(), north: b.getNorth() };
+    const shot = this.flatShot;
+    const container = this.map.getContainer();
+    const frame = { width: container.clientWidth, height: container.clientHeight, fovDeg: this.map.getVerticalFieldOfView() };
+    return viewArea(own, shot && frame.width > 0 && frame.height > 0 ? { camera: shot, frame, padding: this.anchorPadding } : null);
+  }
+
+  /** While an En-route 3D camera has the flight (its share above 0), the journey's flat Map camera, which "in view" reads; null on Map. */
+  private get flatShot(): MapCamera | null {
+    return this.enRouteBlend > 0 ? this.enRoute.journeyCamera : null;
   }
 
   /** How many aircraft the map draws in view; null while it is zoomed out past them or has read none. */
@@ -943,10 +957,9 @@ export class GlobeMap {
       this.map.getSource<GeoJSONSource>("trails")?.setData(trails);
       this.skyDrawn = showSky;
       if (showSky) {
-        const b = this.map.getBounds();
-        const bounds = { west: b.getWest(), east: b.getEast(), south: b.getSouth(), north: b.getNorth() };
+        const bounds = this.viewBounds();
         // The followed flight is drawn apart from the traffic, and counts as in view as well: always, while a 3D
-        // camera has it (the subject of the view, which Cockpit's eye sits inside and the map's bounds need not hold).
+        // camera has it (the subject of the view, which the journey's flat shot frames anyway).
         const followed = this.journeyData.features.filter((f) => f.properties?.part === "aircraft") as SkyFeatures["aircraft"]["features"];
         const counted = this.enRoute.in3D ? countInView(aircraft, bounds, followed) : countInView({ type: "FeatureCollection", features: [...aircraft.features, ...followed] }, bounds);
         this.inView = this.traffic.size || followed.length ? counted : null;
@@ -1194,17 +1207,18 @@ export class GlobeMap {
 
   /**
    * The ground in view, kept to a few degrees round the centre: tilted toward the horizon the map's
-   * bounds run hundreds of kilometres off, where nothing would be legible anyway.
+   * bounds run hundreds of kilometres off, where nothing would be legible anyway. In a 3D camera the journey's
+   * flat shot round its own centre (viewBounds), as on Map.
    */
   private visibleBounds() {
-    const b = this.map.getBounds();
-    const c = this.map.getCenter();
+    const b = this.viewBounds();
+    const c = this.flatShot ?? this.map.getCenter();
     const reach = 6;
     return {
-      west: Math.max(b.getWest(), c.lng - reach),
-      east: Math.min(b.getEast(), c.lng + reach),
-      south: Math.max(b.getSouth(), c.lat - reach),
-      north: Math.min(b.getNorth(), c.lat + reach),
+      west: Math.max(b.west, c.lng - reach),
+      east: Math.min(b.east, c.lng + reach),
+      south: Math.max(b.south, c.lat - reach),
+      north: Math.min(b.north, c.lat + reach),
     };
   }
 }

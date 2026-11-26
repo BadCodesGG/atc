@@ -9,7 +9,14 @@ import { bandPadding, blendPadding, EN_ROUTE_MAX_PITCH, type EnRouteCamera, EnRo
 import { blendPlacement, FALLBACK_NOTICE, type FallbackCause, FrameWatch, RETURN_TO_MAP_S, shareBlend, ShareEase } from "./en-route-journey";
 import type { EnRouteLayer } from "./en-route-layer";
 import type { Rect } from "./journey-frame";
-import { enRouteHaze, enRouteSky, flatSky, hazeStrength, mapBackground, HILLSHADE, HILLSHADE_UNDER, hillshadeLayer, PALETTES, TERRAIN, TERRAIN_SOURCE, terrainSource } from "./map-style";
+import { enRouteHaze, enRouteSky, flatSky, hazeStrength, horizonM, IMAGERY, type ImageryReach, imageryTileZoom, MAPLIBRE_LOD, mapBackground, HILLSHADE, HILLSHADE_UNDER, hillshadeLayer, PALETTES, TERRAIN, TERRAIN_SOURCE, terrainSource } from "./map-style";
+
+/**
+ * One of MapLibre's Mercator units (the world is 1 across) in metres at the equator: its own Earth's
+ * circumference (maplibre-gl's earthRadius, 6,371,008.8 m), which its tile distances are measured on; not
+ * camera.ts's WGS84 equator nor the haze's round-number radius.
+ */
+const MERCATOR_UNIT_M = 2 * Math.PI * 6_371_008.8;
 
 /** What the En-route view needs of the World map that holds it (globe-map.ts). */
 export interface EnRouteHost {
@@ -67,6 +74,8 @@ export class EnRouteController {
   private returnTimer: number | undefined;
   /** In the 3D view: the map camera of the journey's own flat shot this frame, where a return to Map lands. */
   private flatShot: FlatShot | null = null;
+  /** In the 3D view: how far Satellite's large-scale imagery reaches (the horizon), and the metres of ground in one of MapLibre's Mercator units at the eye. */
+  private readonly imageryReach: ImageryReach = { metres: 0, metresPerUnit: 0 };
   /**
    * In the 3D view: the camera placed last frame, centred where the camera looks at (the aircraft), before its
    * centre went out along the line of sight (sightPlacement). Another 3D camera eases in from it, not from the
@@ -238,6 +247,9 @@ export class EnRouteController {
     this.layer?.setAircraft(camera === "cockpit" ? null : pose, aircraftClass.model, aircraftClass.lengthM);
     // The far ground's haze round the eye, in the theme's horizon colour (a look near level sees the ground to it).
     this.layer?.setHaze({ eye, aboveM: overGround, colour: enRouteHaze(this.host.theme()), strength: hazeStrength(placed.pitchDeg) });
+    // Satellite's large-scale imagery reaches as far as the haze is full (imageryTileZoom reads this each tile).
+    this.imageryReach.metres = horizonM(overGround);
+    this.imageryReach.metresPerUnit = MERCATOR_UNIT_M * Math.cos((eye.latitude * Math.PI) / 180);
     return true;
   }
 
@@ -272,6 +284,12 @@ export class EnRouteController {
         map.setSky(enRouteSky(this.host.theme()));
         // The ground past the farthest tile drawn, which a look near level sees, in the sky's haze (mapBackground).
         map.setPaintProperty("background", "background-color", mapBackground(this.host.theme(), true));
+        // Satellite's imagery stays on its own large-scale product out to the horizon (imageryTileZoom).
+        const imagery = map.getSource(IMAGERY);
+        if (imagery) {
+          map.setSourceTileLodParams(MAPLIBRE_LOD.maxZoomLevelsOnScreen, MAPLIBRE_LOD.tileCountMaxMinRatio, IMAGERY);
+          if (imagery.calculateTileZoom) imagery.calculateTileZoom = imageryTileZoom(imagery.calculateTileZoom, this.imageryReach);
+        }
         // The layer's own WebGL (its shaders) is made as it is added, and throws if the context cannot.
         if (this.layer && !map.getLayer(this.layer.id)) map.addLayer(this.layer);
       } catch (error) {
@@ -301,6 +319,12 @@ export class EnRouteController {
       if (map.getSource(TERRAIN_SOURCE)) map.removeSource(TERRAIN_SOURCE);
       map.setSky(flatSky(this.host.theme()));
       map.setPaintProperty("background", "background-color", mapBackground(this.host.theme()));
+      // MapLibre's own level of detail back for the flat map's imagery.
+      const imagery = map.getSource(IMAGERY);
+      if (imagery?.calculateTileZoom) {
+        imagery.calculateTileZoom = undefined;
+        map.triggerRepaint();
+      }
     }
     // The model stands in for the flat marker and its ring.
     for (const id of ["journey-aircraft", "journey-beacon"]) map.setLayoutProperty(id, "visibility", on ? "none" : "visible");

@@ -101,12 +101,41 @@ it, with no second canvas.
   (`hazeStrength`), so Chase and Top look as they did; a drag tilting Chase up eases it in. The haze, the map's background past the farthest tile (`mapBackground`)
   and the sky's horizon are one colour per theme (`enRouteHaze`, the theme's `eyeLevel` horizon), so the
   ground, the haze and the sky meet without a line. Map has none of it.
+- **Satellite's imagery stays one product out to the horizon in a 3D camera** (`imageryTileZoom`,
+  `IMAGERY_NEAR_ZOOM` in `map-style.ts`). Cockpit and Side in Satellite showed a hard line about 40 km out
+  at 11,000 and 37,000 ft, olive beyond, grey near. It was not the haze: USGSImageryOnly serves a
+  different small-scale product at zoom 8 and under (mean colour 54/57/17 over the same Alabama ground at
+  zoom 8, 109/111/94 at zoom 9, measured on the tiles), and MapLibre's level of detail on a pitched map
+  dropped from 9 to 8 there. A haze starting nearer, as a share of the horizon distance, hazed the near
+  ground and still showed the line at 37,000 ft (tried and reverted). Instead, in a 3D camera the imagery
+  source's `calculateTileZoom` (MapLibre's own, from `setSourceTileLodParams` with its defaults,
+  `MAPLIBRE_LOD`) is floored at zoom 9 for every tile nearer than the horizon (`horizonM`, where the haze
+  is full), so the ground in sight is all the large-scale product and the olive one is only ever under full
+  haze; Map gets MapLibre's own back. It costs zoom-9 tiles to the horizon: imagery tiles drawn, floor off
+  against on in the same page with the tiles loaded, Cockpit 4 to 6 against 14 to 22 and Side 5 to 8
+  against 16 to 33 (11,000 and 37,000 ft); Chase and Top barely change. Imagery requests on entering
+  Cockpit from a fresh page: 107 at 11,000 ft and 131 at 37,000 ft (91 and 214 before, so within the
+  run-to-run spread), then Side 17 and 54 more (5 and 10 before). With the tiles loaded the frame
+  rate was the same either way on hardware GL, within the runs' own spread (Cockpit 123 to 148 fps off,
+  140 to 148 on); while the extra tiles are still arriving the first seconds of a camera run slower.
+  Light and Dark have no imagery and are unchanged. What still shows is the imagery's own
+  state mosaic (the Alabama and Georgia orthophotos differ in colour along the state line, at every zoom
+  and on Map too), which is the ground's picture, not a level of detail.
 - **The address carries the journey's flat shot in a 3D camera.** The map writes its camera into the
   address's `#map=` itself (`GlobeMap.addressCamera`, `withMapHash`, at most every 300 ms), not through
   MapLibre's own hash: that wrote the 3D camera's view past level (pitch 90), which on a reload MapLibre
   refused for being past the map's 78 and opened the world instead. In a 3D camera the address and the
   share link carry the journey's flat shot, so a reload opens on the flat map where the flight is; a
   `#map=` past 78 (an address made before) names no camera (`mapHashCamera`) and is dropped.
+- **"In view" in a 3D camera is the journey's flat shot's ground** (owner's decision). Past level the
+  map's own bounds are a point (Cockpit and Side at pitch 90 measured `[-85.42,33.7,-85.42,33.7]`), and in
+  Chase and Top a small area down the line of sight, so the header's "N aircraft in view", the filters'
+  options, the military and squawk alerts and the region's traffic reads saw only the followed flight.
+  While a 3D camera has the flight (its share above 0) they all read `GlobeMap.viewBounds`, the one seam:
+  the ground the journey's flat Map shot would show for the frame and the map's own padding
+  (`shotBounds`, `viewArea` in `src/lib/globe/camera.ts`, MapLibre's own `getBounds` worked through on a
+  flat map, its top cut under the horizon), so the count and the alerts are what Map would give. On Map
+  the map's own bounds are read unchanged. The followed flight counts in every 3D camera wherever it is.
 - **A drag peeks, and eases back.** In a 3D camera MapLibre's own drag, rotate, pinch and double-click
   handlers are off and the map's canvas takes pointer drags (mouse and touch alike) itself: a drag adds
   a bearing and tilt offset (`EnRoutePeek`, `peekPlacement`) on top of the rig's eased framing, so the
