@@ -74,6 +74,77 @@ export function paddingFor(anchor: { x: number; y: number }, width: number, heig
   };
 }
 
+/** A box on the ground, its edges in degrees (east runs past 180 across the antimeridian), as `map.getBounds()` gives it. */
+export interface GroundBounds {
+  west: number;
+  east: number;
+  south: number;
+  north: number;
+}
+
+/** The frame a camera draws into: its size in CSS pixels and its vertical field of view. */
+export interface ShotFrame {
+  width: number;
+  height: number;
+  fovDeg: number;
+}
+
+/** MapLibre's horizon: the frame's top is cut to just under it (getMercatorHorizon, maplibre-gl's mercator_utils.ts). */
+const HORIZON_SHARE = 0.85;
+const MAX_HORIZON_DEG = 89.25;
+
+/**
+ * The ground the flat map would show from `cam`, as MapLibre's own `getBounds()` measures it on a flat (Mercator)
+ * map: the frame's four corners, its top cut to just under the horizon, met on the ground, with the vanishing
+ * point at the padded centre. The pitch is kept to the flat map's own limit (MAX_PITCH), so the box is always a
+ * real area round the centre, even for a camera at the horizon.
+ */
+export function shotBounds(cam: MapCamera, frame: ShotFrame, padding: { top: number; bottom: number; left: number; right: number }): GroundBounds {
+  const pitch = Math.max(0, Math.min(MAX_PITCH, cam.pitch)) * RAD;
+  const d = cameraToCentrePx(frame);
+  const cx = padding.left + (frame.width - padding.left - padding.right) / 2;
+  const cy = padding.top + (frame.height - padding.top - padding.bottom) / 2;
+  const horizon = d * Math.min(Math.tan(Math.PI / 2 - pitch) * HORIZON_SHARE, Math.tan(MAX_HORIZON_DEG * RAD - pitch));
+  const top = Math.max(0, frame.height / 2 - horizon);
+  // The eye in pixels round the centre on the ground: x right across the frame, y ahead (up the frame), z up.
+  const eyeY = -d * Math.sin(pitch);
+  const eyeZ = d * Math.cos(pitch);
+  const worldPx = TILE * 2 ** cam.zoom;
+  const centreX = ((cam.lng + 180) / 360) * worldPx;
+  const centreY = ((180 - (180 / Math.PI) * Math.log(Math.tan(Math.PI / 4 + (cam.lat * RAD) / 2))) / 360) * worldPx;
+  const bearing = cam.bearing * RAD;
+  const out = { west: Infinity, east: -Infinity, south: Infinity, north: -Infinity };
+  for (const [x, y] of [[0, top], [frame.width, top], [frame.width, frame.height], [0, frame.height]]) {
+    const dx = x - cx;
+    const dy = y - cy;
+    // The ray through the pixel: d along the look, dx right, dy down the frame (down the frame is toward the eye and the ground).
+    const dirY = d * Math.sin(pitch) - dy * Math.cos(pitch);
+    const dirZ = Math.min(-1e-6, -d * Math.cos(pitch) - dy * Math.sin(pitch));
+    const t = -eyeZ / dirZ;
+    const right = dx * t;
+    const ahead = eyeY + dirY * t;
+    // Turned by the bearing (ahead is the bearing's direction), into Mercator pixels (y grows south).
+    const px = centreX + right * Math.cos(bearing) + ahead * Math.sin(bearing);
+    const py = centreY - (ahead * Math.cos(bearing) - right * Math.sin(bearing));
+    const lng = (px / worldPx) * 360 - 180;
+    const lat = (360 / Math.PI) * Math.atan(Math.exp(((180 - (py / worldPx) * 360) * Math.PI) / 180)) - 90;
+    out.west = Math.min(out.west, lng);
+    out.east = Math.max(out.east, lng);
+    out.south = Math.min(out.south, lat);
+    out.north = Math.max(out.north, lat);
+  }
+  return out;
+}
+
+/**
+ * The ground "in view" (the header's count, the filters' options and the alerts): the map's own bounds on Map;
+ * while an En-route 3D camera has the flight, the journey's flat Map shot's (shotBounds), exactly as if the reader
+ * were on Map. A 3D camera's own bounds are a point at pitch 90, or a small odd area down its line of sight.
+ */
+export function viewArea(own: GroundBounds, flat: { camera: MapCamera; frame: ShotFrame; padding: { top: number; bottom: number; left: number; right: number } } | null): GroundBounds {
+  return flat ? shotBounds(flat.camera, flat.frame, flat.padding) : own;
+}
+
 /** The map's centre is kept within this many degrees of the equator: past it the world view is all pole. */
 const MAX_CENTRE_LAT = 75;
 

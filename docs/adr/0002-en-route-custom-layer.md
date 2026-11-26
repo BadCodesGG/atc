@@ -107,6 +107,15 @@ it, with no second canvas.
   refused for being past the map's 78 and opened the world instead. In a 3D camera the address and the
   share link carry the journey's flat shot, so a reload opens on the flat map where the flight is; a
   `#map=` past 78 (an address made before) names no camera (`mapHashCamera`) and is dropped.
+- **"In view" in a 3D camera is the journey's flat shot's ground** (owner's decision). Past level the
+  map's own bounds are a point (Cockpit and Side at pitch 90 measured `[-85.42,33.7,-85.42,33.7]`), and in
+  Chase and Top a small area down the line of sight, so the header's "N aircraft in view", the filters'
+  options, the military and squawk alerts and the region's traffic reads saw only the followed flight.
+  While a 3D camera has the flight (its share above 0) they all read `GlobeMap.viewBounds`, the one seam:
+  the ground the journey's flat Map shot would show for the frame and the map's own padding
+  (`shotBounds`, `viewArea` in `src/lib/globe/camera.ts`, MapLibre's own `getBounds` worked through on a
+  flat map, its top cut under the horizon), so the count and the alerts are what Map would give. On Map
+  the map's own bounds are read unchanged. The followed flight counts in every 3D camera wherever it is.
 - **A drag peeks, and eases back.** In a 3D camera MapLibre's own drag, rotate, pinch and double-click
   handlers are off and the map's canvas takes pointer drags (mouse and touch alike) itself: a drag adds
   a bearing and tilt offset (`EnRoutePeek`, `peekPlacement`) on top of the rig's eased framing, so the
