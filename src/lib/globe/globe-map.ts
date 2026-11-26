@@ -11,7 +11,10 @@ import { REGION_LISTING, REGION_RECKON, type SharedSky } from "../shared-sky";
 import { PLAYBACK_DELAY, type TrackedAircraft, Tracker } from "../tracker";
 import { routeArcs } from "./arcs";
 import { toGeo, toLocal, type Origin } from "../geo";
-import type { JourneyFeatures } from "../journey-follow";
+import type { JourneyFeatures, JourneyFix } from "../journey-follow";
+import { classify } from "../aircraft-class";
+import { type EnRouteCamera, enRoutePose, EnRouteRig, enRouteShot, is3D } from "./en-route";
+import type { EnRouteLayer } from "./en-route-layer";
 import { AIRCRAFT_GLYPH, GLYPH_BOX } from "./aircraft-glyph";
 import { finiteCamera, groundView, type Lens, type MapCamera, mapToOrbit, orbitToMap, paddingFor, worldFloor } from "./camera";
 import { shiftClearOfCard } from "./clear-of-card";
@@ -19,7 +22,7 @@ import { airportFeatures, type ProcedurePiece, procedureFeatures } from "./featu
 import { frameShift, freeBand } from "./journey-frame";
 import { type Band, globeCapable, Guide } from "./handover";
 import { type FlightIdentity, isFlight, type MapFlight, markLost } from "./map-flight";
-import { aircraftOpacity, arcOpacities, buildingHeight, FLOW_DASHES, mapStyle, PALETTES, radarLayer, radarSource, ripple, SELECTION_DIM } from "./map-style";
+import { aircraftOpacity, arcOpacities, buildingHeight, FLOW_DASHES, mapStyle, PALETTES, radarLayer, radarSource, ripple, SELECTION_DIM, TERRAIN, TERRAIN_SOURCE, terrainSource } from "./map-style";
 import { pickAircraft, REACH_PX } from "./pick";
 import { isEstimated, selectedPath, selectionFeatures } from "./selected-path";
 import { TrackHistory } from "./track-history";
@@ -226,6 +229,21 @@ export class GlobeMap {
   private pageDrove = -Infinity;
   /** Told when the reader moves the map by hand. */
   private onUserMove: (() => void) | null = null;
+  /**
+   * The En-route view (en-route.ts): the camera framing the followed flight, Map (the flat map, the
+   * journey's own shot) or a 3D one, which tilts the map behind the aircraft, turns on terrain and draws
+   * its model (en-route-layer.ts, loaded on the first 3D pick).
+   */
+  private enRoute: EnRouteCamera = "map";
+  private layer: EnRouteLayer | null = null;
+  private layerLoading = false;
+  private readonly rig = new EnRouteRig();
+  /** Whether the rig has been started from the camera the map had when the 3D camera was picked. */
+  private rigStarted = false;
+  /** In a 3D camera: the journey's own (Map) shot, in the airport's metres, which the Handover still reads; null in Map. */
+  private journeyShot: OrbitView | null = null;
+  /** In a 3D camera: the camera this frame, as an orbit in the airport's metres aimed at the aircraft in the air. */
+  private enRouteView: OrbitView | null = null;
 
   constructor(container: HTMLElement, options: GlobeOptions) {
     this.container = container;
@@ -275,6 +293,8 @@ export class GlobeMap {
     });
     this.map.on("load", () => {
       this.applyRadar();
+      // A 3D camera picked before the style had loaded.
+      this.applyEnRoute();
       this.draw();
       void this.loadCounts();
       void this.loadRegion();
@@ -497,6 +517,112 @@ export class GlobeMap {
     this.onUserMove = listener;
   }
 
+  /** The En-route view's camera: Map, or a 3D one. */
+  get enRouteCamera(): EnRouteCamera {
+    return this.enRoute;
+  }
+
+  /**
+   * The camera a journey's Handover reads: in a 3D camera the journey's own Map shot (where the flat map
+   * would stand), so the Handover judges the flight's ends as it does on the flat map; otherwise the map's.
+   */
+  get journeyView(): OrbitView {
+    return this.journeyShot ?? this.view;
+  }
+
+  /**
+   * Picks the En-route view's camera. A 3D camera turns on the terrain and the aircraft's layer (both added
+   * only now: the flat map never loads them) and frames the flight from the next frame the journey steers.
+   * Map takes them off and brings the camera back to the ground. Returns, on leaving a 3D camera, the camera
+   * it had (an orbit in the airport's metres, aimed at the aircraft in the air), for the journey to ease its
+   * own shot in from; null otherwise.
+   */
+  setEnRouteCamera(camera: EnRouteCamera): OrbitView | null {
+    if (camera === this.enRoute) return null;
+    const left = is3D(this.enRoute) ? this.enRouteView : null;
+    this.enRoute = camera;
+    this.rig.reset();
+    this.rigStarted = false;
+    this.journeyShot = null;
+    this.enRouteView = null;
+    this.applyEnRoute();
+    if (!is3D(camera)) {
+      this.following = true;
+      this.map.jumpTo({ elevation: 0, pitch: Math.min(this.map.getPitch(), 60) });
+      this.following = false;
+    }
+    return left;
+  }
+
+  /** Brings the map to the En-route camera: terrain, the aircraft's layer, the followed flight's flat marks and the camera's clamp to the ground. Waits for the style. */
+  private applyEnRoute(): void {
+    const { map } = this;
+    if (!map.getLayer("aircraft")) return;
+    const on = is3D(this.enRoute);
+    map.setCenterClampedToGround(!on);
+    if (on) {
+      if (!map.getSource(TERRAIN_SOURCE)) map.addSource(TERRAIN_SOURCE, terrainSource());
+      if (!map.getTerrain()) map.setTerrain(TERRAIN);
+      if (this.layer) {
+        if (!map.getLayer(this.layer.id)) map.addLayer(this.layer);
+      } else if (!this.layerLoading) {
+        this.layerLoading = true;
+        void import("./en-route-layer")
+          .then(({ EnRouteLayer }) => {
+            this.layer = new EnRouteLayer();
+            this.paintLayer();
+            this.applyEnRoute();
+          })
+          .catch((error: unknown) => console.error("atc: the en-route view failed to load", error))
+          .finally(() => (this.layerLoading = false));
+      }
+    } else {
+      if (this.layer && map.getLayer(this.layer.id)) map.removeLayer(this.layer.id);
+      if (map.getTerrain()) map.setTerrain(null);
+      if (map.getSource(TERRAIN_SOURCE)) map.removeSource(TERRAIN_SOURCE);
+    }
+    // The model stands in for the flat marker and its ring.
+    for (const id of ["journey-aircraft", "journey-beacon"]) map.setLayoutProperty(id, "visibility", on ? "none" : "visible");
+  }
+
+  /** The aircraft's colours for the theme: light metal, painted in the selection colour. */
+  private paintLayer(): void {
+    this.layer?.setColours(PALETTES[this.theme].modelBody, PALETTES[this.theme].selected);
+  }
+
+  /**
+   * Frames the followed flight in the 3D camera for this frame (the journey's driver, once a frame): `fix`
+   * is its pose from the shared tracker, sampled once for the frame, and `mapShot` the journey's own Map
+   * shot in `frame`'s metres, kept for the Handover. The aircraft's model and the camera are placed from
+   * the same pose, so the camera never lags the model it frames.
+   */
+  steerEnRoute(fix: JourneyFix, mapShot: OrbitView, frame: Origin, now: number): void {
+    const camera = this.enRoute;
+    if (!is3D(camera)) return;
+    const [slat, slon] = toGeo(frame, mapShot.target[0], mapShot.target[1]);
+    this.journeyShot = groundView({ ...mapShot, target: toLocal(this.airport, slat, slon) });
+    const ground = this.map.queryTerrainElevation([fix.longitude, fix.latitude]) ?? 0;
+    const pose = enRoutePose(fix, ground);
+    const cls = classify(fix.typeCode, null);
+    const shot = enRouteShot(pose, camera, cls.lengthM);
+    const lens: Lens = { height: this.container.clientHeight, fovDeg: this.map.getVerticalFieldOfView() };
+    if (!this.rigStarted) {
+      // Eased in from the camera the map has now.
+      this.rigStarted = true;
+      const c = this.map.getCenter();
+      const from = mapToOrbit(this.camera, { latitude: c.lat, longitude: c.lng }, lens);
+      this.rig.start({ center: { latitude: c.lat, longitude: c.lng }, elevationM: this.map.getCenterElevation(), distanceM: from.distance, bearingDeg: this.map.getBearing(), pitchDeg: this.map.getPitch() }, shot, now);
+    }
+    const eased = this.rig.step(shot, now);
+    const orbit: OrbitView = { azimuthDeg: eased.bearingDeg, elevationDeg: 90 - eased.pitchDeg, target: [0, 0], height: 0, distance: eased.distanceM };
+    const cam = orbitToMap(orbit, eased.center, lens);
+    this.following = true;
+    this.map.jumpTo({ center: [cam.lng, cam.lat], zoom: cam.zoom, bearing: cam.bearing, pitch: cam.pitch, elevation: eased.elevationM });
+    this.following = false;
+    this.enRouteView = { ...orbit, target: toLocal(this.airport, eased.center.latitude, eased.center.longitude), height: eased.elevationM };
+    this.layer?.setAircraft(pose, cls.model, cls.lengthM);
+  }
+
   /** The followed flight, drawn over the traffic and left out of it; null clears it. */
   setJourney(hex: string | null, features: JourneyFeatures | null): void {
     this.journeyHex = hex;
@@ -519,7 +645,8 @@ export class GlobeMap {
     }
     const end = features?.approach.at(-1);
     this.framing = features?.aircraft ? (end ? [features.aircraft, end] : [features.aircraft]) : [];
-    this.keepInBand();
+    // A 3D camera frames the flight itself.
+    if (!is3D(this.enRoute)) this.keepInBand();
   }
 
   /**
@@ -679,7 +806,8 @@ export class GlobeMap {
     if (theme === this.theme) return;
     this.theme = theme;
     // The new style carries the data already drawn, so the diff leaves the markers where they are.
-    const style = mapStyle(theme, { globe: this.globe, radar: this.radar?.tiles });
+    // The terrain is carried in the new style while a 3D camera is on, so the diff keeps it; the aircraft's layer is added back once it applies.
+    const style = mapStyle(theme, { globe: this.globe, radar: this.radar?.tiles, terrain: is3D(this.enRoute) });
     style.sources.airports = { type: "geojson", data: airportFeatures(AIRPORTS, this.counts) };
     style.sources.arcs = { type: "geojson", data: routeArcs(this.routes.values()), lineMetrics: true };
     style.sources.journey = { type: "geojson", data: this.journeyData };
@@ -692,6 +820,8 @@ export class GlobeMap {
       this.rise = -1;
       this.flowStep = -1;
       this.applyDim();
+      this.paintLayer();
+      this.applyEnRoute();
     });
   }
 

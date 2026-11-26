@@ -7,6 +7,7 @@ import { describeWeather, describeWind, formatVisibility, type Metar } from "@/l
 import { cutMovements, MOVEMENT_ROWS, type Movements as MovementsData, movementsFoot } from "@/lib/movements";
 import type { OpsBoardRow, OpsView } from "@/lib/path-pulse";
 import type { CameraMode } from "@/lib/scene/cameras";
+import type { EnRouteCamera } from "@/lib/globe/en-route";
 import type { ReplayRate } from "@/lib/replay";
 import type { ThemeKey } from "@/lib/scene/theme";
 import { TURN_STEP, ZOOM_STEP } from "@/lib/scene/view-keys";
@@ -422,11 +423,50 @@ function JourneyPanel({ journey }: { journey: JourneyViewData }) {
   );
 }
 
+/** The En-route view's cameras as the Journey card names them. */
+const EN_ROUTE_LABELS: Record<EnRouteCamera, string> = { map: "Map", chase: "Chase", cockpit: "Cockpit", side: "Side", top: "Top" };
+
+/**
+ * The En-route view's camera switch on the Journey card: the flat map, or a 3D camera riding along with the
+ * flight. Offered while the map follows the flight (`cameras`), on every viewport.
+ */
+export function EnRouteSwitch({ camera, cameras, onChange }: { camera: EnRouteCamera; cameras: readonly EnRouteCamera[]; onChange: (camera: EnRouteCamera) => void }) {
+  return (
+    <div role="group" aria-label="En-route camera" className="flex gap-1 self-start rounded-full bg-well p-1">
+      {cameras.map((key) => (
+        <button
+          key={key}
+          type="button"
+          aria-pressed={key === camera}
+          onClick={() => onChange(key)}
+          className={`min-h-11 rounded-full px-3.5 text-sm font-semibold xl:min-h-8 ${key === camera ? "bg-accent text-on-accent" : "bg-transparent text-ink-2"}`}
+        >
+          {EN_ROUTE_LABELS[key]}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 /**
  * The followed flight on the map, between its two dioramas: the flight card's own panel, with the
- * journey's progress, speed, height and estimated arrival. Its toggle lets go of the journey there.
+ * journey's progress, speed, height and estimated arrival, and the En-route view's camera switch while the
+ * map follows it. Its toggle lets go of the journey there.
  */
-export function JourneyCard({ journey, onStop }: { journey: JourneyViewData; onStop: () => void }) {
+export function JourneyCard({
+  journey,
+  onStop,
+  camera,
+  cameras,
+  onCamera,
+}: {
+  journey: JourneyViewData;
+  onStop: () => void;
+  /** The En-route view's camera, and those offered (null while the map does not follow the flight). */
+  camera: EnRouteCamera;
+  cameras: readonly EnRouteCamera[] | null;
+  onCamera: (camera: EnRouteCamera) => void;
+}) {
   const facts: [string, string][] = [
     ["Speed", journey.speed],
     ["Altitude", journey.altitude],
@@ -455,6 +495,7 @@ export function JourneyCard({ journey, onStop }: { journey: JourneyViewData; onS
           </button>
         </div>
       </div>
+      {cameras && <EnRouteSwitch camera={camera} cameras={cameras} onChange={onCamera} />}
       <JourneyPanel journey={journey} />
       <dl className="flex justify-between gap-x-6 max-xl:short:hidden">
         {facts.map(([label, value]) => (
