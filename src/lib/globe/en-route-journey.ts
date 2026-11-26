@@ -22,9 +22,14 @@ export const SHARE_FROM = 2.5;
  */
 export function enRouteShare(distanceM: number, band: Band | null): number {
   if (!band) return 1;
-  const t = Math.min(1, Math.max(0, Math.log(distanceM / band.far) / Math.log(SHARE_FROM)));
-  return t * t * (3 - 2 * t);
+  return smoothstep(Math.min(1, Math.max(0, Math.log(distanceM / band.far) / Math.log(SHARE_FROM))));
 }
+
+/** An even share (0 to 1) smoothed at both ends: how the view eases between flat and 3D. */
+export const smoothstep = (t: number): number => t * t * (3 - 2 * t);
+
+/** The stretch round an airport where its Handover band reaches the 3D camera: out to SHARE_FROM times the band's outer edge. */
+export const shareReach = (band: Band): Band => ({ near: band.near, far: band.far * SHARE_FROM });
 
 /**
  * The camera the World map shows for the one chosen on the Journey card: a 3D camera chosen while the flight
@@ -65,11 +70,6 @@ export class ShareEase {
     const room = dt / SHARE_EASE_S;
     this.value = target > this.value ? Math.min(target, this.value + room) : Math.max(target, this.value - room);
     return this.value;
-  }
-
-  /** Puts the share straight at `value` (the 3D view dropped at once). */
-  set(value: number): void {
-    this.value = value;
   }
 }
 
@@ -119,23 +119,19 @@ export class FrameWatch {
   }
 }
 
-/** Why a 3D camera gave way to Map. */
+/** Why a 3D camera gave way to Map: its WebGL failed, or it was too slow. */
 export type FallbackCause = "webgl" | "slow";
 
-/** The short notice the Journey card shows when the view returns to Map by itself. */
+/**
+ * The short notice the Journey card shows when a 3D camera gives way to Map by itself: its WebGL (the
+ * terrain, the aircraft's layer or its module) failed, or its frame rate stayed low (FrameWatch).
+ */
 export const FALLBACK_NOTICE: Record<FallbackCause, string> = {
-  webgl: "3D view is not available on this device, so you are back on Map.",
-  slow: "3D view could not keep up on this device, so you are back on Map.",
+  webgl: "The 3D cameras are not available on this device, so you are back on Map.",
+  slow: "The 3D cameras could not keep up on this device, so you are back on Map.",
 };
 
-/** Whether the 3D camera gives way to Map, and the notice that says why: WebGL (the terrain, the aircraft's layer or its module) failed, or the frame rate stayed low (FrameWatch); null keeps it. */
-export function enRouteFallback({ failed, slow }: { failed: boolean; slow: boolean }): string | null {
-  if (failed) return FALLBACK_NOTICE.webgl;
-  if (slow) return FALLBACK_NOTICE.slow;
-  return null;
-}
-
-const wrap360 =(deg: number) => ((deg % 360) + 360) % 360;
+const wrap360 = (deg: number) => ((deg % 360) + 360) % 360;
 
 /**
  * The camera `share` of the way from the flat Map shot `flat` to the 3D camera `rode`: the point looked at

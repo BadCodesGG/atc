@@ -506,6 +506,7 @@ export function JourneyCard({
         </div>
       </div>
       {cameras && <EnRouteSwitch camera={camera} cameras={cameras} onChange={onCamera} />}
+      {/* Always there, empty and hidden while there is nothing to say: a live region announces only what changes inside it once it exists. */}
       <p data-en-route-notice role="status" className={notice ? "text-xs text-ink-2" : "sr-only"}>
         {notice}
       </p>

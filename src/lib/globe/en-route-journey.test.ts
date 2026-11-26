@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { arrivalCamera, blendPlacement,enRouteFallback, enRouteOffered, enRouteShare, FALLBACK_NOTICE, FrameWatch, mapCamera, SHARE_EASE_S, SHARE_FROM, ShareEase, SLOW_FOR_S } from "./en-route-journey";
+import { arrivalCamera, blendPlacement, enRouteOffered, enRouteShare, FALLBACK_NOTICE, FrameWatch, mapCamera, SHARE_EASE_S, SHARE_FROM, ShareEase, shareReach, SLOW_FOR_S } from "./en-route-journey";
 import type { EnRoutePlacement } from "./en-route";
 
 /** Feeds `watch` frames at `fps` for `seconds` from `from` ms; returns whether it called for Map, and the time it ended. */
@@ -50,23 +50,27 @@ describe("FrameWatch: a frame rate that stays low", () => {
   });
 });
 
-describe("enRouteFallback: back to Map, with a short notice", () => {
-  it("returns to Map with a notice when WebGL fails or the frame rate stays low", () => {
-    expect(enRouteFallback({ failed: true, slow: false })).toBe(FALLBACK_NOTICE.webgl);
-    expect(enRouteFallback({ failed: false, slow: true })).toBe(FALLBACK_NOTICE.slow);
-    expect(enRouteFallback({ failed: true, slow: true })).toBe(FALLBACK_NOTICE.webgl);
-  });
-
-  it("keeps the 3D camera otherwise", () => {
-    expect(enRouteFallback({ failed: false, slow: false })).toBeNull();
+describe("FALLBACK_NOTICE: what the card says on the way back to Map", () => {
+  it("says why, for a WebGL failure and for a frame rate that stayed low", () => {
+    expect(FALLBACK_NOTICE.webgl).toMatch(/not available/);
+    expect(FALLBACK_NOTICE.slow).toMatch(/could not keep up/);
   });
 
   it("says so in a short line that names the Map it returns to", () => {
     for (const notice of Object.values(FALLBACK_NOTICE)) {
       expect(notice.length).toBeLessThan(80);
-      expect(notice).toMatch(/Map/);
+      expect(notice).toMatch(/back on Map\.$/);
       expect(notice).not.toMatch(/—/);
     }
+  });
+});
+
+describe("shareReach: where an airport's band reaches the 3D camera", () => {
+  it("runs out to the distance the share is all 3D from", () => {
+    const reach = shareReach(band);
+    expect(reach.far).toBe(band.far * SHARE_FROM);
+    expect(enRouteShare(reach.far, band)).toBe(1);
+    expect(reach.near).toBe(band.near);
   });
 });
 
@@ -134,12 +138,6 @@ describe("ShareEase: the share the view takes, eased over time", () => {
     expect(ease.step(1, 60_000)).toBeLessThan(0.3);
   });
 
-  it("can be put straight at a share (a camera switched off at once)", () => {
-    const ease = new ShareEase();
-    ease.step(1, 0);
-    ease.set(0);
-    expect(ease.step(0, 10)).toBe(0);
-  });
 });
 
 describe("blendPlacement: the flat Map shot eased into the 3D camera", () => {

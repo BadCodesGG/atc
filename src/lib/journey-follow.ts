@@ -448,7 +448,7 @@ export class Journey {
     if (!looking) return null;
     const ideal = this.groundShot(fix, shot, looking);
     const view: OrbitView = { ...ideal, target: [ideal.target[0] + cam.offset[0], ideal.target[1] + cam.offset[1]], distance: ideal.distance * cam.scale };
-    return { view, fix, frame:{ latitude: fix.latitude, longitude: fix.longitude } };
+    return { view, fix, frame: { latitude: fix.latitude, longitude: fix.longitude } };
   }
 
   /**

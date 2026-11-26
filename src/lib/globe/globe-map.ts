@@ -14,7 +14,7 @@ import { toGeo, toLocal, type Origin } from "../geo";
 import type { JourneyFeatures, JourneyFix } from "../journey-follow";
 import { classify } from "../aircraft-class";
 import { type EnRouteCamera, EnRoutePeek, type EnRoutePlacement, enRoutePose, EnRouteRig, enRouteShot, is3D, peekPlacement } from "./en-route";
-import { blendPlacement, enRouteFallback, FrameWatch, ShareEase } from "./en-route-journey";
+import { blendPlacement, FALLBACK_NOTICE, type FallbackCause, FrameWatch, ShareEase, smoothstep } from "./en-route-journey";
 import type { EnRouteLayer } from "./en-route-layer";
 import { AIRCRAFT_GLYPH, GLYPH_BOX } from "./aircraft-glyph";
 import { finiteCamera, groundView, type Lens, type MapCamera, mapToOrbit, orbitToMap, paddingFor, worldFloor } from "./camera";
@@ -64,9 +64,6 @@ const EASE_EVERY_MS = 1_500;
 /** One beat of an airport's ripple, and one step of the routes' flow, ms. */
 const BEAT_MS = 2_400;
 const FLOW_STEP_MS = 90;
-
-/** An even share smoothed at both ends, as the view eases between flat and 3D. */
-const smooth = (t: number) => t * t * (3 - 2 * t);
 
 // MapLibre looks for its worker beside its own module, which the bundler has moved; this copy is put in
 // public/ on install (scripts/maplibre-worker.mjs).
@@ -245,7 +242,7 @@ export class GlobeMap {
   private rode: Exclude<EnRouteCamera, "map"> | null = null;
   /** How much of the 3D camera the Handover leaves the view (enRouteShare), given by the page each frame, and the share eased toward it. */
   private shareTarget = 1;
-  private readonly shareEase = new ShareEase();
+  private shareEase = new ShareEase();
   private share = 0;
   /** Whether the 3D view is on the map: terrain, the aircraft's layer, the map's drags off. On from the first frame with any share of a 3D camera to the last. */
   private on3D = false;
@@ -301,9 +298,12 @@ export class GlobeMap {
       this.viewNumber++;
       if (!this.driver) void this.loadRegion();
     });
-    // A lost WebGL context in the 3D view: back to Map, which the map draws again once the context is restored.
+    // A lost WebGL context in the 3D view: back to Map at once (nothing draws to ease through), which the map
+    // draws again once the context is restored.
     this.map.on("webglcontextlost", () => {
-      if (this.on3D) this.fallBack(true);
+      if (!this.on3D) return;
+      this.fallBack("webgl");
+      this.dropEnRoute();
     });
     this.map.on("click", (e) => this.pick(e.point, e.originalEvent));
     this.map.on("mousemove", (e) => this.hover(e.point));
@@ -556,7 +556,7 @@ export class GlobeMap {
 
   /** How far the view is into the 3D camera this frame (0 flat, 1 all 3D), smoothed as the camera is: the Handover's crossfade gives way by as much. */
   get enRouteBlend(): number {
-    return smooth(this.share);
+    return smoothstep(this.share);
   }
 
   /**
@@ -581,6 +581,15 @@ export class GlobeMap {
   }
 
   /**
+   * A journey's map takes the flight from a Diorama: the view starts flat (the Handover band is all round it),
+   * whatever the last journey left, and the page's share takes it from the next frame.
+   */
+  startEnRoute(): void {
+    this.shareTarget = 0;
+    this.dropEnRoute();
+  }
+
+  /**
    * Picks the En-route view's camera. A 3D camera eases in from the journey's own shot as the journey steers
    * (terrain and the aircraft's layer added as it starts: the flat map never loads them); Map eases back out
    * of it to the journey's shot, and only then takes the terrain and the layer off, so the map never shows
@@ -594,42 +603,49 @@ export class GlobeMap {
       if (is3D(camera) && camera !== this.rode) {
         // Another 3D camera: the rig eases over to it from the camera the map has now.
         this.rode = camera;
-        this.rig.reset();
-        this.peek.reset();
-        this.peekPointer = null;
-        this.rigStarted = false;
+        this.restartRig();
       }
     }
-    if (atOnce && !is3D(camera)) {
-      this.shareEase.set(0);
-      this.share = 0;
-      this.leave3D();
-      this.following = true;
-      this.map.jumpTo({ elevation: 0, pitch: Math.min(this.map.getPitch(), 60) });
-      this.following = false;
-    }
+    if (atOnce && !is3D(camera)) this.dropEnRoute();
+  }
+
+  /** The 3D view off at once, the camera brought down flat where it is. */
+  private dropEnRoute(): void {
+    // A fresh ease starts at its first target.
+    this.shareEase = new ShareEase();
+    this.share = 0;
+    const was = this.on3D;
+    this.leave3D();
+    if (!was) return;
+    this.following = true;
+    this.map.jumpTo({ elevation: 0, pitch: Math.min(this.map.getPitch(), 60) });
+    this.following = false;
+  }
+
+  /** The rig and the peek start afresh: the next 3D frame eases in from the camera the map has then. */
+  private restartRig(): void {
+    this.rig.reset();
+    this.peek.reset();
+    this.peekPointer = null;
+    this.rigStarted = false;
   }
 
   /** The 3D view is off: terrain and the layer go, and the next 3D camera starts afresh. */
   private leave3D(): void {
     this.rode = is3D(this.enRoute) ? this.enRoute : null;
-    this.rig.reset();
-    this.peek.reset();
-    this.peekPointer = null;
-    this.rigStarted = false;
+    this.restartRig();
     this.journeyShot = null;
     if (!this.on3D) return;
     this.on3D = false;
     this.applyEnRoute();
   }
 
-  /** The 3D view gives way to Map by itself: `failed` WebGL, else a frame rate that stayed low. The view eases back out to the journey's shot. */
-  private fallBack(failed: boolean): void {
-    const notice = enRouteFallback({ failed, slow: !failed });
-    if (!notice || !is3D(this.enRoute)) return;
+  /** The 3D view gives way to Map by itself, with the card's notice saying why; the view eases back out to the journey's shot. */
+  private fallBack(cause: FallbackCause): void {
+    if (!is3D(this.enRoute)) return;
     this.enRoute = "map";
     this.frameWatch.reset();
-    this.onFallback?.(notice);
+    this.onFallback?.(FALLBACK_NOTICE[cause]);
   }
 
   /** Brings the map to the En-route view: terrain, the aircraft's layer, the followed flight's flat marks and the camera's clamp to the ground. Waits for the style. */
@@ -654,20 +670,20 @@ export class GlobeMap {
         if (this.layer && !map.getLayer(this.layer.id)) map.addLayer(this.layer);
       } catch (error) {
         console.warn("atc: the en-route view's WebGL failed", error);
-        this.fallBack(true);
+        this.fallBack("webgl");
       }
       if (!this.layer && !this.layerLoading) {
         this.layerLoading = true;
         void import("./en-route-layer")
           .then(({ EnRouteLayer }) => {
-            this.layer = new EnRouteLayer(() => this.fallBack(true));
+            this.layer = new EnRouteLayer(() => this.fallBack("webgl"));
             this.paintLayer();
             this.applyEnRoute();
           })
           // The module did not load (offline, a deploy that moved it): back to Map, not terrain with no aircraft on it.
           .catch((error: unknown) => {
             console.warn("atc: the en-route view failed to load", error);
-            this.fallBack(true);
+            this.fallBack("webgl");
           })
           .finally(() => (this.layerLoading = false));
       }
@@ -707,7 +723,7 @@ export class GlobeMap {
       this.applyEnRoute();
     }
     // Software GL, or a device the terrain is too much for: back to Map once it has stayed slow a few seconds.
-    if (!this.holdFrameRate && this.frameWatch.frame(now)) this.fallBack(false);
+    if (!this.holdFrameRate && this.frameWatch.frame(now)) this.fallBack("slow");
     const [slat, slon] = toGeo(frame, mapShot.target[0], mapShot.target[1]);
     this.journeyShot = groundView({ ...mapShot, target: toLocal(this.airport, slat, slon) });
     const ground = this.map.queryTerrainElevation([fix.longitude, fix.latitude]) ?? 0;
@@ -726,7 +742,7 @@ export class GlobeMap {
     const rode = peekPlacement(this.rig.step(shot, now), camera, this.peek.at(now));
     // The journey's own shot, where the flat map would stand: the 3D camera eases into it by the share.
     const flat: EnRoutePlacement = { center: { latitude: slat, longitude: slon }, elevationM: mapShot.height, distanceM: mapShot.distance, bearingDeg: mapShot.azimuthDeg, pitchDeg: 90 - mapShot.elevationDeg };
-    const eased = blendPlacement(flat, rode, smooth(share));
+    const eased = blendPlacement(flat, rode, smoothstep(share));
     const orbit: OrbitView = { azimuthDeg: eased.bearingDeg, elevationDeg: 90 - eased.pitchDeg, target: [0, 0], height: 0, distance: eased.distanceM };
     const cam = orbitToMap(orbit, eased.center, lens);
     this.following = true;
