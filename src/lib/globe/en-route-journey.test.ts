@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { arrivalCamera, blendPlacement, enRouteOffered, enRouteShare, FALLBACK_NOTICE, FrameWatch, mapCamera, SHARE_EASE_S, SHARE_FROM, ShareEase, shareReach, SLOW_FOR_S } from "./en-route-journey";
+import { arrivalCamera, blendPlacement, enRouteOffered, enRouteShare, FALLBACK_NOTICE, FLAT_BY_S, FrameWatch, mapCamera, SHARE_EASE_S, SHARE_FROM, ShareEase, shareReach, SLOW_FOR_S } from "./en-route-journey";
 import type { EnRoutePlacement } from "./en-route";
 
 /** Feeds `watch` frames at `fps` for `seconds` from `from` ms; returns whether it called for Map, and the time it ended. */
@@ -21,6 +21,18 @@ describe("FrameWatch: a frame rate that stays low", () => {
     expect(run(new FrameWatch(), 3, 8).slow).toBe(true);
   });
 
+  it("calls for Map on a device that draws one frame every 3 s, after a few seconds of it", () => {
+    expect(run(new FrameWatch(), 1 / 3, 6).slow).toBe(false);
+    expect(run(new FrameWatch(), 1 / 3, 9).slow).toBe(true);
+  });
+
+  it("forgives one long stall on a camera that otherwise keeps up", () => {
+    const watch = new FrameWatch();
+    const first = run(watch, 30, 5);
+    expect(watch.frame(first.at + 3_000)).toBe(false);
+    expect(run(watch, 30, 10, first.at + 3_000).slow).toBe(false);
+  });
+
   it("leaves a camera that keeps up alone, however long", () => {
     expect(run(new FrameWatch(), 30, 60).slow).toBe(false);
     expect(run(new FrameWatch(), 22, 60).slow).toBe(false);
@@ -34,10 +46,11 @@ describe("FrameWatch: a frame rate that stays low", () => {
     expect(first.slow || then.slow || again.slow).toBe(false);
   });
 
-  it("does not count a hidden tab's pause as slow, and starts over after it", () => {
+  it("does not count a hidden tab's pause as slow, and starts over after it, even when it was already counting low", () => {
     const watch = new FrameWatch();
     const before = run(watch, 10, 3);
-    // The tab is hidden for a minute, then shown again at a good rate.
+    // The tab is hidden for a minute (the page's visibilitychange resets the watch), then shown again at a good rate.
+    watch.reset();
     const after = run(watch, 60, 10, before.at + 60_000);
     expect(before.slow || after.slow).toBe(false);
   });
@@ -132,10 +145,28 @@ describe("ShareEase: the share the view takes, eased over time", () => {
     expect(back).toBeCloseTo(out + 0.1 / SHARE_EASE_S, 6);
   });
 
-  it("takes a hidden tab's long gap as one short step", () => {
+  it("arrives back on Map in its time on a device that draws one frame every 3 s", () => {
+    const ease = new ShareEase();
+    ease.step(1, 0);
+    expect(ease.step(0, 3_000)).toBe(0);
+    const half = new ShareEase();
+    half.step(1, 0);
+    expect(half.step(0, 600)).toBeCloseTo(0.5, 6);
+  });
+
+  it("leaves the frames time to finish a return to Map before the timer does, and lands on Map within 2 s", () => {
+    expect(FLAT_BY_S).toBeGreaterThan(SHARE_EASE_S);
+    expect(FLAT_BY_S).toBeLessThanOrEqual(2);
+  });
+
+  it("does not move on the first frame after the page was hidden, then eases on from there", () => {
     const ease = new ShareEase();
     ease.step(0, 0);
-    expect(ease.step(1, 60_000)).toBeLessThan(0.3);
+    const before = ease.step(1, 120);
+    expect(before).toBeCloseTo(0.1, 6);
+    ease.pause();
+    expect(ease.step(1, 60_000)).toBeCloseTo(before, 6);
+    expect(ease.step(1, 60_120)).toBeCloseTo(0.2, 6);
   });
 
   it("still arrives in its time on a device that draws a frame or two a second", () => {

@@ -68,17 +68,23 @@ it, with no second canvas.
   and on the journey's own Map shot. The view is therefore the 3D camera's framing blended into that shot
   (`blendPlacement`) by a share (`enRouteShare`): none of the 3D camera inside the Handover band of the
   Diorama at that end of the journey, all of it from 2.5 times the band's outer edge out, eased in log
-  distance between, and eased in time (`ShareEase`) so a band that changes with the airport never steps the
-  camera. Leaving the origin, a 3D camera chosen in its Diorama (offered on the flight card there) is held
+  distance between, and eased in time (`ShareEase`, all the way in 1.2 s) so a band that changes with the
+  airport never steps the camera. The ease runs on real elapsed time however far apart the frames are; a gap
+  between frames is never taken as a pause by its length alone, only the page being hidden (its
+  `visibilitychange`) is, and the first frame back does not move it. Leaving the origin, a 3D camera chosen in its Diorama (offered on the flight card there) is held
   until the map has the flight and takes over once the flight is out of the band; arriving, it eases into the
   journey's shot, the terrain and the layer come off at a share of nothing, and the usual Handover follows.
   The Diorama then opens in its Approach camera when it has one for the flight, else Orbit. Map eases out the
   same way, and takes the terrain off only once the camera is the flat shot, so the map never shows a frame
-  of tiles it has not loaded (the half second of blank map a cut to Map showed).
+  of tiles it has not loaded (the half second of blank map a cut to Map showed). A return to Map (picked, or a
+  fallback) the frames have not finished 1.6 s after it began (`FLAT_BY_S`: a device drawing a frame every few
+  seconds, as the smokes' software GL does in Top over terrain) is finished by a timer, so Map is back in
+  under 2 s of wall-clock time whatever the frame rate. The arrival ease has no timer: it follows the flight.
 - **It falls back to Map** with a short notice on the Journey card when its WebGL fails (the layer's module
   not loading, the layer or the terrain throwing as they are added or drawn, a lost context) or the frame rate
-  stays under 20 a second for 3 seconds (`FrameWatch`, which forgives a shorter stutter and a hidden tab's
-  pause). `?fps=hold` keeps a 3D camera whatever its frame rate: the smokes' software GL draws it at a few
+  stays under 20 a second for 3 seconds (`FrameWatch`, which forgives a shorter stutter or one long stall, and
+  still trips on a device drawing one frame every few seconds; the page resets it when it is hidden or shown
+  again, so a hidden tab's pause is not counted as slow). `?fps=hold` keeps a 3D camera whatever its frame rate: the smokes' software GL draws it at a few
   frames a second.
 
 The Diorama stays as it is: a separate overlay canvas on the same camera, crossfading during the Handover.
