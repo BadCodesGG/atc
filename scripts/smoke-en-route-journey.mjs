@@ -24,6 +24,7 @@
 import { launchChrome } from "./lib/chrome.mjs";
 import { CALLSIGN, flatTerrain, HEX, STATE } from "./lib/en-route.mjs";
 import { fiber, GLOBE, sleep, waitForTruthy } from "./lib/page.mjs";
+import { TILT_STEP_DEG, tiltStep } from "./lib/tilt-step.mjs";
 
 /** The journey, or null with none. */
 const JOURNEY = fiber(`typeof c.stage === "string" && typeof c.hex === "string" && c.origin`);
@@ -54,6 +55,23 @@ const SAMPLE = `(() => {
     mode: rig ? rig.mode : null,
     card: card ? card.innerText.replace(/\\s+/g, " ").slice(0, 140) : "",
   };
+})()`;
+
+/**
+ * Records every frame the map draws after a step of the share's ease, in `window.__enRouteFrames`: when the ease
+ * stepped (`at`, the driver's clock, ms), the share, the map's tilt and the journey's flat shot's (null while flat).
+ */
+const RECORD_FRAMES = `(() => {
+  const g = ${GLOBE};
+  const frames = (window.__enRouteFrames = []);
+  let last = null;
+  g.map.on("render", () => {
+    const e = g.enRoute;
+    if (e.shareEase.at === last) return;
+    last = e.shareEase.at;
+    frames.push({ t: Date.now(), at: last, share: e.share, pitch: g.map.getPitch(), flatPitch: e.flatShot ? e.flatShot.pitch : null });
+  });
+  return true;
 })()`;
 
 /** How long the page may show nothing new before the gate-to-gate run gives up on it, and the most it may take in all. */
@@ -92,7 +110,8 @@ async function gateToGate({ browser, base, check }) {
     const held = await page.evaluate(SAMPLE);
     check("en-route journey: Chase picked in the origin's Diorama is pressed there, but held: the map under the Diorama stays flat, with no terrain or model", held.stage === "origin" && held.pressed === "Chase" && held.camera === "map" && !held.terrain && held.layer === null, JSON.stringify(held));
 
-    // Ride it gate to gate, sampling, until Charlotte's Diorama has the flight.
+    // Ride it gate to gate, sampling, until Charlotte's Diorama has the flight; the page records each drawn frame.
+    await page.evaluate(RECORD_FRAMES);
     const samples = [];
     const begun = Date.now();
     let moved = Date.now();
@@ -134,15 +153,23 @@ async function gateToGate({ browser, base, check }) {
     const before = onMap.slice(last3D + 1);
     const eased = before.length > 0 && before.every((s) => s.share === 0 && !s.terrain && s.layer === null);
     check("en-route journey: arriving, Chase eases into the journey's own flat shot, terrain off, before the Handover into Charlotte", last3D >= 0 && eased, `last 3D sample ${last3D} of ${onMap.length}; then ${before.length} flat samples; ${JSON.stringify(onMap[last3D])}`);
-    // The ease is continuous: no frame-to-frame step in the tilt like the old snap back to Map (75 to 60 degrees at once).
-    let jump = 0;
-    let where = null;
-    for (let i = Math.max(1, takeover); i < onMap.length; i++) {
-      const step = Math.abs(onMap[i].pitch - onMap[i - 1].pitch);
-      if (onMap[i].t - onMap[i - 1].t < 1500 && step > jump) [jump, where] = [step, i];
-    }
-    const pose = (s) => s && { t: s.t, pitch: s.pitch, zoom: s.zoom, share: s.share, camera: s.camera, terrain: s.terrain };
-    check("en-route journey: the camera's tilt never steps on the way (largest change between samples under 12 degrees)", jump < 12, `${jump.toFixed(1)} degrees${where ? `, sample ${where} of ${onMap.length}: ${JSON.stringify([pose(onMap[where - 1]), pose(onMap[where])])}` : ""}`);
+    // The ease is continuous: no frame-to-frame step in the tilt like the old snap back to Map (75 to 60 degrees
+    // at once). Judged drawn frame to drawn frame, by the time between them (tiltStep): software GL draws slowly.
+    const frames = await page.evaluate(() => window.__enRouteFrames);
+    const from = onMap[Math.max(0, takeover - 1)]?.t ?? Infinity;
+    const ridden = frames.filter((f) => f.t >= from && f.t <= (onMap.at(-1)?.t ?? 0));
+    const judged = ridden.slice(1).map((f, k) => ({ ...tiltStep(ridden[k], f), i: k + 1 }));
+    // The first frame that fails, else the one nearest its bound.
+    const worst = judged.find((j) => !j.ok) ?? judged.toSorted((x, y) => y.step / y.bound - x.step / x.bound)[0];
+    const f1 = (n) => n.toFixed(1);
+    const near = (f) => onMap.findIndex((s) => s.t >= f.t);
+    const pair = (j) =>
+      `frames ${j.i - 1} and ${j.i} of ${ridden.length}, by sample ${near(ridden[j.i])} of ${onMap.length}: ${f1(j.step)} degrees against ${f1(j.bound)} (${TILT_STEP_DEG} flat under ${Math.round(j.shortGapMs)} ms), share moved ${j.moved.toFixed(3)} against the ease's ${j.pace.toFixed(3)} in ${Math.round(j.gapMs)} ms: ${JSON.stringify([ridden[j.i - 1], ridden[j.i]])}`;
+    check(
+      `en-route journey: the camera's tilt never steps on the way (under ${TILT_STEP_DEG} degrees between drawn frames close together, else what the share's ease explains in the time between them)`,
+      judged.length > 0 && judged.every((j) => j.ok),
+      worst ? `${worst.ok ? "largest" : worst.paced ? "tilt stepped" : "share outran its ease"}: ${pair(worst)}` : `${frames.length} drawn frames recorded, ${ridden.length} on the way`,
+    );
 
     // Charlotte's Diorama opens in its Approach camera when it has one for the flight, else Orbit.
     const mode = await waitForTruthy(page, `(() => { const r = ${RIG}; return r && r.mode; })()`, 10_000).then(() => page.evaluate(`${RIG}.mode`), () => null);
