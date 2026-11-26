@@ -1,7 +1,7 @@
 import { validateStyleMin } from "@maplibre/maplibre-gl-style-spec";
 import { describe, expect, it } from "vitest";
 import { THEMES, type ThemeKey } from "../scene/theme";
-import { arcOpacities, buildingHeight, journeyIconSize, mapStyle, PALETTES, radarLayer, radarSource, ripple, SELECTED_SCALE, SELECTION_DIM, TERRAIN, TERRAIN_SOURCE, terrainSource } from "./map-style";
+import { arcOpacities, buildingHeight, enRouteSky, flatSky, HILLSHADE, hillshadeLayer, journeyIconSize, mapStyle, PALETTES, radarLayer, radarSource, ripple, SELECTED_SCALE, SELECTION_DIM, TERRAIN, TERRAIN_SOURCE, terrainSource } from "./map-style";
 
 const KEYS = Object.keys(THEMES) as ThemeKey[];
 const paint = (key: ThemeKey, id: string, prop: string) => {
@@ -249,5 +249,48 @@ describe("the en-route view's terrain", () => {
     expect(style.sources[TERRAIN_SOURCE]).toEqual(terrainSource());
     expect(style.terrain).toEqual(TERRAIN);
     expect(validateStyleMin(style)).toEqual([]);
+  });
+
+  it.each(KEYS)("in %s, the flat map keeps its own sky (the page colour all round) and has no hillshade", (key) => {
+    const style = mapStyle(key);
+    const page = THEMES[key].background;
+    expect(style.sky).toEqual({ "sky-color": page, "horizon-color": page, "fog-color": page, "sky-horizon-blend": 0.5, "horizon-fog-blend": 0.5, "fog-ground-blend": 0.6, "atmosphere-blend": 0 });
+    expect(style.sky).toEqual(flatSky(key));
+    expect(style.layers.some((l) => l.type === "hillshade")).toBe(false);
+  });
+
+  it.each(KEYS)("in %s, a 3D camera's style shades the terrain's relief, under the water, roads and everything else drawn, from the same Terrarium source", (key) => {
+    const style = mapStyle(key, { terrain: true });
+    const shaded = style.layers.filter((l) => l.type === "hillshade");
+    expect(shaded).toEqual([hillshadeLayer(key)]);
+    expect(shaded[0]).toMatchObject({ id: HILLSHADE, source: TERRAIN_SOURCE });
+    expect(style.layers.findIndex((l) => l.id === HILLSHADE)).toBe(style.layers.findIndex((l) => l.id === "water") - 1);
+    // Nothing else changes: the same layers as the flat map, the hillshade aside.
+    expect(style.layers.filter((l) => l.id !== HILLSHADE)).toEqual(mapStyle(key).layers);
+    expect(validateStyleMin(style)).toEqual([]);
+  });
+
+  it.each(KEYS)("in %s, a 3D camera's sky is the Diorama's own air (its zenith over its horizon), so there is a horizon and the sky is not the ground", (key) => {
+    const sky = mapStyle(key, { terrain: true }).sky!;
+    const air = THEMES[key].eyeLevel;
+    expect(sky).toEqual(enRouteSky(key));
+    expect(sky["sky-color"]).toBe(air.zenith);
+    expect(sky["horizon-color"]).toBe(air.horizon);
+    expect(sky["fog-color"]).toBe(air.ground ?? air.horizon);
+    // The sky reads apart from the ground under it (the map's background) and from the horizon.
+    const ground = paint(key, "background", "background-color");
+    expect(sky["sky-color"]).not.toBe(ground);
+    expect(sky["sky-color"]).not.toBe(sky["horizon-color"]);
+  });
+
+  it("shades the relief subtly by day and more strongly by night, in colours named for each theme", () => {
+    const strength = (key: ThemeKey) => (hillshadeLayer(key) as { paint: Record<string, unknown> }).paint["hillshade-exaggeration"] as number;
+    expect(strength("dark")).toBeGreaterThan(strength("light"));
+    for (const key of KEYS) {
+      const p = (hillshadeLayer(key) as { paint: Record<string, unknown> }).paint;
+      expect(p["hillshade-shadow-color"]).toBe(PALETTES[key].reliefShadow);
+      expect(p["hillshade-highlight-color"]).toBe(PALETTES[key].reliefLight);
+      expect(p["hillshade-exaggeration"]).toBe(PALETTES[key].reliefStrength);
+    }
   });
 });

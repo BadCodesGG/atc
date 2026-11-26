@@ -1,4 +1,4 @@
-import type { DataDrivenPropertyValueSpecification, ExpressionSpecification, FilterSpecification, LayerSpecification, RasterDEMSourceSpecification, SourceSpecification, StyleSpecification, TerrainSpecification } from "@maplibre/maplibre-gl-style-spec";
+import type { DataDrivenPropertyValueSpecification, ExpressionSpecification, FilterSpecification, LayerSpecification, RasterDEMSourceSpecification, SkySpecification, SourceSpecification, StyleSpecification, TerrainSpecification } from "@maplibre/maplibre-gl-style-spec";
 import { RADAR_CREDIT, RADAR_MAX_ZOOM } from "../radar";
 import { MODEL, THEMES, type ThemeKey } from "../scene/theme";
 import { BEACON_RADIUS_PX } from "./aircraft-glyph";
@@ -50,6 +50,10 @@ export interface MapPalette {
   chipCount: string;
   /** The En-route view's aircraft model: its metal, painted in `selected`. */
   modelBody: string;
+  /** The En-route view's relief (its hillshade over the terrain): the slopes facing away from the light and toward it, and how strongly it shades. */
+  reliefShadow: string;
+  reliefLight: string;
+  reliefStrength: number;
 }
 
 export const PALETTES: Record<ThemeKey, MapPalette> = {
@@ -76,6 +80,10 @@ export const PALETTES: Record<ThemeKey, MapPalette> = {
     chipText: "#1d1f24",
     chipCount: "#5d6068",
     modelBody: "#f2f1ec",
+    // Subtle: the labels' warm grey in the shade, the paper lit.
+    reliefShadow: "#7a7468",
+    reliefLight: "#ffffff",
+    reliefStrength: 0.35,
   },
   // Night ops: the land the diorama's black, a deep navy sea, faint shores and borders, the cities lit.
   dark: {
@@ -100,6 +108,10 @@ export const PALETTES: Record<ThemeKey, MapPalette> = {
     chipText: "#f2f6fb",
     chipCount: "#6ff0a6",
     modelBody: "#c9ced8",
+    // Visible by night: black shade, the slopes lit in the shores' navy.
+    reliefShadow: "#000000",
+    reliefLight: "#2a4468",
+    reliefStrength: 0.7,
   },
   satellite: {
     water: "#2c4a63",
@@ -123,6 +135,10 @@ export const PALETTES: Record<ThemeKey, MapPalette> = {
     chipText: "#16181c",
     chipCount: "#4a4e55",
     modelBody: "#f2f1ec",
+    // The imagery shows its own relief: only a touch more.
+    reliefShadow: "#000000",
+    reliefLight: "#ffffff",
+    reliefStrength: 0.15,
   },
 };
 
@@ -292,9 +308,40 @@ export function terrainSource(): RasterDEMSourceSpecification {
   };
 }
 
+/** The flat map's sky: the page colour all round, as the diorama's fog is, so a tilted flat map fades into the page. */
+export function flatSky(key: ThemeKey): SkySpecification {
+  const page = THEMES[key].background;
+  return { "sky-color": page, "horizon-color": page, "fog-color": page, "sky-horizon-blend": 0.5, "horizon-fog-blend": 0.5, "fog-ground-blend": 0.6, "atmosphere-blend": 0 };
+}
+
+/**
+ * The En-route view's sky, while a 3D camera is on: the Diorama's own air in a close camera (the theme's
+ * eyeLevel), its zenith over its horizon, and the far terrain hazed into the ground's colour there, so the
+ * view has a horizon and the sky reads apart from the ground.
+ */
+export function enRouteSky(key: ThemeKey): SkySpecification {
+  const air = THEMES[key].eyeLevel;
+  return { "sky-color": air.zenith, "horizon-color": air.horizon, "fog-color": air.ground ?? air.horizon, "sky-horizon-blend": 0.7, "horizon-fog-blend": 0.5, "fog-ground-blend": 0.4, "atmosphere-blend": 0 };
+}
+
+/** The En-route view's hillshade layer id. */
+export const HILLSHADE = "hillshade";
+
+/** The relief of the En-route view's terrain, shaded from the same Terrarium source in the theme's colours: subtle by day, plainer by night. Under everything else drawn. */
+export function hillshadeLayer(key: ThemeKey): LayerSpecification {
+  const p = PALETTES[key];
+  return {
+    id: HILLSHADE,
+    type: "hillshade",
+    source: TERRAIN_SOURCE,
+    paint: { "hillshade-shadow-color": p.reliefShadow, "hillshade-accent-color": p.reliefShadow, "hillshade-highlight-color": p.reliefLight, "hillshade-exaggeration": p.reliefStrength },
+  };
+}
+
 /**
  * The map's style. `radar`: a frame's tile URL (radar.ts) to draw the weather radar from; without it the
- * style has no radar layer. `terrain`: the en-route view's terrain is on (only while a 3D camera is).
+ * style has no radar layer. `terrain`: the en-route view's terrain is on (only while a 3D camera is), with
+ * its hillshade and its sky.
  */
 export function mapStyle(key: ThemeKey, { globe = false, radar = null, terrain = false }: { globe?: boolean; radar?: string | null; terrain?: boolean } = {}): StyleSpecification {
   const theme = THEMES[key];
@@ -321,6 +368,7 @@ export function mapStyle(key: ThemeKey, { globe = false, radar = null, terrain =
   const layers: LayerSpecification[] = [
     { id: "background", type: "background", paint: { "background-color": satellite ? theme.background : theme.surfaces.ground } },
     ...(satellite ? [{ id: "imagery", type: "raster", source: "imagery", paint: { "raster-saturation": -0.1 } } satisfies LayerSpecification] : []),
+    ...(terrain ? [hillshadeLayer(key)] : []),
     // The shore is the fill's own outline, not a line layer over the same polygons: a lake's outline is one ring of thousands of points (Lake Lanier is 6,500 at zoom 10), and a
     // line bucket asks for ten vertices a point, past the 65,535 a segment holds ("Max vertices per segment is 65535" in the console, the line drawn wrong). A fill asks for one a point.
     // On the aerial view the fill is transparent rather than faded out, so its outline still draws.
@@ -567,8 +615,8 @@ export function mapStyle(key: ThemeKey, { globe = false, radar = null, terrain =
     // Web Mercator at region zoom and closer, which the camera conversion assumes. At world zoom a globe
     // where the renderer draws one properly (see globeCapable).
     projection: { type: globe ? ["interpolate", ["linear"], ["zoom"], 4.5, "vertical-perspective", 6, "mercator"] : "mercator" },
-    // The horizon fades into the page colour, as the diorama's fog does.
-    sky: { "sky-color": theme.background, "horizon-color": theme.background, "fog-color": theme.background, "sky-horizon-blend": 0.5, "horizon-fog-blend": 0.5, "fog-ground-blend": 0.6, "atmosphere-blend": 0 },
+    // Flat, the horizon fades into the page colour, as the diorama's fog does; a 3D camera has a sky.
+    sky: terrain ? enRouteSky(key) : flatSky(key),
     ...(terrain ? { terrain: TERRAIN } : {}),
   };
 }
