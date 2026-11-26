@@ -7,7 +7,8 @@ import type { RadarFrame } from "../radar";
 import type { FlightRoute } from "../routes";
 import type { OrbitView } from "../scene/orbit";
 import type { ThemeKey } from "../scene/theme";
-import { type TrackedAircraft, Tracker } from "../tracker";
+import { REGION_LISTING, REGION_RECKON, type SharedSky } from "../shared-sky";
+import { PLAYBACK_DELAY, type TrackedAircraft, Tracker } from "../tracker";
 import { routeArcs } from "./arcs";
 import { toGeo, toLocal, type Origin } from "../geo";
 import type { JourneyFeatures } from "../journey-follow";
@@ -42,9 +43,6 @@ const MAX_CELLS = 9;
 /** How often the aircraft and the airport counts are read again while the map is in view. */
 const REGION_MS = 10_000;
 const COUNTS_MS = 60_000;
-/** Live, the picture runs this far behind the clock so a read is nearly always on each side of it; and an aircraft not heard is flown on this long. */
-const LIVE_DELAY = 12;
-const LIVE_RECKON = 30;
 /** Seconds of flight each trail shows. */
 const TRAIL_SECONDS = 75;
 /** The live layers are redrawn this often, ms: smooth enough at map scale, and light on a phone. */
@@ -157,11 +155,15 @@ export class GlobeMap {
   private rise = -1;
   private counts: Counts = {};
   private readonly routes = new Map<string, FlightRoute>();
-  /** The live sky: every aircraft read, moving between reads, in the map's own metres. */
+  /**
+   * The sky the map draws: live, the page's shared tracker (setSky), which the region reads fill alongside
+   * the airport feed and the journey's reads; with the fixture, the recorded regions as one moment, flown on.
+   */
   private sky: Tracker;
-  /** The live clock in the feed's UTC seconds; for the fixture, the recorded moment running on from when the page opened. */
-  private clock: () => number = () => Date.now() / 1000;
-  private offset: number | null = null;
+  /** The page's shared sky, once the page has given it (live only). */
+  private shared: SharedSky | null = null;
+  /** The moment the sky is drawn at, on the feed's clock: the shared sky's frame time; for the fixture, the recorded moment running on from when the page opened. */
+  private skyTime: () => number = () => Date.now() / 1000;
   private recorded: RegionSnapshot[] | null = null;
   private readonly timers: number[] = [];
   private regionRequest = 0;
@@ -231,7 +233,8 @@ export class GlobeMap {
     this.fixture = options.fixture;
     this.theme = options.theme;
     this.globe = globeCapable(rendererName());
-    this.sky = options.fixture ? new Tracker({ playbackDelay: 0, deadReckonMax: Infinity }) : new Tracker({ playbackDelay: LIVE_DELAY, deadReckonMax: LIVE_RECKON });
+    // Live, an empty sky until the page gives the map its shared one.
+    this.sky = new Tracker({ deadReckonMax: options.fixture ? Infinity : REGION_RECKON });
     this.map = new MapLibreMap({
       container,
       style: mapStyle(options.theme, { globe: this.globe }),
@@ -741,7 +744,7 @@ export class GlobeMap {
       this.viewSubjects = [];
     }
     if (showSky || this.skyDrawn) {
-      const tracked = showSky ? this.sky.at(this.clock()).filter((a) => a.id !== this.journeyHex) : [];
+      const tracked = showSky ? this.sky.at(this.skyTime(), { frame: MAP_ORIGIN }).filter((a) => a.id !== this.journeyHex) : [];
       const step = Math.min(1, (now - this.lastSkyAt) / GHOST_MS);
       this.lastSkyAt = now;
       const filtering = filtersActive(this.filters);
@@ -821,7 +824,7 @@ export class GlobeMap {
       const last = this.lastFlight;
       if (last) {
         // On the feed's clock, the one the time bar reads, so "last seen" and the bar agree (the fixture's included).
-        const lost = markLost(last, this.clock() * 1000);
+        const lost = markLost(last, this.skyTime() * 1000);
         if (lost !== last) {
           this.selectionData = { ...this.selectionData, features: this.selectionData.features.map((f) => (f.properties?.part === "aircraft" ? { ...f, properties: { ...f.properties, lost: true } } : f)) };
           this.map.getSource<GeoJSONSource>("selected")?.setData(this.selectionData);
@@ -937,11 +940,14 @@ export class GlobeMap {
       if (this.sky.size === 0) {
         const snapshot = mergeRegions(await this.recordedRegions(), MAP_ORIGIN, { rebase: true });
         const opened = Date.now() / 1000;
-        this.clock = () => snapshot.time + (Date.now() / 1000 - opened);
+        // Drawn from the recorded moment itself, the playback delay behind a clock that starts there.
+        this.skyTime = () => snapshot.time + PLAYBACK_DELAY + (Date.now() / 1000 - opened);
         this.sky.add(snapshot);
       }
       return;
     }
+    const shared = this.shared;
+    if (!shared) return;
     const request = ++this.regionRequest;
     let cells = this.map.getZoom() >= REGION_ZOOM ? cellsCovering(this.visibleBounds()) : [];
     if (cells.length > MAX_CELLS) cells = [];
@@ -974,11 +980,21 @@ export class GlobeMap {
     const read = answers.filter((a): a is RegionSnapshot => a !== null && typeof a.time === "number");
     if (!read.length) return;
     const snapshot = mergeRegions(read, MAP_ORIGIN);
-    // Run on the feed's own clock, so the playback delay is measured against its timestamps.
-    this.offset ??= snapshot.time - Date.now() / 1000;
-    const offset = this.offset;
-    this.clock = () => Date.now() / 1000 + offset;
-    this.sky.add(snapshot);
+    // The page's feed clock follows these answers too, and the fixes join the airport feed's and the journey's in the one tracker.
+    shared.heard(snapshot.time);
+    shared.tracker.add(snapshot, REGION_LISTING);
+  }
+
+  /**
+   * The page's shared sky (live only; the fixture draws its own recorded moment): the map's region reads go
+   * into it, and the map draws its aircraft from it at the frame's one moment, as the diorama and the journey do.
+   */
+  setSky(sky: SharedSky): void {
+    if (this.fixture || this.shared === sky) return;
+    this.shared = sky;
+    this.sky = sky.tracker;
+    this.skyTime = sky.time;
+    void this.loadRegion();
   }
 
   /** Holds the map's LIVE dot current while no aircraft are read (zoomed out), or lets it age from the region reads. Never for a fixture, whose dot the page sets. */

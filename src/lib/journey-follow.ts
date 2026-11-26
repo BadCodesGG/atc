@@ -11,13 +11,14 @@ import { type JourneyEnd, journeyEnd, journeyProgress, type JourneyProgress, typ
 import type { FlightRoute } from "./routes";
 import { groundView, seenOnGround } from "./globe/camera";
 import type { OrbitView } from "./scene/orbit";
-import { PLAYBACK_DELAY, Tracker } from "./tracker";
+import { hexListing, SharedSky } from "./shared-sky";
+import { PLAYBACK_DELAY } from "./tracker";
 
 /**
  * One flight followed gate to gate, held by the page so it outlives each airport's diorama. It reads
- * the aircraft by its hex all the way (`/api/hex`, every five seconds of the feed's clock), on the same
- * playback delay the dioramas draw at, so the map and the diorama show the aircraft at the same moment
- * wherever they hand over. While the map leads, it steers the map's camera behind the flight.
+ * the aircraft by its hex all the way (`/api/hex`, every five seconds of the feed's clock) into the page's
+ * shared tracker, and draws it from there, as the diorama and the map do: the same pose at the same
+ * moment wherever they hand over. While the map leads, it steers the map's camera behind the flight.
  */
 
 /** Where the journey is: on the origin's diorama, on the map, on the destination's diorama, or parked at the end. */
@@ -32,8 +33,6 @@ const ANSWER_FRESH_S = 3 * POLL_S;
 /** Time constants, seconds, of the camera's turn and tilt toward the shot's (slow: it swings round to look ahead at cruise), and of the hand from the diorama's camera to the journey's. */
 const TURN_S = 2.5;
 const SETTLE_S = 0.8;
-/** How long the journey's own reads fly the aircraft on through a gap, seconds. */
-const DEAD_RECKON_S = 60;
 /** A place the flight was on the ground is kept every this many seconds of the feed's clock, the last GROUND_TRAIL_MAX of them. */
 const GROUND_TRAIL_S = 2;
 const GROUND_TRAIL_MAX = 6;
@@ -135,8 +134,8 @@ export class Journey {
   private estimating = false;
   /** What the procedures' chunk has missed while it loaded: the first sightings of the aircraft on the ground and in the air, to replay. */
   private early: EndsFix[] = [];
-  /** Flown on through a gap in the reads for a minute: an aircraft in the air goes on as it was going. */
-  private readonly tracker = new Tracker({ deadReckonMax: DEAD_RECKON_S });
+  /** The page's one tracker, which the journey's reads fill (flown on through a gap for a minute: in the air an aircraft goes on as it was going) and its fix is drawn from. */
+  private readonly sky: SharedSky;
   /** When the flight was last drawn by a diorama or read by the journey's own poll, on the feed's clock, seconds. */
   private lastReport: number | null = null;
   /** The newest position the journey's own reads have heard, on the feed's clock (a read's time less its position's age), seconds. */
@@ -173,7 +172,9 @@ export class Journey {
   constructor(
     private readonly source: FeedSource,
     { hex, callsign, origin, route, originKnown = true }: { hex: string; callsign: string; origin: Airport; route: FlightRoute | null; originKnown?: boolean },
+    sky: SharedSky = new SharedSky(source),
   ) {
+    this.sky = sky;
     this.hex = hex;
     this.callsign = callsign;
     this.origin = origin;
@@ -290,9 +291,10 @@ export class Journey {
   fix(): JourneyFix | null {
     if (this.standing) return this.standing;
     if (this.sighting && performance.now() - this.sighting.at < SIGHTING_MS) return this.sighting.fix;
-    const a = this.tracker.at(this.clock()).find((t) => t.id === this.hex);
-    if (!a) return this.ground;
-    const [latitude, longitude] = toGeo(MAP_ORIGIN, a.x, a.y);
+    // The shared tracker's pose, at the moment every view draws this frame: where the diorama and the map draw it too.
+    const a = this.sky.tracker.one(this.hex, this.sky.time());
+    if (!a || a.latitude === undefined || a.longitude === undefined) return this.ground;
+    const { latitude, longitude } = a;
     return { latitude, longitude, altitudeFt: a.altitudeFt, onGround: a.onGround, groundSpeedKt: a.groundSpeedKt, headingDeg: a.headingDeg, verticalRateFpm: a.verticalRateFpm, callsign: a.callsign, typeCode: a.typeCode };
   }
 
@@ -465,7 +467,7 @@ export class Journey {
     };
     const seen = (p: { latitude: number; longitude: number; altitudeFt: number; onGround: boolean }) => place(p.latitude, p.longitude, this.heightOf(p));
     const aircraft = fix ? seen(fix) : null;
-    const drawn = this.clock() - PLAYBACK_DELAY;
+    const drawn = this.sky.time() - PLAYBACK_DELAY;
     const way = this.flown.filter((p) => p.t <= drawn).map((p) => seen({ ...p, onGround: false }));
     const dest = this.destinationPoint();
     const start = this.start();
@@ -548,7 +550,7 @@ export class Journey {
       if (!body.aircraft) return;
       this.source.heard(body.time);
       this.firstSeen ??= { latitude: body.aircraft.latitude, longitude: body.aircraft.longitude };
-      this.tracker.add(mergeRegions([{ cell: { latitude: 0, longitude: 0 }, time: body.time, aircraft: [body.aircraft] }], MAP_ORIGIN));
+      this.sky.tracker.add(mergeRegions([{ cell: { latitude: 0, longitude: 0 }, time: body.time, aircraft: [body.aircraft] }], MAP_ORIGIN), hexListing(this.hex));
       const a = body.aircraft;
       this.lastPosition = Math.max(this.lastPosition ?? -Infinity, body.time - (a.positionAgeS ?? 0));
       const fix: JourneyFix = { latitude: a.latitude, longitude: a.longitude, altitudeFt: a.altitudeFt ?? 0, onGround: a.onGround, groundSpeedKt: a.groundSpeedKt, headingDeg: a.trackDeg ?? 0, verticalRateFpm: a.verticalRateFpm, callsign: a.callsign, typeCode: a.typeCode };

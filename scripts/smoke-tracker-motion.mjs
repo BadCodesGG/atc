@@ -27,7 +27,7 @@ const MAX_FRAME_GAP = 1;
 const WATCH_MS = 25_000;
 
 /** Finds the airport's tracker in the Viewer's state (below `main`, so found from the model's own element) and records every frame it is asked for. */
-const HOOK = `(() => {
+const HOOK = `(async () => {
   const el = document.querySelector("[role='application']");
   const key = el && Object.keys(el).find((k) => k.startsWith("__reactFiber$"));
   if (!key) return false;
@@ -47,13 +47,26 @@ const HOOK = `(() => {
         return out;
       };
       // A headless browser drawing WebGL in software manages a frame or two a second: ask the tracker on
-      // the page's own clock at a display's 60 Hz as well, alongside the frames the page draws.
-      window.setInterval(() => tracker.at(c.clock()), 1000 / 60);
+      // the page's own clock at a display's 60 Hz as well, alongside the frames the page draws. The page
+      // reads its clock once a frame (c.clock), so between frames the hook reads the feed's clock afresh,
+      // through the page's shared sky (the World the Viewer is given); never behind a frame the page drew.
+      let world = null;
+      for (let g = el[key]; g && !world; g = g.return) if (g.memoizedProps && g.memoizedProps.world && typeof g.memoizedProps.world.sky === "function") world = g.memoizedProps.world;
+      const sky = world ? await world.sky() : null;
+      const fresh = sky && typeof sky.clock === "function" ? () => sky.clock() : c.clock;
+      window.setInterval(() => tracker.at(fresh()), 1000 / 60);
       return true;
     }
   }
   return false;
 })()`;
+
+/**
+ * What a move may show against the rules once turned into the airport's metres, metres: the page's one tracker
+ * moves each aircraft in metres measured from near it, and a move held exactly square to its way there can
+ * read a fraction of a millimetre back here (as in src/lib/tracker.test.ts).
+ */
+const SLACK_M = 1e-3;
 
 /** The same rules as the Tracker's replay test (src/lib/tracker.test.ts), over the frames the page drew. */
 function violations(frames) {
@@ -75,15 +88,15 @@ function violations(frames) {
       const step = Math.hypot(dx, dy);
       moves++;
       const atRest = gs !== null && gs < AT_REST_KT;
-      const bound = Math.max((gs ?? 0) * KNOTS, STEP_FLOOR_M) + 1e-6;
+      const bound = Math.max((gs ?? 0) * KNOTS, STEP_FLOOR_M) + SLACK_M;
       const snapped = step > SNAP_M;
       if (step > bound && !snapped) out.push(`${id} stepped ${step.toFixed(1)} m (bound ${bound.toFixed(1)} m)`);
       if (!atRest && !snapped) {
         const u = last.get(id);
-        if (u && dx * u[0] + dy * u[1] < -1e-6) out.push(`${id} moved ${(-(dx * u[0] + dy * u[1])).toFixed(3)} m back on its last move`);
+        if (u && dx * u[0] + dy * u[1] < -SLACK_M) out.push(`${id} moved ${(-(dx * u[0] + dy * u[1])).toFixed(3)} m back on its last move`);
         if (!onGround && headingKnown) {
           const along = dx * Math.sin((headingDeg * Math.PI) / 180) + dy * Math.cos((headingDeg * Math.PI) / 180);
-          if (along < -1e-6) out.push(`${id} flew ${(-along).toFixed(3)} m back along its track`);
+          if (along < -SLACK_M) out.push(`${id} flew ${(-along).toFixed(3)} m back along its track`);
         }
       }
       if (snapped || step <= 1e-3) last.delete(id);

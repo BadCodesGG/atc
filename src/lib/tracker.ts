@@ -1,6 +1,6 @@
 import { OFFLINE_AFTER_S } from "./feed-health";
-import { KNOTS } from "./geo";
-import type { TrafficSnapshot } from "./traffic";
+import { KNOTS, type Origin, toGeo, toLocal } from "./geo";
+import type { Aircraft, TrafficSnapshot } from "./traffic";
 
 /**
  * Turns the snapshots a client polls every few seconds into positions that move smoothly every
@@ -17,10 +17,18 @@ import type { TrafficSnapshot } from "./traffic";
  *   holds it instead, and its path catches up with it;
  * - it never steps more than about a second of its own speed in one frame;
  * - an error over CORRECTION_SNAP is not the same track carrying on, and it jumps there.
+ *
+ * One page holds one geographic Tracker for every view (docs/adr/0001-one-shared-tracker.md): the airport
+ * feed, the World map's region reads and the Journey's hex poll each add their fixes to it as a feed of
+ * its own, merged by when each fix was taken; the Diorama, the World map and the Journey each read the
+ * same poses from it, in their own metres, at the one moment of the frame.
  */
 
-/** Seconds the picture runs behind the live clock. Covers the 4 s cache plus a poll interval of jitter. */
-export const PLAYBACK_DELAY = 8;
+/**
+ * Seconds the picture runs behind the live clock, in every view. Covers the 4 s cache, a 5 s poll and a
+ * 10 s region read with a fix to spare on each side, so an aircraft is nearly always drawn between two.
+ */
+export const PLAYBACK_DELAY = 12;
 /** Longest an aircraft is extrapolated past its last sighting before it starts to fade out. */
 export const DEAD_RECKON_MAX = 15;
 /**
@@ -29,7 +37,7 @@ export const DEAD_RECKON_MAX = 15;
  * then catching up. Not for the whole age of an old fix: taxiways turn and aircraft stop, and an old
  * ground fix carried on for 30 s or more would put a taxiing aircraft far off the pavement.
  */
-export const GROUND_DEAD_RECKON_MAX = 12;
+export const GROUND_DEAD_RECKON_MAX = 16;
 /**
  * Time constant, seconds, of the chase that takes a drawn aircraft onto a corrected path (95% there in
  * three of these): the shortest for a small correction, longer for a large one so it is never caught
@@ -64,12 +72,44 @@ const HISTORY = 10;
 const MAX_SAMPLES = 32;
 /** A fix less than this after the previous one is the same report seen again. */
 const MIN_SAMPLE_GAP = 0.05;
+/**
+ * Two polls list the same fix as taken up to this far apart, seconds, when their clocks differ: a fix this
+ * close in time to one held, at the same place (within SAME_FIX_M metres), is that fix heard again.
+ */
+const SAME_FIX_S = 1;
+const SAME_FIX_M = 1;
+/**
+ * A geographic track measures its metres from a point near it, where north is up and a metre is a metre;
+ * once a flight is this far from that point, metres, it measures them from where it is instead.
+ */
+const REANCHOR_M = 50_000;
+/** The feed a snapshot is added to when none is named: a tracker fed by one poll. */
+const ONE_FEED = "feed";
+
+/** Which poll a snapshot came from, and how long an aircraft it lists is flown on once it stops listing it. */
+export interface Listing {
+  /** Each poll's snapshots are a feed of their own: `airport:atl`, `region`, `hex`. */
+  feed?: string;
+  /** Seconds an aircraft is flown on past this feed's last listing (the tracker's deadReckonMax by default). */
+  reckon?: number;
+}
+
+/** How a view reads the tracker. */
+export interface Reading {
+  /** The metres x and y are given in, east and north of this point; a geographic tracker's own metres without one. A plain tracker answers in the metres it was fed. */
+  frame?: Origin;
+  /** Only the aircraft these feeds list, fading as they stop listing them; every aircraft by default. */
+  feeds?: readonly string[];
+}
 
 export interface TrackedAircraft {
   id: string;
-  /** Metres east and north of the airport reference point. */
+  /** Metres east and north of the airport reference point (or of the reading's frame). */
   x: number;
   y: number;
+  /** Where it is drawn, degrees: from a geographic tracker only. */
+  latitude?: number;
+  longitude?: number;
   /** Feet above mean sea level; 0 on the ground. */
   altitudeFt: number;
   /** Degrees clockwise from true north, in [0, 360). */
@@ -147,13 +187,23 @@ function clampLength(move: Vector, most: number): Vector {
   return length > most ? [(move[0] * most) / length, (move[1] * most) / length] : move;
 }
 
+/** How one feed lists an aircraft. */
+interface Listed {
+  /** Render time at which the feed's listing becomes visible and starts fading in. */
+  since: number;
+  /** Time of the feed's newest snapshot that listed it. */
+  seen: number;
+  /** How long it is flown on past `seen`. */
+  reckon: number;
+}
+
 interface Track {
   samples: Sample[];
   drawn: Drawn | null;
-  /** Render time at which the aircraft becomes visible and starts fading in. */
-  start: number;
-  /** Time of the newest snapshot that listed it. */
-  lastSeen: number;
+  /** Each feed that lists the aircraft. */
+  listed: Map<string, Listed>;
+  /** A geographic track's samples are metres east and north of this point (null in a plain tracker). */
+  anchor: Origin | null;
   callsign: string | null;
   registration: string | null;
   typeCode: string | null;
@@ -166,6 +216,16 @@ const wrap360 = (degrees: number) => ((degrees % 360) + 360) % 360;
 /** Signed turn from one heading to another, the short way round, in [-180, 180). */
 const turn = (from: number, to: number) => ((((to - from) % 360) + 540) % 360) - 180;
 const lerp = (a: number, b: number, u: number) => a + (b - a) * u;
+
+/**
+ * Degrees clockwise that north at a point is turned from north in metres measured from `anchor`: a heading
+ * of 0 there runs this way in those metres. Nothing at the anchor; a fraction of a degree 50 km from it.
+ */
+function northTurn(anchor: Origin, latitude: number, longitude: number): number {
+  const [x0, y0] = toLocal(anchor, latitude, longitude);
+  const [x1, y1] = toLocal(anchor, latitude + 1e-4, longitude);
+  return Math.atan2(x1 - x0, y1 - y0) / RAD;
+}
 const lerpOrNearest = (a: number | null, b: number | null, u: number) => (a !== null && b !== null ? lerp(a, b, u) : u < 0.5 ? (a ?? b) : (b ?? a));
 
 /** What a sample and an interpolated moment share: everything in TrackedAircraft that motion decides. */
@@ -243,16 +303,23 @@ function between(a: Sample, b: Sample, t: number): Pose {
 export class Tracker {
   private readonly delay: number;
   private readonly reckon: number;
+  private readonly geographic: boolean;
   private readonly tracks = new Map<string, Track>();
-  private newest = -Infinity;
+  /** Each feed's newest snapshot time, and the newest of them all. */
+  private readonly newest = new Map<string, number>();
+  private latest = -Infinity;
 
   /**
    * `deadReckonMax`: how long an aircraft is flown on past its last sighting before it fades (default
-   * DEAD_RECKON_MAX). The world map, drawing a recorded moment, flies it on without limit.
+   * DEAD_RECKON_MAX), unless a feed says otherwise. The world map, drawing a recorded moment, flies it on
+   * without limit. `geographic`: place each fix by its latitude and longitude rather than its x and y, so
+   * feeds measured from different points (an airport's, the map's) are one picture, read in any view's
+   * metres; the page's shared tracker is one.
    */
-  constructor({ playbackDelay = PLAYBACK_DELAY, deadReckonMax = DEAD_RECKON_MAX }: { playbackDelay?: number; deadReckonMax?: number } = {}) {
+  constructor({ playbackDelay = PLAYBACK_DELAY, deadReckonMax = DEAD_RECKON_MAX, geographic = false }: { playbackDelay?: number; deadReckonMax?: number; geographic?: boolean } = {}) {
     this.delay = playbackDelay;
     this.reckon = deadReckonMax;
+    this.geographic = geographic;
   }
 
   /** Aircraft currently tracked, including ones still fading out. */
@@ -267,17 +334,21 @@ export class Tracker {
     return n;
   }
 
-  /** Feed snapshots in arrival order; one that is not newer than the newest already seen is ignored. */
-  add(snapshot: Pick<TrafficSnapshot, "time" | "aircraft">): void {
-    if (!(snapshot.time > this.newest)) return;
-    this.newest = snapshot.time;
+  /**
+   * A feed's snapshots, in the order they arrive; one that is not newer than the newest that feed has
+   * given (the server's last answer served again) is ignored. Fixes from different feeds are merged by
+   * when each was taken, whatever order they arrive in, and the same fix heard by two feeds is one.
+   */
+  add(snapshot: Pick<TrafficSnapshot, "time" | "aircraft">, { feed = ONE_FEED, reckon = this.reckon }: Listing = {}): void {
+    if (!(snapshot.time > (this.newest.get(feed) ?? -Infinity))) return;
+    this.newest.set(feed, snapshot.time);
+    this.latest = Math.max(this.latest, snapshot.time);
     for (const a of snapshot.aircraft) {
       let track = this.tracks.get(a.id);
       if (!track) {
-        track = { samples: [], drawn: null, start: 0, lastSeen: snapshot.time, callsign: null, registration: null, typeCode: null, military: false, category: null };
+        track = { samples: [], drawn: null, listed: new Map(), anchor: null, callsign: null, registration: null, typeCode: null, military: false, category: null };
         this.tracks.set(a.id, track);
       }
-      track.lastSeen = snapshot.time;
       track.callsign = a.callsign ?? track.callsign;
       track.registration = a.registration ?? track.registration;
       track.typeCode = a.typeCode ?? track.typeCode;
@@ -287,42 +358,108 @@ export class Tracker {
       // Time each fix by when it was taken. The same old fix turns up in snapshot after snapshot for
       // a transponder that rarely reports; it is one sample, not many.
       const t = snapshot.time - a.positionAge;
-      const last = track.samples.at(-1);
-      if (!last || t > last.t + MIN_SAMPLE_GAP) {
-        track.samples.push({
-          t,
-          x: a.x,
-          y: a.y,
-          altitudeFt: a.altitudeFt,
-          headingDeg: a.trackDeg !== null ? wrap360(a.trackDeg) : (last?.headingDeg ?? 0),
-          headingKnown: a.trackDeg !== null || (last?.headingKnown ?? false),
-          groundSpeedKt: a.groundSpeedKt,
-          onGround: a.onGround,
-          verticalRateFpm: a.verticalRateFpm,
-        });
-        if (!last) track.start = Math.max(t, snapshot.time - this.delay);
-      }
+      const listed = track.listed.get(feed);
+      if (listed) {
+        listed.seen = snapshot.time;
+        listed.reckon = reckon;
+      } else track.listed.set(feed, { since: Math.max(t, snapshot.time - this.delay), seen: snapshot.time, reckon });
+      this.insert(track, t, a);
     }
     this.prune();
   }
 
+  /** Puts a fix among the track's samples where its time falls, unless it is one already held. */
+  private insert(track: Track, t: number, a: Aircraft): void {
+    const { samples } = track;
+    const [x, y] = this.place(track, a);
+    let i = samples.length;
+    while (i > 0 && samples[i - 1].t > t) i--;
+    const before = samples[i - 1];
+    const after = samples[i];
+    const same = (s: Sample | undefined) => s !== undefined && (Math.abs(s.t - t) <= MIN_SAMPLE_GAP || (Math.abs(s.t - t) < SAME_FIX_S && Math.hypot(s.x - x, s.y - y) < SAME_FIX_M));
+    if (same(before) || same(after)) return;
+    // Headings are held in the track's own metres, which a geographic track turns from true north a little away from its anchor.
+    const turned = track.anchor ? northTurn(track.anchor, a.latitude, a.longitude) : 0;
+    samples.splice(i, 0, {
+      t,
+      x,
+      y,
+      altitudeFt: a.altitudeFt,
+      headingDeg: a.trackDeg !== null ? wrap360(a.trackDeg + turned) : (before?.headingDeg ?? 0),
+      headingKnown: a.trackDeg !== null || (before?.headingKnown ?? false),
+      groundSpeedKt: a.groundSpeedKt,
+      onGround: a.onGround,
+      verticalRateFpm: a.verticalRateFpm,
+    });
+  }
+
+  /**
+   * Where a fix is in the track's metres: as given in a plain tracker; in a geographic one, from its latitude
+   * and longitude, measured from a point near the aircraft (moved along with it once it has flown far).
+   */
+  private place(track: Track, a: Aircraft): [number, number] {
+    if (!this.geographic) return [a.x, a.y];
+    const here = { latitude: a.latitude, longitude: a.longitude };
+    track.anchor ??= here;
+    const [x, y] = toLocal(track.anchor, a.latitude, a.longitude);
+    if (Math.hypot(x, y) <= REANCHOR_M) return [x, y];
+    const from = track.anchor;
+    const move = (p: { x: number; y: number; headingDeg: number }) => {
+      const [latitude, longitude] = toGeo(from, p.x, p.y);
+      [p.x, p.y] = toLocal(here, latitude, longitude);
+      p.headingDeg = wrap360(p.headingDeg - northTurn(from, latitude, longitude) + northTurn(here, latitude, longitude));
+    };
+    for (const s of track.samples) move(s);
+    if (track.drawn) {
+      track.drawn.pose = { ...track.drawn.pose };
+      move(track.drawn.pose);
+    }
+    track.anchor = here;
+    return [0, 0];
+  }
+
   /**
    * Every visible aircraft at `time`, the live clock in the snapshots' own UTC seconds: the picture
-   * is of `time - playbackDelay`. Call with non-decreasing times; samples behind the playback moment
-   * are discarded as snapshots arrive.
+   * is of `time - playbackDelay`. Call with non-decreasing times, the same one for every view reading
+   * it in a frame; samples behind the playback moment are discarded as snapshots arrive.
    */
-  at(time: number): TrackedAircraft[] {
+  at(time: number, reading: Reading = {}): TrackedAircraft[] {
     const t = time - this.delay;
     const out: TrackedAircraft[] = [];
     for (const [id, track] of this.tracks) {
-      const fade = Math.min(1, (t - track.start) / FADE_IN, 1 - (t - (track.lastSeen + this.reckonFor(track))) / FADE_OUT);
-      if (!(fade > 0)) {
-        track.drawn = null;
-        continue;
-      }
-      out.push({ id, callsign: track.callsign, registration: track.registration, typeCode: track.typeCode, military: track.military, category: track.category, fade, ...this.draw(track, t) });
+      const a = this.read(id, track, t, reading);
+      if (a) out.push(a);
     }
     return out;
+  }
+
+  /** One aircraft at `time`, as at() has it, or null when it is not visible: what a view following one flight reads. */
+  one(id: string, time: number, reading: Reading = {}): TrackedAircraft | null {
+    const track = this.tracks.get(id);
+    return track ? this.read(id, track, time - this.delay, reading) : null;
+  }
+
+  private read(id: string, track: Track, t: number, { frame, feeds }: Reading): TrackedAircraft | null {
+    let since = Infinity;
+    let until = -Infinity;
+    for (const [feed, listed] of track.listed) {
+      if (feeds && !feeds.includes(feed)) continue;
+      since = Math.min(since, listed.since);
+      until = Math.max(until, listed.seen + this.reckonFor(track, listed.reckon));
+    }
+    const fade = Math.min(1, (t - since) / FADE_IN, 1 - (t - until) / FADE_OUT);
+    if (!(fade > 0)) return null;
+    const pose = this.draw(track, t);
+    let { x, y, headingDeg } = pose;
+    let where: { latitude?: number; longitude?: number } = {};
+    if (track.anchor) {
+      const [latitude, longitude] = toGeo(track.anchor, x, y);
+      where = { latitude, longitude };
+      // Every view is given the true heading, as every feed gives it.
+      headingDeg = wrap360(headingDeg - northTurn(track.anchor, latitude, longitude));
+      if (frame) [x, y] = toLocal(frame, latitude, longitude);
+    }
+    return { id, callsign: track.callsign, registration: track.registration, typeCode: track.typeCode, military: track.military, category: track.category, fade, ...pose, x, y, headingDeg, ...where };
   }
 
   /**
@@ -381,8 +518,10 @@ export class Tracker {
     const last = samples[samples.length - 1];
     if (t >= last.t) {
       // Past the newest fix: carry on from it. An aircraft still being listed with an old fix is
-      // extrapolated from that fix to its last listing, and 15 s beyond.
-      const elapsed = Math.min(t - last.t, track.lastSeen - last.t + this.reckon, last.onGround ? GROUND_DEAD_RECKON_MAX : Infinity);
+      // extrapolated from that fix to its last listing, and as long beyond as the feed listing it says.
+      let flownTo = -Infinity;
+      for (const listed of track.listed.values()) flownTo = Math.max(flownTo, listed.seen + listed.reckon);
+      const elapsed = Math.min(t - last.t, flownTo - last.t, last.onGround ? GROUND_DEAD_RECKON_MAX : Infinity);
       return { ...pose(last), ...project(last, elapsed, samples.at(-2)) };
     }
     // Before the oldest fix still held: pruning can leave one fix ahead of a moment drawn a little
@@ -399,15 +538,17 @@ export class Tracker {
    * on the ground at its last fix is no guess, so it stays as long as the server still serves that answer
    * (adsb.lol can answer 429 for minutes, and a held or parked aircraft would otherwise blink out).
    */
-  private reckonFor(track: Track): number {
+  private reckonFor(track: Track, reckon: number): number {
     const last = track.samples.at(-1);
-    return last && last.onGround && (last.groundSpeedKt ?? 0) < STOPPED_KT ? Math.max(this.reckon, OFFLINE_AFTER_S) : this.reckon;
+    return last && last.onGround && (last.groundSpeedKt ?? 0) < STOPPED_KT ? Math.max(reckon, OFFLINE_AFTER_S) : reckon;
   }
 
   private prune(): void {
-    const playback = this.newest - this.delay;
+    const playback = this.latest - this.delay;
     for (const [id, track] of this.tracks) {
-      if (track.lastSeen + this.reckonFor(track) + FADE_OUT < playback) {
+      // A feed whose listing has faded out no longer shows the aircraft; one no feed shows is gone.
+      for (const [feed, listed] of track.listed) if (listed.seen + this.reckonFor(track, listed.reckon) + FADE_OUT < playback) track.listed.delete(feed);
+      if (track.listed.size === 0) {
         this.tracks.delete(id);
         continue;
       }

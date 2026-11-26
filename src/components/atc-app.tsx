@@ -32,7 +32,8 @@ import { ease, type OrbitView, orbit, pan, panAlong, turn, zoom } from "@/lib/sc
 import { MODEL, type SceneTheme, THEMES, type ThemeKey } from "@/lib/scene/theme";
 import { viewKey } from "@/lib/scene/view-keys";
 import { fixtureFeed, recordFeedAnswer, recordFeedFailure, startFeed } from "@/lib/feed-health";
-import { PLAYBACK_DELAY, type Tracker } from "@/lib/tracker";
+import type { SharedSky, TrafficFeed } from "@/lib/shared-sky";
+import { PLAYBACK_DELAY } from "@/lib/tracker";
 import type { TrafficSnapshot } from "@/lib/traffic";
 import type { FlightCard as FlightCardData, TrafficEntry, TrafficView } from "@/lib/traffic-view";
 import type { OpsView, PathPulse } from "@/lib/path-pulse";
@@ -152,6 +153,8 @@ interface World {
   onMap: boolean;
   /** Where the feeds come from: the network, or `?fixture=journey`'s recording. Made once, on first ask. */
   source: () => Promise<FeedSource>;
+  /** The page's one tracker on the feed's clock, which every view draws from. Made once, on first ask. */
+  sky: () => Promise<SharedSky>;
   /** The flight followed gate to gate, which outlives each airport's diorama, and what the chrome shows of it. */
   journeyRef: RefObject<Journey | null>;
   journey: JourneyStatus | null;
@@ -287,7 +290,8 @@ interface ChromeState {
 /** The traffic side, which outlives any one scene: switching theme rebuilds the model, not the feed. */
 interface Traffic {
   map: AirportMap;
-  tracker: Tracker;
+  /** This airport's feed of the page's tracker (a frozen recording's own tracker). */
+  tracker: TrafficFeed;
   view: TrafficView;
   /** The live clock in the feed's own UTC seconds (frozen for the fixture). */
   clock: () => number;
@@ -340,6 +344,13 @@ export function AtcApp({ initialTheme, initialAirport, initialFilters }: { initi
   // feed-source
   const sourceRef = useRef<Promise<FeedSource> | null>(null);
   const source = useCallback(() => (sourceRef.current ??= feedSourceFor(new URLSearchParams(window.location.search))), []);
+  /**
+   * The page's one tracker, on the feed's clock (docs/adr/0001-one-shared-tracker.md): the airport feed, the map's
+   * region reads and the journey's reads fill it, and the diorama, the map and the journey all draw from it. It
+   * outlives every airport, so the flight a journey follows is where it was when the page lands on the next one.
+   */
+  const skyRef = useRef<Promise<SharedSky> | null>(null);
+  const sky = useCallback(() => (skyRef.current ??= Promise.all([source(), import("@/lib/shared-sky")]).then(([s, { SharedSky }]) => new SharedSky(s))), [source]);
   // /feed-source
 
   // journey
@@ -373,10 +384,10 @@ export function AtcApp({ initialTheme, initialAirport, initialFilters }: { initi
     stopJourney();
     journeyHexRef.current = flight.hex;
     const generation = journeyGeneration.current;
-    void source()
-      .then((s) => {
+    void Promise.all([source(), sky()])
+      .then(([s, k]) => {
       if (generation !== journeyGeneration.current) return;
-      const j = new Journey(s, flight);
+      const j = new Journey(s, flight, k);
       journeyRef.current = j;
       // The panel's figures, four times a second, timed by the feed's clock (the fixture's runs fast).
       ready?.();
@@ -446,6 +457,15 @@ export function AtcApp({ initialTheme, initialAirport, initialFilters }: { initi
       globe = new GlobeMap(container, { theme: themeRef.current, airport: airportRef.current, fixture });
       globeRef.current = globe;
       setGlobeReady(true);
+      // Live, the map reads its regions into the page's one tracker and draws from it.
+      if (!fixture) {
+        const made = globe;
+        void sky()
+          .then((k) => {
+            if (!stopped) made.setSky(k);
+          })
+          .catch((error: unknown) => console.error("atc: the map's sky failed to start", error));
+      }
       globe.setFilters(filtersRef.current);
       globe.setSelectionListener(setMapFlight);
       globe.setCardRect(() => mapCardRef.current?.querySelector("section[aria-label^='Selected flight']")?.getBoundingClientRect() ?? null);
@@ -475,7 +495,7 @@ export function AtcApp({ initialTheme, initialAirport, initialFilters }: { initi
       setGlobeReady(false);
       globe?.dispose();
     };
-  }, [hasWebGL2]);
+  }, [hasWebGL2, sky]);
 
   useEffect(() => {
     themeRef.current = theme;
@@ -541,7 +561,7 @@ export function AtcApp({ initialTheme, initialAirport, initialFilters }: { initi
     setSwitched(true);
   };
 
-  const world: World = { globeRef, leadRef, mapRef, setLead, onMap, source, journeyRef, journey, journeyHexRef, startJourney, stopJourney, journeyToMap, journeyLanded, showMap: setOnMap, radar, alerts, mapFlight, globeReady, mapCardRef, journeyCardRef };
+  const world: World = { globeRef, leadRef, mapRef, setLead, onMap, source, sky, journeyRef, journey, journeyHexRef, startJourney, stopJourney, journeyToMap, journeyLanded, showMap: setOnMap, radar, alerts, mapFlight, globeReady, mapCardRef, journeyCardRef };
   return (
     <main data-theme={theme} data-on-map={onMap || undefined} className="relative h-dvh w-full overflow-clip bg-paper font-sans text-ink">
       {/* The world map, under the diorama; shown once the page knows which of the two leads. MapLibre's
@@ -569,7 +589,7 @@ interface ViewerProps {
 }
 
 function Viewer({ airport, theme, onTheme, onAirport, filters, onFilters, focusPicker, world, hasWebGL2 }: ViewerProps) {
-  const { globeRef, leadRef, mapRef, setLead, onMap, source, journeyRef, journey, journeyHexRef, radar, alerts, mapFlight, globeReady, mapCardRef, journeyCardRef } = world;
+  const { globeRef, leadRef, mapRef, setLead, onMap, source, sky, journeyRef, journey, journeyHexRef, radar, alerts, mapFlight, globeReady, mapCardRef, journeyCardRef } = world;
   const feedAlerts = alerts.feed;
   const viewAlerts = alerts.view;
   /** The layer holding the diorama and everything pinned to it, faded in over the map as the camera closes on the airport. */
@@ -1104,7 +1124,15 @@ function Viewer({ airport, theme, onTheme, onAirport, filters, onFilters, focusP
       ]);
       const map = await loadAirportMap(airport.code);
       if (stopped) return;
-      const tracker = new Tracker();
+      const params = new URLSearchParams(window.location.search);
+      const fixture = params.get("fixture");
+      // A frozen recording (`?fixture=1`, `?fixture=sequence`) is a moment of its own, on a clock that stands
+      // still: it keeps a tracker of its own. Everything else is on the feed's clock, in the page's one tracker,
+      // which this airport's feed fills and its diorama reads (only the aircraft its feed lists, in its metres).
+      const frozen = fixture === "1" || fixture === "sequence";
+      const shared = frozen ? null : await sky();
+      if (stopped) return;
+      const tracker: TrafficFeed = shared ? shared.airport(airport.code, airport) : new Tracker();
       const view = new TrafficView(map, airport);
       // replay
       // Taxi trails follow the taxiways, so the time-lapse never draws an aircraft across the grass.
@@ -1120,8 +1148,6 @@ function Viewer({ airport, theme, onTheme, onAirport, filters, onFilters, focusP
       let clock: () => number;
       let sequence: TrafficSnapshot[] | null = null;
       let notice: string | null = null;
-      const params = new URLSearchParams(window.location.search);
-      const fixture = params.get("fixture");
       if (fixture) startFeed(Date.now(), fixtureFeed(params.get("feed")));
       else startFeed(Date.now());
       // The recorded sequence is of Atlanta: elsewhere it only supplies the frozen moment, and there is no traffic.
@@ -1159,10 +1185,10 @@ function Viewer({ airport, theme, onTheme, onAirport, filters, onFilters, focusP
       } else {
         // The live feed, or `?fixture=journey`'s recording standing in for the network: the same code reads both.
         const feed = await source();
-        if (stopped) return;
-        // Run on the feed's own clock, the page's one, so the playback delay is measured against its
-        // timestamps and every tracker on the page plays back to the same moment.
-        clock = () => feed.clock();
+        if (stopped || !shared) return;
+        // Run on the feed's own clock, the page's one, read once a frame: the diorama draws the shared tracker at
+        // the very moment the map and the journey draw it, so its playback delay is measured against the same timestamps.
+        clock = shared.time;
         const load = async () => {
           try {
             const res = await feed.get(`/api/traffic/${airport.code}`);
@@ -1209,7 +1235,7 @@ function Viewer({ airport, theme, onTheme, onAirport, filters, onFilters, focusP
         stopPoll = feed.every(POLL_MS / 1000, load);
       }
       // The fixtures hold their traffic from the start; the live feed (and the journey's recording) is heard from its first answer, above.
-      if (fixture === "1" || fixture === "sequence") setHeard(true);
+      if (frozen) setHeard(true);
       if (!stopped) setTraffic({ map, tracker, view, clock, replay, replayView, sequence, notice });
     })().catch((error: unknown) => {
       console.error("atc: traffic failed to start", error);
@@ -1220,7 +1246,7 @@ function Viewer({ airport, theme, onTheme, onAirport, filters, onFilters, focusP
       stopPoll();
       window.clearTimeout(heardTimer);
     };
-  }, [hasWebGL2, airport, globeRef, leadRef, source, journeyRef, feedAlerts, viewAlerts]);
+  }, [hasWebGL2, airport, globeRef, leadRef, source, sky, journeyRef, feedAlerts, viewAlerts]);
 
   // The FAA's delay programs, airport-wide. The fixture has none, so its cards say so.
   useEffect(() => {

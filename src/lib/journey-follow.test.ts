@@ -77,7 +77,8 @@ describe("the way flown", () => {
       await settle();
       time += 10;
     }
-    // The clock now stands 10 s past the last read: the moment drawn (8 s behind it) is after every point read.
+    // The clock now stands 15 s past the last read: the moment drawn (PLAYBACK_DELAY, 12 s, behind it) is after every point read.
+    time += 5;
     const { flown } = j.features(null, MAP_ORIGIN);
     // The origin, the way flown, then the aircraft itself.
     const way = flown.slice(1, -1);

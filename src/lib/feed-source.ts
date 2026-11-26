@@ -1,11 +1,13 @@
+import { PLAYBACK_DELAY } from "./tracker";
+
 /**
  * Where the page's feeds come from: the API routes over the network, or a fixture that answers the same
  * paths with the same shapes on a clock of its own (`?fixture=journey`, played compressed). The code that
  * polls, parses and tracks is the same either way; only this stands between it and the network.
  *
- * It also keeps the feed's clock, one for the whole page: every tracker plays its aircraft back on it,
- * so an aircraft read by two feeds (an airport's, and the hex a journey follows) is drawn at the same
- * moment by both, and the two pictures agree where they hand over.
+ * It also keeps the feed's clock, one for the whole page: the page's one tracker (shared-sky.ts) plays
+ * every aircraft back on it, whichever feed read it (an airport's, the map's regions, the hex a journey
+ * follows), so every view draws it at the same moment and the pictures agree where they hand over.
  */
 export interface FeedSource {
   /** Seconds on the clock the answers are timed against: the wall's, or the fixture's own. */
@@ -31,9 +33,9 @@ const SYNC_SLEW = 0.1;
 
 /**
  * Seconds after the first answer in which the clock takes each new estimate outright: the picture plays
- * 8 s behind the feed, so nothing is drawn yet, and a first answer served old is not slewed off for minutes.
+ * PLAYBACK_DELAY behind the feed, so nothing is drawn yet, and a first answer served old is not slewed off for minutes.
  */
-const SYNC_SETTLE_S = 8;
+const SYNC_SETTLE_S = PLAYBACK_DELAY;
 
 /** The network, on the wall's clock, offset to the feed's own: set by the first answer and re-synced by every one after. */
 export function liveSource(): FeedSource {
