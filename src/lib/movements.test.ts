@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import type { AirportMap } from "./airport-map";
 import { DEFAULT_AIRPORT } from "./airports";
 import { activeMovements, cutMovements, type MovementRow, movementsFoot } from "./movements";
-import { Tracker } from "./tracker";
+import { FADE_IN, Tracker } from "./tracker";
 import { parseTraffic } from "./traffic";
 import { fixtureTime, TrafficView } from "./traffic-view";
 
@@ -42,6 +42,19 @@ describe("activeMovements on the ATL fixture", () => {
     expect(rows.get("EDV5051")).toMatchObject({ type: "CRJ9", phrase: "Westbound", tag: "TAXI", state: "taxiing", speed: "19 kt" });
     expect(rows.get("A40694")).toMatchObject({ phrase: "Northbound" });
     expect(rows.get("DAL1182")).toMatchObject({ phrase: "Southwest" });
+  });
+
+  it("words a runway crossing by the runway it is on, while the aircraft is on it", () => {
+    // DAL753's fix (17.5 s old, 9 kt north) has it on 8R/26L. At the fixture's moment it has been carried
+    // north for the whole ground dead reckoning limit (16 s) and is off the runway, so read it at the first
+    // moment it is drawn in full. Its listing starts one playback delay behind the snapshot and it is faded
+    // in FADE_IN after that: read at the snapshot's time plus FADE_IN, the picture is 7.5 s on from its fix.
+    const snapshot = parseTraffic(raw, DEFAULT_AIRPORT);
+    const tracker = new Tracker();
+    tracker.add(snapshot);
+    const onCrossing = snapshot.time + FADE_IN;
+    const { entries } = new TrafficView(map, DEFAULT_AIRPORT).frame(tracker.at(onCrossing));
+    const rows = new Map(activeMovements(entries, null, 30).rows.map((r) => [r.callsign, r]));
     expect(rows.get("DAL753")).toMatchObject({ phrase: "Crossing 8R/26L", tag: "TAXI" });
   });
 });
