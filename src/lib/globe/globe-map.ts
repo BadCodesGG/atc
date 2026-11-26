@@ -12,13 +12,13 @@ import { PLAYBACK_DELAY, type TrackedAircraft, Tracker } from "../tracker";
 import { routeArcs } from "./arcs";
 import { toGeo, toLocal, type Origin } from "../geo";
 import type { JourneyFeatures, JourneyFix } from "../journey-follow";
-import { type EnRouteCamera, MAX_PITCH } from "./en-route";
+import { type EnRouteCamera, type Insets, MAX_PITCH } from "./en-route";
 import { EnRouteController } from "./en-route-controller";
 import { AIRCRAFT_GLYPH, GLYPH_BOX } from "./aircraft-glyph";
 import { finiteCamera, groundView, type Lens, type MapCamera, mapToOrbit, orbitToMap, paddingFor, worldFloor } from "./camera";
 import { shiftClearOfCard } from "./clear-of-card";
 import { airportFeatures, type ProcedurePiece, procedureFeatures } from "./features";
-import { frameShift, freeBand } from "./journey-frame";
+import { frameShift, freeBand, type Rect } from "./journey-frame";
 import { type Band, globeCapable, Guide } from "./handover";
 import { type FlightIdentity, isFlight, type MapFlight, markLost } from "./map-flight";
 import { aircraftOpacity, arcOpacities, buildingHeight, FLOW_DASHES, mapStyle, PALETTES, radarLayer, radarSource, ripple, SELECTION_DIM } from "./map-style";
@@ -222,6 +222,8 @@ export class GlobeMap {
   private cardRect: (() => DOMRect | null) | null = null;
   /** On a phone, the journey's card and the controls round the foot of the map (null elsewhere): the band between them is where the flight is kept. */
   private frameBand: (() => { card: DOMRect | null; controls: DOMRect[] } | null) | null = null;
+  /** The padding that puts the map's centre where the diorama draws the point it looks at (setAnchor): the map's own, which a 3D camera eases from. */
+  private anchorPadding: Insets = { top: 0, bottom: 0, left: 0, right: 0 };
   /** The followed aircraft as drawn and the end of its approach where it has one, [longitude, latitude], to keep in that band; empty with no aircraft drawn. */
   private framing: [number, number][] = [];
   /** The aircraft drawn last frame, which a click is matched against. */
@@ -286,6 +288,8 @@ export class GlobeMap {
         airport: () => this.airport,
         theme: () => this.theme,
         place: (camera) => this.jump(camera),
+        band: () => this.band(),
+        padding: () => this.anchorPadding,
       },
       options.holdFrameRate ?? false,
     );
@@ -477,6 +481,9 @@ export class GlobeMap {
   /** Where on screen (CSS pixels) the diorama draws the point it looks at: the map puts its centre there too. */
   setAnchor(anchor: { x: number; y: number }): void {
     const want = paddingFor(anchor, this.map.getContainer().clientWidth, this.map.getContainer().clientHeight);
+    this.anchorPadding = want;
+    // A 3D camera sets the padding itself each frame (EnRouteController.steer), from this one.
+    if (this.enRoute.in3D) return;
     const have = this.map.getPadding();
     if (Math.abs(want.left - (have.left ?? 0)) + Math.abs(want.right - (have.right ?? 0)) + Math.abs(want.top - (have.top ?? 0)) + Math.abs(want.bottom - (have.bottom ?? 0)) < 0.5) return;
     this.following = true;
@@ -608,6 +615,15 @@ export class GlobeMap {
     if (!this.enRoute.in3D) this.keepInBand();
   }
 
+  /** On a phone or tablet, the free band between the journey's card and the controls at the foot, in the map's own pixels; null on a wide screen. */
+  private band(): Rect | null {
+    const rects = this.frameBand?.();
+    if (!rects) return null;
+    const box = this.container.getBoundingClientRect();
+    const within = (r: DOMRect) => ({ left: r.left - box.left, right: r.right - box.left, top: r.top - box.top, bottom: r.bottom - box.top });
+    return freeBand({ width: box.width, height: box.height }, rects.card && within(rects.card), rects.controls.filter((r) => r.width > 0 && r.height > 0).map(within));
+  }
+
   /**
    * On a phone, moves the map so the followed aircraft stands in the band between the card and the
    * controls, rather than under the card; with an approach drawn and the aircraft near enough to see it
@@ -615,14 +631,11 @@ export class GlobeMap {
    * pulls against the reader: a drag or a wheel ends the journey's steering and with it this.
    */
   private keepInBand(): void {
-    const rects = this.framing.length ? this.frameBand?.() : null;
-    if (!rects) return;
+    const band = this.framing.length ? this.band() : null;
+    if (!band) return;
     // An approach too far off to frame with the aircraft leaves the aircraft alone in the band.
     const [aircraft, end] = this.framing;
     const framed = end && Math.hypot(...toLocal({ latitude: aircraft[1], longitude: aircraft[0] }, end[1], end[0])) <= FRAME_RANGE_M ? this.framing : [aircraft];
-    const box = this.container.getBoundingClientRect();
-    const within = (r: DOMRect) => ({ left: r.left - box.left, right: r.right - box.left, top: r.top - box.top, bottom: r.bottom - box.top });
-    const band = freeBand({ width: box.width, height: box.height }, rects.card && within(rects.card), rects.controls.filter((r) => r.width > 0 && r.height > 0).map(within));
     this.following = true;
     for (let i = 0; i < 3; i++) {
       const first = frameShift(framed.map((c) => this.map.project(c)), band);

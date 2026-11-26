@@ -45,6 +45,23 @@ it, with no second canvas.
 - **Loaded only for a 3D camera.** The layer's module (and the model builder with it) is imported on the
   first 3D pick; the terrain source and the terrain are added then and removed on Map, so the flat map
   loads neither. A theme switch carries the terrain in the new style and adds the layer back after it.
+- **A 3D camera shades the relief and has a sky** (ticket #23's review). The flat themes' land is one paper
+  or night colour, which under a tilted camera read as an empty screen with no horizon. While a 3D camera
+  is on, a `hillshade` layer (`hillshadeLayer`, under every other layer) shades the terrain from the same
+  Terrarium source, in colours named per theme beside the map's palette (`reliefShadow`, `reliefLight`,
+  `reliefStrength`: subtle by day, plainer by night, a touch over the imagery), and the style's `sky` is the
+  Diorama's own air in a close camera (`enRouteSky`: the theme's `eyeLevel` zenith over its horizon, the
+  far terrain hazed into its ground colour), so the view has a horizon in every theme, Satellite included.
+  Both come and go with the terrain: Map has neither, and keeps its own sky (`flatSky`, the page colour all
+  round) exactly as before; a theme switch carries both in the new style. No new tile host: the CSP is
+  unchanged.
+- **On a phone or tablet the aircraft is framed in the free band** below the Journey card (ticket #23's
+  review: the card covered it). Below xl the map's padding in a 3D camera is the band's
+  (`bandPadding`, from `freeBand`, the band the flat shot keeps the aircraft in), eased in from the map's
+  own padding by the same share the camera eases by (`blendPadding`), and Chase, Side and Top stand back
+  as far as the whole model needs to fit 80% of the band each way (`fitDistance`). At 320x700 that band
+  is too shallow, so in a 3D camera on a short phone (a `cramped` screen under 640 px wide) the Journey card folds to its
+  head, the switch and the progress: the facts and the notes come back on Map. Wide screens are unchanged.
 - **The camera is pure** (`src/lib/globe/en-route.ts`): pose and camera in, the map's placement out
   (centre and its elevation, distance, bearing, pitch, eye). Chase stands behind and above along the
   track; Cockpit has its eye just ahead of the nose looking along the track; Side stands abeam on the
@@ -109,11 +126,12 @@ The Diorama stays as it is: a separate overlay canvas on the same camera, crossf
   Diorama is drawn on. The Journey card keeps the chosen camera pressed through it. For the last stretch
   before the band the map is flat while a 3D camera is chosen.
 - Tests: `src/lib/globe/en-route.test.ts` (each camera's placement, the peek and its ease back, the keys,
-  the pose, the model's matrix, the rig), `src/lib/globe/en-route-journey.test.ts` (the share at both ends,
+  the pose, the model's matrix, the rig, the band's padding and the fit in it), `src/lib/globe/en-route-journey.test.ts` (the share at both ends,
   its ease, the blend, the camera held in the origin's Diorama, Approach else Orbit, the fallback rule and
-  its notice), `src/lib/globe/map-style.test.ts` (terrain only when asked); smoke:
-  `scripts/smoke-en-route-chase.mjs`, `scripts/smoke-en-route-cameras.mjs` and
-  `scripts/smoke-en-route-journey.mjs` (gate to gate in Chase, phone and tablet, the fallback).
+  its notice), `src/lib/globe/map-style.test.ts` (terrain, hillshade and sky only when asked, the flat
+  sky unchanged); smoke: `scripts/smoke-en-route-chase.mjs`, `scripts/smoke-en-route-cameras.mjs` and
+  `scripts/smoke-en-route-journey.mjs` (gate to gate in Chase, phone and tablet, the aircraft in the band
+  below the card, the switch on one row, hillshade and sky in 3D only, the fallback).
 
 ## Alternatives considered
 

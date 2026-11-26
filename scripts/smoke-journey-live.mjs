@@ -11,7 +11,7 @@
  */
 
 import { launchChrome } from "./lib/chrome.mjs";
-import { fiber, GLOBE, sleep, waitForTruthy } from "./lib/page.mjs";
+import { fiber, selectOnMap, sleep, waitForTruthy } from "./lib/page.mjs";
 
 /** The journey, or null with none. */
 const JOURNEY = fiber(`typeof c.stage === "string" && typeof c.hex === "string" && c.origin`);
@@ -54,14 +54,9 @@ async function handIntoTheAirportOnShow({ browser, base, check }) {
   await page.route("**/api/weather/atl", (r) => r.fulfill({ json: { station: "KATL", raw: "", wind: { directionDeg: 270, speedKt: 8, gustKt: null, variable: false, range: null } } }));
   await page.goto(`${base}/?fixture=1#map=7/33.6/-84.4`);
   await page.locator("main[data-on-map]").waitFor({ timeout: 60_000 });
-  let at = null;
-  for (let i = 0; i < 120 && !at; i++) {
-    at = await page.evaluate(`(() => { const g = ${GLOBE}; const f = g && g.drawn.find((x) => x.properties.id === "${HEX}"); if (!f) return null; const p = g.map.project(f.geometry.coordinates); return { x: p.x, y: p.y }; })()`);
-    if (!at) await sleep(500);
-  }
-  // The map keeps the recorded route it learns first for the flight; this one has none, as a flight first met on the map often has.
-  await page.evaluate(`(() => { const g = ${GLOBE}; g.routes.delete("${CALLSIGN}"); })()`);
-  if (at) await page.mouse.click(at.x, at.y);
+  // Selected with no route: the map keeps the recorded route it learns first for the flight, and this one has
+  // none, as a flight first met on the map often has.
+  await selectOnMap(page, HEX, { forgetRoute: CALLSIGN });
   await page.locator("section[aria-label^='Selected flight']").locator("visible=true").waitFor({ timeout: 15_000 }).catch(() => {});
   await page.getByRole("button", { name: "Follow this flight" }).locator("visible=true").first().click();
   // From the first frame the diorama shows (the hand's first half), until it has the flight in its own feed (it never will here), its card is not another flight's.

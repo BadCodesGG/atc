@@ -5,10 +5,11 @@ import type { JourneyFix } from "../journey-follow";
 import type { OrbitView } from "../scene/orbit";
 import type { ThemeKey } from "../scene/theme";
 import { groundView, type Lens, mapToOrbit, orbitToMap } from "./camera";
-import { type EnRouteCamera, EnRoutePeek, type EnRoutePlacement, enRoutePose, EnRouteRig, enRouteShot, is3D, peekPlacement } from "./en-route";
+import { bandPadding, blendPadding, type EnRouteCamera, EnRoutePeek, type EnRoutePlacement, enRoutePose, EnRouteRig, enRouteShot, fitDistance, type Insets, is3D, peekPlacement } from "./en-route";
 import { blendPlacement, FALLBACK_NOTICE, type FallbackCause, FrameWatch, RETURN_TO_MAP_S, shareBlend, ShareEase } from "./en-route-journey";
 import type { EnRouteLayer } from "./en-route-layer";
-import { PALETTES, TERRAIN, TERRAIN_SOURCE, terrainSource } from "./map-style";
+import type { Rect } from "./journey-frame";
+import { enRouteSky, flatSky, HILLSHADE, HILLSHADE_UNDER, hillshadeLayer, PALETTES, TERRAIN, TERRAIN_SOURCE, terrainSource } from "./map-style";
 
 /** What the En-route view needs of the World map that holds it (globe-map.ts). */
 export interface EnRouteHost {
@@ -20,6 +21,10 @@ export interface EnRouteHost {
   theme(): ThemeKey;
   /** Moves the map's camera as the page's own move: not the reader's, and not guided by the Handover. */
   place(camera: JumpToOptions): void;
+  /** On a phone or tablet, the free band between the Journey card and the controls at the map's foot (the map's own pixels); null on a wide screen. */
+  band(): Rect | null;
+  /** The map's own padding: where it puts the point it looks at while the view is flat. */
+  padding(): Insets;
 }
 
 /** A map camera, as a return to Map lands on it. */
@@ -178,8 +183,12 @@ export class EnRouteController {
     const ground = map.queryTerrainElevation([fix.longitude, fix.latitude]) ?? 0;
     const pose = enRoutePose(fix, ground);
     const aircraftClass = classify(fix.typeCode, null);
-    const shot = enRouteShot(pose, camera, aircraftClass.lengthM);
     const lens: Lens = { height: container.clientHeight, fovDeg: map.getVerticalFieldOfView() };
+    // On a phone or tablet the aircraft is framed in the band below the Journey card, the camera standing back
+    // as far as the whole of it needs to fit there; a wide screen frames it as the map's own padding does.
+    const band = this.host.band();
+    const ideal = enRouteShot(pose, camera, aircraftClass.lengthM);
+    const shot = band ? { ...ideal, distanceM: fitDistance(ideal.distanceM, camera, aircraftClass.lengthM, lens, band) } : ideal;
     if (!this.rigStarted) {
       // Eased in from the camera the map has now.
       this.rigStarted = true;
@@ -196,7 +205,10 @@ export class EnRouteController {
     const eased = blendPlacement(flat, framed, shareBlend(share));
     const orbit: OrbitView = { azimuthDeg: eased.bearingDeg, elevationDeg: 90 - eased.pitchDeg, target: [0, 0], height: 0, distance: eased.distanceM };
     const cam = orbitToMap(orbit, eased.center, lens);
-    this.host.place({ center: [cam.lng, cam.lat], zoom: cam.zoom, bearing: cam.bearing, pitch: cam.pitch, elevation: eased.elevationM });
+    // The band's padding eases in with the 3D camera, so at none of it the map has its own and the flat shot never steps.
+    const own = this.host.padding();
+    const padding = band ? blendPadding(own, bandPadding({ width: container.clientWidth, height: container.clientHeight }, band), shareBlend(share)) : own;
+    this.host.place({ center: [cam.lng, cam.lat], zoom: cam.zoom, bearing: cam.bearing, pitch: cam.pitch, elevation: eased.elevationM, padding });
     // From the Cockpit the aircraft is the one the eye sits in: its model is not drawn, so a peek back never fills the view with it.
     this.layer?.setAircraft(camera === "cockpit" ? null : pose, aircraftClass.model, aircraftClass.lengthM);
     return true;
@@ -220,6 +232,9 @@ export class EnRouteController {
       try {
         if (!map.getSource(TERRAIN_SOURCE)) map.addSource(TERRAIN_SOURCE, terrainSource());
         if (!map.getTerrain()) map.setTerrain(TERRAIN);
+        // The relief shaded from the same tiles, under everything else drawn, and a sky with a horizon.
+        if (!map.getLayer(HILLSHADE)) map.addLayer(hillshadeLayer(this.host.theme()), HILLSHADE_UNDER);
+        map.setSky(enRouteSky(this.host.theme()));
         // The layer's own WebGL (its shaders) is made as it is added, and throws if the context cannot.
         if (this.layer && !map.getLayer(this.layer.id)) map.addLayer(this.layer);
       } catch (error) {
@@ -243,8 +258,11 @@ export class EnRouteController {
       }
     } else {
       if (this.layer && map.getLayer(this.layer.id)) map.removeLayer(this.layer.id);
+      // The hillshade reads the terrain's source: it goes first. The flat map's own sky back.
+      if (map.getLayer(HILLSHADE)) map.removeLayer(HILLSHADE);
       if (map.getTerrain()) map.setTerrain(null);
       if (map.getSource(TERRAIN_SOURCE)) map.removeSource(TERRAIN_SOURCE);
+      map.setSky(flatSky(this.host.theme()));
     }
     // The model stands in for the flat marker and its ring.
     for (const id of ["journey-aircraft", "journey-beacon"]) map.setLayoutProperty(id, "visibility", on ? "none" : "visible");
@@ -319,6 +337,8 @@ export class EnRouteController {
     if (!this.on3D) return;
     this.on3D = false;
     this.apply();
+    // The map's own padding back: the band's was the 3D view's.
+    this.host.place({ padding: this.host.padding() });
   }
 
   /** The 3D view gives way to Map by itself, with the card's notice saying why; the view eases back out to the journey's shot. */

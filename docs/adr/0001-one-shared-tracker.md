@@ -63,11 +63,21 @@ what came next. Neither moves the picture off 12 s: a recording is drawn 12 s be
 the Replayer's picture is the live clock less the same 12 s, its 30 s being only how far ahead in the
 history it reads.
 
+Kept apart, the Replayer and the live tracker can draw an aircraft tens of metres apart at the moment a
+replay catches up with live (46 m for a slow taxi in the recorded Atlanta sequence). That seam is not a
+jump of the picture, so it is not cut: across it each aircraft is eased from where the replay last drew it
+to where live has it, under the Tracker's own rules for a frame (`Seam` in `src/lib/replay.ts`): a step no
+longer than a second of its speed (never under 5 m), never back along its heading unless at rest (it holds
+and live comes on to meet it), a gap over 1,500 m taken at once, and nothing carried over frames more than
+a second apart. LIVE pressed, a seek and a replay started are jumps of the picture and are not eased.
+
 ## Consequences
 
 - An aircraft is at the same place in the Diorama, on the World map and in the Journey at the same instant,
   so switching views, or the Handover, never moves it. Tests: `src/lib/tracker.test.ts` ("Tracker shared by
   every view") and `src/lib/shared-sky.test.ts`; smoke: `scripts/smoke-shared-tracker.mjs`.
+- A replay catching up with live hands each aircraft over without a hop. Tests: `src/lib/replay.test.ts`
+  ("catching up with live", a synthetic disagreement either way and the recorded Atlanta sequence).
 - Each view sees more fixes of the aircraft it shows (a followed flight is heard by its hex poll and by the
   airport feed), so it is drawn between real fixes more often and dead reckoned less.
 - The Diorama's picture is 4 s further behind live than before (12 s, was 8 s). Ground dead reckoning grew

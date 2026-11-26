@@ -60,12 +60,12 @@ const ROUNDING = 1e-12;
  * Frames further apart than this, seconds, are not one motion (a hidden tab, a seek, a coarse replay):
  * the aircraft is drawn on its path, with nothing carried over from the frame before.
  */
-const MAX_FRAME_GAP = 1;
+export const MAX_FRAME_GAP = 1;
 /** A ground course over fixes closer than this, metres, is noise, not a direction. */
 const MIN_COURSE = 3;
 export const FADE_IN = 2;
 /** Slower than this on the ground is standing still. */
-const STOPPED_KT = 1;
+export const STOPPED_KT = 1;
 export const FADE_OUT = 3;
 /** Seconds of samples kept behind the playback moment, so a slightly late query still has its bracket. */
 const HISTORY = 10;

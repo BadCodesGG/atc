@@ -7,7 +7,7 @@ import { KNOTS } from "./geo";
 import { History } from "./history";
 import { Replay, ReplayClock, Replayer } from "./replay";
 import { readSequence } from "./sequence";
-import { FADE_IN, PLAYBACK_DELAY, Tracker } from "./tracker";
+import { CORRECTION_SNAP, FADE_IN, PLAYBACK_DELAY, STEP_FLOOR, STEP_SECONDS, type TrackedAircraft, Tracker } from "./tracker";
 import type { Aircraft, TrafficSnapshot } from "./traffic";
 import { TrafficView } from "./traffic-view";
 
@@ -216,6 +216,106 @@ describe("Replay", () => {
     expect(replay.trails(400, [])).toBeNull();
     replay.play(30, 600, 0);
     expect(replay.trails(400, [])?.added.length).toBeGreaterThan(1);
+  });
+
+  describe("catching up with live", () => {
+    /** Each aircraft's step from one frame to the next over `frames`, against the Tracker's bound for a frame (STEP_SECONDS of its speed, never under STEP_FLOOR). */
+    function overSteps(frames: TrackedAircraft[][]): string[] {
+      const out: string[] = [];
+      for (let i = 1; i < frames.length; i++) {
+        const before = new Map(frames[i - 1].map((a) => [a.id, a]));
+        for (const a of frames[i]) {
+          const b = before.get(a.id);
+          if (!b) continue;
+          const step = Math.hypot(a.x - b.x, a.y - b.y);
+          const bound = Math.max((a.groundSpeedKt ?? 0) * KNOTS * STEP_SECONDS, STEP_FLOOR);
+          if (step > bound + 1e-6 && step <= CORRECTION_SNAP) out.push(`${a.id} stepped ${step.toFixed(1)} m (bound ${bound.toFixed(1)} m) in frame ${i}`);
+        }
+      }
+      return out;
+    }
+
+    /** Eastbound at 10 m/s in the history; the live picture has it `ahead` metres further on. */
+    function disagreeing(ahead: number) {
+      const history = recorded(eastbound(600));
+      const live = { at: (clock: number): TrackedAircraft[] => [{ id: "a", x: 10 * (clock - PLAYBACK_DELAY) + ahead, y: 0, latitude: 0, longitude: (10 * (clock - PLAYBACK_DELAY) + ahead) / 111_320, altitudeFt: 3000, headingDeg: 90, headingKnown: true, groundSpeedKt: 10 * MPS, onGround: false, verticalRateFpm: null, callsign: null, typeCode: null, military: false, category: null, fade: 1 }] };
+      return new Replay(live, { elevationFt: 0, history });
+    }
+
+    /** Plays at 10x from the start of the history until well past the moment it catches up with live, at 60 frames a second; the live clock runs on in real time. */
+    function playToLive(replay: Replay): { frames: TrackedAircraft[][]; caughtUp: number } {
+      replay.play(10, 300, 0);
+      const frames: TrackedAircraft[][] = [];
+      let caughtUp = -1;
+      for (let i = 0; i < 60 * 40; i++) {
+        const wall = i / 60;
+        const { aircraft } = replay.frame(300 + wall, wall);
+        if (caughtUp < 0 && replay.isLive) caughtUp = i;
+        frames.push(aircraft);
+      }
+      return { frames, caughtUp };
+    }
+
+    it("eases each aircraft from where the replay drew it to where live has it, never stepping more in a frame than the Tracker allows", () => {
+      const { frames, caughtUp } = playToLive(disagreeing(46));
+      expect(caughtUp).toBeGreaterThan(0);
+      expect(overSteps(frames)).toEqual([]);
+      // It does get there: a few frames on it is drawn where live has it.
+      const end = frames.at(-1)![0];
+      expect(end.x).toBeCloseTo(10 * (300 + (frames.length - 1) / 60 - PLAYBACK_DELAY) + 46, 6);
+      // The latitude and longitude move with it.
+      const seam = frames[caughtUp][0];
+      expect(seam.longitude! * 111_320).toBeCloseTo(seam.x, 0);
+    });
+
+    it("holds an aircraft live has behind where the replay drew it, rather than moving it back along its track, until live catches up", () => {
+      const { frames, caughtUp } = playToLive(disagreeing(-46));
+      expect(overSteps(frames)).toEqual([]);
+      for (let i = caughtUp; i < frames.length; i++) expect(frames[i][0].x, `frame ${i}`).toBeGreaterThanOrEqual(frames[i - 1][0].x - 1e-6);
+      const end = frames.at(-1)![0];
+      expect(end.x).toBeCloseTo(10 * (300 + (frames.length - 1) / 60 - PLAYBACK_DELAY) - 46, 6);
+    });
+
+    it("does not ease a LIVE press or a seek: the picture jumped", () => {
+      const replay = disagreeing(46);
+      replay.seek(200, 300, 0);
+      replay.frame(300, 0);
+      replay.goLive();
+      const live = replay.frame(300.02, 0.02).aircraft[0];
+      expect(live.x).toBeCloseTo(10 * (300.02 - PLAYBACK_DELAY) + 46, 6);
+    });
+
+    it("keeps every aircraft of the recorded ATL sequence within the Tracker's step as a 10x replay catches up with live", async () => {
+      const bytes = readFileSync(path.join(import.meta.dirname, "../../public/fixtures/atl-sequence.json.gz"));
+      const snapshots = await readSequence(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength), DEFAULT_AIRPORT);
+      const live = new Tracker();
+      const replay = new Replay(live, { elevationFt: 0 });
+      const first = snapshots[0].time;
+      let fed = 0;
+      const feed = (clock: number) => {
+        for (; fed < snapshots.length && snapshots[fed].time <= clock; fed++) {
+          live.add(snapshots[fed]);
+          replay.add(snapshots[fed]);
+        }
+      };
+      // Live for two minutes, then a 10x replay from the start, played on until well past live.
+      const opened = first + 120;
+      feed(opened);
+      replay.play(10, opened, 0);
+      const frames: TrackedAircraft[][] = [];
+      let caughtUp = -1;
+      for (let i = 0; i < 60 * 30; i++) {
+        const wall = i / 60;
+        feed(opened + wall);
+        const { aircraft } = replay.frame(opened + wall, wall);
+        if (caughtUp < 0 && replay.isLive) caughtUp = i;
+        frames.push(aircraft);
+      }
+      expect(caughtUp).toBeGreaterThan(0);
+      expect(frames[caughtUp].length).toBeGreaterThan(10);
+      // From the last frame of the replay on: the seam, and live after it.
+      expect(overSteps(frames.slice(caughtUp - 1))).toEqual([]);
+    });
   });
 
   describe("its own view of the traffic", () => {
