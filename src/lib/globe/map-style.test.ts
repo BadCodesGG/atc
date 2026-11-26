@@ -1,7 +1,7 @@
 import { type LayerSpecification, validateStyleMin } from "@maplibre/maplibre-gl-style-spec";
 import { describe, expect, it } from "vitest";
 import { THEMES, type ThemeKey } from "../scene/theme";
-import { arcOpacities, buildingHeight, enRouteHaze, enRouteSky, flatSky, HAZE_SHELLS, hazeShells, hazeStartHeights, hazeStrength, HILLSHADE, HILLSHADE_UNDER, hillshadeLayer, horizonM, IMAGERY_NEAR_ZOOM, imageryTileZoom, journeyIconSize, mapBackground, mapStyle, PALETTES, radarLayer, radarSource, RELIEF_CRUISE_ZOOM, RELIEF_LOW_ZOOM, reliefStrength, ripple, SELECTED_SCALE, SELECTION_DIM, TERRAIN, TERRAIN_SOURCE, terrainSource } from "./map-style";
+import { arcOpacities, buildingHeight, enRouteHaze, enRouteSky, flatSky, HAZE_SHELLS, hazeShells, hazeStrength, HILLSHADE, HILLSHADE_UNDER, hillshadeLayer, horizonM, IMAGERY_NEAR_ZOOM, imageryTileZoom, journeyIconSize, mapBackground, mapStyle, PALETTES, radarLayer, radarSource, RELIEF_CRUISE_ZOOM, RELIEF_LOW_ZOOM, reliefStrength, ripple, SELECTED_SCALE, SELECTION_DIM, TERRAIN, TERRAIN_SOURCE, terrainSource } from "./map-style";
 
 const KEYS = Object.keys(THEMES) as ThemeKey[];
 const paint = (key: ThemeKey, id: string, prop: string) => {
@@ -343,15 +343,17 @@ describe("hazeShells", () => {
   const FL370 = 37_000 * 0.3048;
   const horizon = (aboveM: number) => Math.sqrt(2 * 6_371_000 * aboveM + aboveM * aboveM);
   const opacity = (shells: { opacity: number }[]) => shells.at(-1)!.opacity;
+  /** The flat themes' haze (their floor in the eye's heights, PALETTES' hazeFloorHeights). */
+  const flat = (aboveM: number, farM?: number) => hazeShells(aboveM, PALETTES.dark.hazeFloorHeights, farM);
 
   it("draws nothing for an eye at or under the ground", () => {
-    expect(hazeShells(0)).toEqual([]);
-    expect(hazeShells(-50)).toEqual([]);
-    expect(hazeShells(Number.NaN)).toEqual([]);
+    expect(flat(0)).toEqual([]);
+    expect(flat(-50)).toEqual([]);
+    expect(flat(Number.NaN)).toEqual([]);
   });
 
   it("builds the haze in HAZE_SHELLS shells, ever farther out, to full haze at the horizon", () => {
-    const shells = hazeShells(FL110);
+    const shells = flat(FL110);
     expect(shells).toHaveLength(HAZE_SHELLS);
     for (let i = 1; i < shells.length; i++) expect(shells[i].distanceM).toBeGreaterThan(shells[i - 1].distanceM);
     for (const s of shells) {
@@ -363,54 +365,54 @@ describe("hazeShells", () => {
   });
 
   it("thickens in equal steps, so no shell's edge on the ground stands out from the others", () => {
-    const shells = hazeShells(FL110);
+    const shells = flat(FL110);
     shells.forEach((s, i) => expect(s.opacity).toBeCloseTo((i + 1) / shells.length, 9));
     expect(1 / HAZE_SHELLS).toBeLessThanOrEqual(0.05);
   });
 
   it("leaves the near ground clear: at 11,000 ft it starts past Chase's 13 km and the Cockpit's nearer relief", () => {
-    expect(hazeShells(FL110)[0].distanceM).toBeGreaterThan(13_000);
+    expect(flat(FL110)[0].distanceM).toBeGreaterThan(13_000);
     // Quickly at first, as air does: half the haze well inside half the way to the horizon.
-    const shells = hazeShells(FL110);
+    const shells = flat(FL110);
     expect(shells[shells.length / 2 - 1].distanceM).toBeLessThan(horizon(FL110) / 2);
   });
 
   it("starts as far below the horizon from cruise heights as at 11,000 ft, so the ground under the look reads from FL400 too", () => {
-    // At 11,000 ft (3 km over the ground) it starts 5.2 heights out, as it did: under a look 11 degrees down, clear.
+    // At 11,000 ft (3 km over the ground) it starts 4.8 heights out or more, as it did: under a look 11 degrees down, clear.
+    // So it is as it was for an eye up to 11,600 ft over the ground (Chase's stands a little over the aircraft).
     const fl110 = 11_000 * 0.3048 - 300;
-    for (const ground of [0, 300, 1_500]) {
-      const above = 11_000 * 0.3048 - ground;
+    for (const above of [11_000 * 0.3048, 11_000 * 0.3048 - 300, 11_000 * 0.3048 - 1_500, 11_600 * 0.3048]) {
       const start = 0.08 * horizon(above);
-      expect(hazeShells(above)[0].distanceM, `over ${ground} m`).toBeCloseTo(start + (horizon(above) - start) * (1 / HAZE_SHELLS) ** (1 / 0.7), 6);
+      expect(flat(above)[0].distanceM, `${above} m over the ground`).toBeCloseTo(start + (horizon(above) - start) * (1 / HAZE_SHELLS) ** (1 / 0.7), 6);
     }
     for (const feet of [25_000, 40_000, 47_000, 51_000]) {
       const above = feet * 0.3048 - 300;
-      const start = hazeShells(above)[0].distanceM;
+      const start = flat(above)[0].distanceM;
       // The look's angle below level where the haze starts: no shallower than at 11,000 ft.
-      expect(Math.atan2(above, start), `${feet} ft`).toBeGreaterThanOrEqual(Math.atan2(fl110, hazeShells(fl110)[0].distanceM) - 0.01);
-      expect(hazeShells(above).at(-1)!.distanceM).toBeCloseTo(horizon(above), 6);
+      expect(Math.atan2(above, start), `${feet} ft`).toBeGreaterThanOrEqual(Math.atan2(fl110, flat(fl110)[0].distanceM) - 0.01);
+      expect(flat(above).at(-1)!.distanceM).toBeCloseTo(horizon(above), 6);
     }
   });
 
   it("floors the start in Light and Dark only: Satellite's haze is as it was at every height", () => {
-    expect(hazeStartHeights("light")).toBeGreaterThan(0);
-    expect(hazeStartHeights("dark")).toBe(hazeStartHeights("light"));
-    expect(hazeStartHeights("satellite")).toBe(0);
+    expect(PALETTES.light.hazeFloorHeights).toBeGreaterThan(0);
+    expect(PALETTES.dark.hazeFloorHeights).toBe(PALETTES.light.hazeFloorHeights);
+    expect(PALETTES.satellite.hazeFloorHeights).toBe(0);
     for (const feet of [11_000, 40_000, 47_000]) {
       const above = feet * 0.3048 - 300;
       const start = 0.08 * horizon(above);
-      expect(hazeShells(above, Infinity, hazeStartHeights("satellite"))[0].distanceM).toBeCloseTo(start + (horizon(above) - start) * (1 / HAZE_SHELLS) ** (1 / 0.7), 6);
+      expect(hazeShells(above, PALETTES.satellite.hazeFloorHeights)[0].distanceM).toBeCloseTo(start + (horizon(above) - start) * (1 / HAZE_SHELLS) ** (1 / 0.7), 6);
     }
   });
 
   it("reaches farther from higher up, with the horizon", () => {
-    expect(hazeShells(FL370).at(-1)!.distanceM).toBeGreaterThan(hazeShells(FL110).at(-1)!.distanceM * 1.5);
-    expect(hazeShells(FL370)[0].distanceM).toBeGreaterThan(hazeShells(FL110)[0].distanceM);
+    expect(flat(FL370).at(-1)!.distanceM).toBeGreaterThan(flat(FL110).at(-1)!.distanceM * 1.5);
+    expect(flat(FL370)[0].distanceM).toBeGreaterThan(flat(FL110)[0].distanceM);
   });
 
   it("ends inside the map's far plane, where the ground drawn ends, when that comes before the horizon", () => {
     const far = 40_000;
-    const shells = hazeShells(FL110, far);
+    const shells = flat(FL110, far);
     expect(shells.at(-1)!.distanceM).toBeLessThan(far);
     expect(shells.at(-1)!.distanceM).toBeGreaterThan(far * 0.9);
     expect(opacity(shells)).toBe(1);
@@ -421,7 +423,7 @@ describe("horizonM", () => {
   it("is the distance to the horizon over a round Earth, where the haze is full", () => {
     expect(horizonM(11_000 * 0.3048)).toBeCloseTo(206_700, -3);
     expect(horizonM(37_000 * 0.3048)).toBeCloseTo(379_100, -3);
-    expect(hazeShells(11_000 * 0.3048).at(-1)!.distanceM).toBeCloseTo(horizonM(11_000 * 0.3048), 6);
+    expect(hazeShells(11_000 * 0.3048, PALETTES.dark.hazeFloorHeights).at(-1)!.distanceM).toBeCloseTo(horizonM(11_000 * 0.3048), 6);
     expect(horizonM(0)).toBe(0);
     expect(horizonM(Number.NaN)).toBe(0);
   });

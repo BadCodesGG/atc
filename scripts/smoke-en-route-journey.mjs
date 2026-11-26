@@ -329,16 +329,15 @@ async function cruise({ browser, base, check }) {
       for (const camera of cameras) {
         await group.getByRole("button", { name: camera, exact: true }).click();
         const on = await waitForTruthy(page, `(() => { const s = ${STATE}; return s && s.camera === "${camera.toLowerCase()}" && s.pressed === "${camera}" && s.terrain && s.layer === "custom" && s.drawn > 5 && (s.camera !== "chase" || s.pitch > 60); })()`, 60_000).then(() => true, () => false);
+        // Within a few pixels of the framing point (the old maths put it 116 px off on a wide screen at FL390).
+        const framed = name === "wide" ? { at: await settledAt(page) } : await framedInBand(page, viewport);
+        const point = await page.evaluate(FRAMING_POINT);
+        const off = framed.at ? Math.round(Math.hypot(framed.at.x - point.x, framed.at.y - point.y)) : Infinity;
         if (name === "wide") {
-          const at = await settledAt(page);
-          const point = await page.evaluate(FRAMING_POINT);
-          const off = at ? Math.hypot(at.x - point.x, at.y - point.y) : Infinity;
-          check(`en-route cruise ${name} (${viewport.width}x${viewport.height}, FL390, track 020): Chase draws the aircraft on the map's framing point, as at 11,000 ft`, on && off < 12, JSON.stringify({ at, point, off: Math.round(off) }));
+          check(`en-route cruise ${name} (${viewport.width}x${viewport.height}, FL390, track 020): Chase draws the aircraft on the map's framing point, as at 11,000 ft`, on && off <= 4, JSON.stringify({ at: framed.at, point, off }));
         } else {
-          const { at, band, model, inBand, clear } = await framedInBand(page, viewport);
-          const point = await page.evaluate(FRAMING_POINT);
-          const off = at ? Math.hypot(at.x - point.x, at.y - point.y) : Infinity;
-          check(`en-route cruise ${name} (${viewport.width}x${viewport.height}, FL390, track 020): in ${camera} the aircraft stands on the band's framing point below the Journey card, the whole model clear of the card and the foot`, on && inBand && clear && off < 12, JSON.stringify({ at, point, band, model }));
+          const { at, band, model, inBand, clear } = framed;
+          check(`en-route cruise ${name} (${viewport.width}x${viewport.height}, FL390, track 020): in ${camera} the aircraft stands on the band's framing point below the Journey card, the whole model clear of the card and the foot`, on && inBand && clear && off <= 4, JSON.stringify({ at, point, off, band, model }));
         }
       }
       check(`en-route cruise ${name}: console clean`, problems.length === 0, problems.slice(0, 3).join(" | "));

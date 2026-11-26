@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { FEET, KNOTS, toLocal } from "../geo";
-import { MAX_PITCH } from "./camera";
-import { aircraftMatrix, type AircraftPose, bandPadding, blendPadding, CHASE, COCKPIT, EASE_S, EN_ROUTE_MAX_PITCH, EN_ROUTE_OFFERED, enRouteKey, EnRoutePeek, enRouteShortcut, enRoutePose, type EnRouteShot, enRouteShot, EnRouteRig, fitDistance, is3D, mapCamera, mapEye, mapNearPlane, NO_PEEK, PEEK_DEG_PER_PX, peekPlacement, SIDE, SIGHT_MIN_M, sightPlacement, TOP } from "./en-route";
+import { MAX_PITCH, orbitToMap } from "./camera";
+import { aircraftMatrix, type AircraftPose, bandPadding, blendPadding, CHASE, COCKPIT, EASE_S, EN_ROUTE_MAX_PITCH, EN_ROUTE_OFFERED, enRouteKey, EnRoutePeek, enRouteShortcut, enRoutePose, type EnRouteShot, enRouteShot, EnRouteRig, fitDistance, is3D, mapCamera, mapEye, mapMetres, mapNearPlane, NO_PEEK, PEEK_DEG_PER_PX, peekPlacement, SIDE, SIGHT_MIN_M, sightPlacement, TOP } from "./en-route";
 
 const cruise: AircraftPose = { latitude: 35, longitude: -100, altitudeM: 10_000, trackDeg: 90, pitchDeg: 0 };
 
@@ -284,6 +284,8 @@ describe("sightPlacement: the map's centre moved along the camera's line of sigh
  * centre and its elevation in the Web Mercator world, the camera back along the look by the camera-to-centre
  * distance over the world's size, an off-axis lens that draws the centre in the middle of the padded view), and
  * a point placed as MercatorCoordinate.fromLngLat places the aircraft's model: where on the screen it is drawn.
+ * Written out apart from en-route.ts's mapEye and its helpers on purpose, from MapLibre's source, so a slip in
+ * those is caught here rather than repeated.
  */
 function mapPixel(cam: ReturnType<typeof mapCamera>, screen: { width: number; height: number; fovDeg: number }, padding: { top: number; bottom: number; left: number; right: number }, point: { latitude: number; longitude: number; altitudeM: number }) {
   const RADIUS = 6_371_008.8;
@@ -359,6 +361,15 @@ describe("the aircraft's place in the frame, from 1,000 to 51,000 ft (the contro
     const cam = mapCamera({ center: { latitude: 35, longitude: -100 }, elevationM: 0, distanceM: 1_000, bearingDeg: 0, pitchDeg: 0 }, lens);
     const pxPerMetre = (512 * 2 ** cam.zoom) / (2 * Math.PI * 6_371_008.8 * Math.cos((35 * Math.PI) / 180));
     expect(pxPerMetre * 1_000).toBeCloseTo(lens.height / 2 / Math.tan((fovDeg * Math.PI) / 360), 6);
+  });
+
+  it("keeps the flat shot's zoom across the change of metres (mapMetres), so the share never steps the camera", () => {
+    const lens = { height: 900, fovDeg };
+    for (const latitude of [0, 35, 62]) {
+      const orbit = orbitToMap({ azimuthDeg: 30, elevationDeg: 40, target: [0, 0], height: 0, distance: 25_000 }, { latitude, longitude: -100 }, lens);
+      const cam = mapCamera({ center: { latitude, longitude: -100 }, elevationM: 0, distanceM: mapMetres(25_000), bearingDeg: 30, pitchDeg: 50 }, lens);
+      expect(cam.zoom).toBeCloseTo(orbit.zoom, 9);
+    }
   });
 });
 

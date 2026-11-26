@@ -59,6 +59,15 @@ export interface MapPalette {
   reliefStrength: number;
   /** How strongly it shades from cruise heights (zoom RELIEF_CRUISE_ZOOM and down), where the relief faded at reliefStrength. */
   reliefCruiseStrength: number;
+  /**
+   * The far ground's haze starts no nearer than this many of the eye's heights over the ground (hazeShells), so
+   * from cruise heights it sits as far below level as from 11,000 ft. There HAZE_START's share is 4.8 heights out
+   * from an eye 3.5 km over the ground and more from lower, so a floor of 4.8 leaves it as it was up to 11,600 ft
+   * over the ground. The horizon only grows as the root of the height: at FL400 the share alone started the haze
+   * 2.6 heights out, over every piece of ground a level look sees, and Dark's Cockpit was a near-black frame. None
+   * for Satellite, whose imagery shows its own ground and whose haze stays as it was (see imageryTileZoom).
+   */
+  hazeFloorHeights: number;
 }
 
 export const PALETTES: Record<ThemeKey, MapPalette> = {
@@ -90,6 +99,7 @@ export const PALETTES: Record<ThemeKey, MapPalette> = {
     reliefLight: "#ffffff",
     reliefStrength: 0.35,
     reliefCruiseStrength: 0.65,
+    hazeFloorHeights: 4.8,
   },
   // Night ops: the land the diorama's black, a deep navy sea, faint shores and borders, the cities lit.
   dark: {
@@ -119,6 +129,7 @@ export const PALETTES: Record<ThemeKey, MapPalette> = {
     reliefLight: "#2a4468",
     reliefStrength: 0.7,
     reliefCruiseStrength: 1,
+    hazeFloorHeights: 4.8,
   },
   satellite: {
     water: "#2c4a63",
@@ -147,6 +158,7 @@ export const PALETTES: Record<ThemeKey, MapPalette> = {
     reliefLight: "#ffffff",
     reliefStrength: 0.15,
     reliefCruiseStrength: 0.15,
+    hazeFloorHeights: 0,
   },
 };
 
@@ -342,21 +354,6 @@ export const enRouteHaze = (key: ThemeKey): string => THEMES[key].eyeLevel.horiz
 export const HAZE_SHELLS = 24;
 /** Where the haze starts, as a share of the way to where it is full: past the ground near the aircraft (Chase's 13 km at 11,000 ft). */
 const HAZE_START = 0.08;
-/**
- * Nor nearer than this many of the eye's heights over the ground: as far below level as from 11,000 ft (where
- * HAZE_START's share is 4.9 to 5.2 heights out, by the ground's height: this leaves it as it was there), so from
- * cruise heights the ground under the look is not all haze. The horizon only grows as the root of the height: at
- * FL400 the share alone started the haze 2.6 heights out, over every piece of ground a level look sees, and Dark's
- * Cockpit was a near-black frame.
- */
-const HAZE_START_HEIGHTS = 4.9;
-
-/**
- * The haze's floor in the eye's heights for a theme (hazeShells' `startHeights`): HAZE_START_HEIGHTS for the flat
- * themes, whose relief it hid from cruise heights, none for Satellite, whose imagery shows its own ground and whose
- * haze stays as it was (its start is what hides the small-scale imagery's seam, see imageryTileZoom).
- */
-export const hazeStartHeights = (key: ThemeKey): number => (key === "satellite" ? 0 : HAZE_START_HEIGHTS);
 /** How the haze thickens with distance past its start: as a power of the share of the way (under 1, quickly at first, as air does). */
 const HAZE_RISE = 0.7;
 const EARTH_RADIUS_M = 6_371_000;
@@ -381,14 +378,15 @@ export interface HazeShell {
 /**
  * The far ground's haze in a 3D camera, as spheres round the eye that the ground nearer than each hides
  * (the En-route layer draws them against the map's depth): for an eye `aboveM` over the ground, from a little
- * way out (HAZE_START of the way, and no nearer than `startHeights` of the eye's heights: hazeStartHeights) to full haze at the horizon (the distance to it over a round Earth, which the flat map does not
- * have), or just inside the map's far plane (`farM`) where the ground drawn ends first. The haze thickens
- * in equal steps, the last shell opaque.
+ * way out (HAZE_START of the way, and no nearer than `floorHeights` of the eye's heights: the theme's
+ * hazeFloorHeights) to full haze at the horizon (the distance to it over a round Earth, which the flat map
+ * does not have), or just inside the map's far plane (`farM`) where the ground drawn ends first. The haze
+ * thickens in equal steps, the last shell opaque.
  */
-export function hazeShells(aboveM: number, farM = Infinity, startHeights = HAZE_START_HEIGHTS): HazeShell[] {
+export function hazeShells(aboveM: number, floorHeights: number, farM = Infinity): HazeShell[] {
   if (!(aboveM > 0)) return [];
   const end = Math.min(horizonM(aboveM), farM * 0.98);
-  const start = Math.min(end, Math.max(HAZE_START * end, startHeights * aboveM));
+  const start = Math.min(end, Math.max(HAZE_START * end, floorHeights * aboveM));
   return Array.from({ length: HAZE_SHELLS }, (_, i) => {
     const share = (i + 1) / HAZE_SHELLS;
     return { distanceM: start + (end - start) * share ** (1 / HAZE_RISE), opacity: share };

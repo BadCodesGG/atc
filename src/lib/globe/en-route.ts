@@ -1,5 +1,5 @@
-import { FEET, KNOTS, toGeo, toLocal, turn, wrap360 } from "../geo";
-import type { Lens } from "./camera";
+import { EARTH_RADIUS_M, FEET, KNOTS, toGeo, toLocal, turn, wrap360 } from "../geo";
+import { cameraToCentrePx, CIRCUMFERENCE, type Lens, TILE } from "./camera";
 import type { Rect } from "./journey-frame";
 
 /**
@@ -184,15 +184,11 @@ export function enRouteShot(pose: AircraftPose, camera: Exclude<EnRouteCamera, "
 export const mapNearPlane = (distanceM: number, fovDeg: number): number => (distanceM * Math.tan((fovDeg * RAD) / 2)) / 25;
 
 /**
- * MapLibre's Earth: its Web Mercator world runs 0 to 1 across, x east and y south, and its heights are metres over
- * the circumference at the latitude on this radius (its `earthRadius`, as MercatorCoordinate.fromLngLat places the
- * aircraft's model). The world's metre therefore changes with the latitude, up and across alike.
+ * A point, or a step, in MapLibre's Web Mercator world: 0 to 1 across, x east and y south, its height in the same
+ * units. MapLibre's heights are metres over the circumference at the latitude on its own radius (EARTH_RADIUS_M, as
+ * MercatorCoordinate.fromLngLat places the aircraft's model), so the world's metre changes with the latitude, up and
+ * across alike.
  */
-const MAP_EARTH_RADIUS_M = 6_371_008.8;
-/** MapLibre's tiles, CSS pixels across. */
-const MAP_TILE_PX = 512;
-
-/** A point in MapLibre's Mercator world, its height in the same units. */
 export interface MapWorldPoint {
   x: number;
   y: number;
@@ -200,7 +196,13 @@ export interface MapWorldPoint {
 }
 
 /** The world's units in a metre at `latitude` (MapLibre's mercatorZfromAltitude of one metre). */
-const worldPerMetre = (latitude: number) => 1 / (2 * Math.PI * MAP_EARTH_RADIUS_M * Math.cos(latitude * RAD));
+const worldPerMetre = (latitude: number) => 1 / (2 * Math.PI * EARTH_RADIUS_M * Math.cos(latitude * RAD));
+
+/**
+ * A distance in orbitToMap's metres (the Diorama's and the flat map's, on the zoom's equatorial radius) in MapLibre's
+ * own, the ones mapCamera takes: so a placement from the flat shot or the map's own camera keeps its zoom.
+ */
+export const mapMetres = (orbitM: number): number => (orbitM * 2 * Math.PI * EARTH_RADIUS_M) / CIRCUMFERENCE;
 const worldOf = (latitude: number, longitude: number, altitudeM: number): MapWorldPoint => ({
   x: (180 + longitude) / 360,
   y: (180 - (180 / Math.PI) * Math.log(Math.tan(Math.PI / 4 + (latitude * RAD) / 2))) / 360,
@@ -226,10 +228,18 @@ export function mapEye(p: EnRoutePlacement): MapWorldPoint {
   return { x: c.x - look.x * d, y: c.y - look.y * d, z: c.z - look.z * d };
 }
 
-/** The camera the map is handed for a placement (jumpTo's centre, zoom, bearing, pitch and centre elevation), its distance in MapLibre's own metres. */
-export function mapCamera(p: EnRoutePlacement, lens: Lens): { center: [number, number]; zoom: number; bearing: number; pitch: number; elevation: number } {
-  const focal = lens.height / 2 / Math.tan((lens.fovDeg * RAD) / 2);
-  const zoom = Math.log2(focal / (MAP_TILE_PX * p.distanceM * worldPerMetre(p.center.latitude)));
+/** What jumpTo is handed for a 3D camera: MapCamera's view with the centre's elevation, in jumpTo's own shape. */
+export interface MapJump {
+  center: [number, number];
+  zoom: number;
+  bearing: number;
+  pitch: number;
+  elevation: number;
+}
+
+/** The camera the map is handed for a placement, its distance in MapLibre's own metres. */
+export function mapCamera(p: EnRoutePlacement, lens: Lens): MapJump {
+  const zoom = Math.log2(cameraToCentrePx(lens) / (TILE * p.distanceM * worldPerMetre(p.center.latitude)));
   return { center: [p.center.longitude, p.center.latitude], zoom, bearing: wrap360(p.bearingDeg + 180) - 180, pitch: p.pitchDeg, elevation: p.elevationM };
 }
 
@@ -237,8 +247,8 @@ export function mapCamera(p: EnRoutePlacement, lens: Lens): { center: [number, n
 export const SIGHT_MIN_M = 2_000;
 
 /**
- * The same camera with the map's centre moved out along its line of sight (MapLibre's eye, mapEye, and the look
- * kept, so the picture is the same, the aircraft on the framing point at any height): as far as the eye is over the ground (`groundM`), at least SIGHT_MIN_M, or to the ground
+ * The same camera with the map's centre moved out along its line of sight (MapLibre's eye, mapEye, and
+ * the look kept, so the picture is the same, the aircraft on the framing point at any height): as far as the eye is over the ground (`groundM`), at least SIGHT_MIN_M, or to the ground
  * if the look meets it first; never so far that MapLibre's near plane (mapNearPlane) passes half the distance to
  * the nearest thing drawn (`nearestM`: the aircraft's model, or the ground under the eye), and never nearer than
  * the camera's own centre.

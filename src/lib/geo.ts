@@ -4,7 +4,9 @@
  * kilometre out to the 30 km the scene uses, and exactly invertible.
  */
 
-const R = 6_371_008.8;
+/** The Earth's mean radius, metres: the sphere these conversions run on, and MapLibre's own `earthRadius`. */
+export const EARTH_RADIUS_M = 6_371_008.8;
+const R = EARTH_RADIUS_M;
 const RAD = Math.PI / 180;
 
 export interface Origin {

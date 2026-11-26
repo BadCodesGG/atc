@@ -113,13 +113,14 @@ it, with no second canvas.
   pixels before the horizon, and the far ground showed as a band of low-zoom imagery with a hard seam
   against the near relief and a white line at the horizon (ticket #23's review; a probe with a magenta fog
   showed it). So the En-route layer draws the haze itself, before the aircraft (`hazeShells`): 24 spheres
-  round the eye, from 8% of the way to the horizon (past Chase's ground), and never nearer than 4.9 of the
-  eye's heights over the ground (`HAZE_START_HEIGHTS`), out to full haze at the horizon's
+  round the eye, from 8% of the way to the horizon (past Chase's ground), and in Light and Dark never
+  nearer than 4.8 of the eye's heights over the ground (the palette's `hazeFloorHeights`; Satellite has
+  none, its haze as it was), out to full haze at the horizon's
   distance over a round Earth (`sqrt(2Rh)`), or just inside the map's far plane when that comes first.
   The horizon grows only as the root of the height: at FL400 the 8% alone started the haze 2.6 heights
-  out, over all the ground a level look sees, and Dark's Cockpit was a near-black frame. At 11,000 ft the
-  8% is 4.9 to 5.2 heights out, so the floor leaves it as it was there and keeps the look's first 11
-  degrees below level clear from any height.
+  out, over all the ground a level look sees, and Dark's Cockpit was a near-black frame. The 8% is 4.8
+  heights out from an eye 11,600 ft over the ground and more from lower, so the floor leaves 11,000 ft
+  as it was and keeps the look's first 11 degrees below level clear from any height.
   The shells are first only counted, in the stencil, against the map's depth buffer (never written to
   it): a pixel's count is how many shells are nearer than the ground there. Then each count's haze is
   drawn where the stencil holds it, an equal 1/24 share a shell (too small a step to show as an edge), so
