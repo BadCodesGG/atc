@@ -235,24 +235,36 @@ const ALONG_RUNWAY_COS = 0.9;
  * width of the centreline, between its ends) and running its way, as the lead-ons and back-taxi
  * stretches mappers draw on the centreline do. A taxiway crossing the runway does not.
  */
-function alongRunway(runways: Runway[], a: Point, b: Point): boolean {
+function liesAlongRunway(stretches: RunwayStretch[], a: Point, b: Point): boolean {
   const len = Math.hypot(b[0] - a[0], b[1] - a[1]);
   if (!(len > 0)) return false;
-  return runways.some((runway) => {
+  return stretches.some(({ from, ux, uy, length, halfWidth }) => {
+    const onPavement = ([x, y]: Point) => {
+      const along = (x - from[0]) * ux + (y - from[1]) * uy;
+      return along >= 0 && along <= length && Math.abs(-(x - from[0]) * uy + (y - from[1]) * ux) <= halfWidth;
+    };
+    return onPavement(a) && onPavement(b) && Math.abs((b[0] - a[0]) * ux + (b[1] - a[1]) * uy) / len >= ALONG_RUNWAY_COS;
+  });
+}
+
+/** One straight stretch of a runway's pavement: where it starts, its heading as a unit vector, its length and half its width. */
+interface RunwayStretch {
+  from: Point;
+  ux: number;
+  uy: number;
+  length: number;
+  halfWidth: number;
+}
+
+/** Every runway as straight stretches, between its ends as the scene draws it (its mapped centreline when the ends are unknown). */
+function runwayStretches(runways: Runway[]): RunwayStretch[] {
+  return runways.flatMap((runway) => {
     const line = runway.ends.length >= 2 ? runway.ends.map((e): Point => [e.x, e.y]) : runway.centerline;
-    for (let i = 1; i < line.length; i++) {
-      const [p, q] = [line[i - 1], line[i]];
-      const length = Math.hypot(q[0] - p[0], q[1] - p[1]);
-      if (!(length > 0)) continue;
-      const ux = (q[0] - p[0]) / length;
-      const uy = (q[1] - p[1]) / length;
-      const on = ([x, y]: Point) => {
-        const along = (x - p[0]) * ux + (y - p[1]) * uy;
-        return along >= 0 && along <= length && Math.abs(-(x - p[0]) * uy + (y - p[1]) * ux) <= runway.width / 2;
-      };
-      if (on(a) && on(b) && Math.abs((b[0] - a[0]) * ux + (b[1] - a[1]) * uy) / len >= ALONG_RUNWAY_COS) return true;
-    }
-    return false;
+    return line.slice(1).flatMap((to, i) => {
+      const from = line[i];
+      const length = Math.hypot(to[0] - from[0], to[1] - from[1]);
+      return length > 0 ? [{ from, ux: (to[0] - from[0]) / length, uy: (to[1] - from[1]) / length, length, halfWidth: runway.width / 2 }] : [];
+    });
   });
 }
 
@@ -277,6 +289,7 @@ export function taxiwayRuns(map: Pick<AirportMap, "taxiways" | "aprons" | "runwa
   });
   const onApron = (x: number, y: number) => aprons.some((a) => x >= a.minX && x <= a.maxX && y >= a.minY && y <= a.maxY && inPolygon(x, y, a.rings));
 
+  const runways = runwayStretches(map.runways);
   const runs: TaxiwayRun[] = [];
   for (const t of map.taxiways) {
     const alwaysMinor = t.kind === "taxilane" || t.ref === null;
@@ -284,7 +297,7 @@ export function taxiwayRuns(map: Pick<AirportMap, "taxiways" | "aprons" | "runwa
     for (let i = 1; i < t.line.length; i++) {
       const [ax, ay] = t.line[i - 1];
       const [bx, by] = t.line[i];
-      if (alongRunway(map.runways, t.line[i - 1], t.line[i])) {
+      if (liesAlongRunway(runways, t.line[i - 1], t.line[i])) {
         current = null;
         continue;
       }

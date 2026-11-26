@@ -68,18 +68,18 @@ function taxiwayPoints(map) {
 /** Where map points land on screen, through the scene's camera; only those well inside the frame. */
 async function project(page, points) {
   return page.evaluate(
-    ({ expr, points }) => {
+    ({ expr, points, height, margin }) => {
       const scene = eval(expr);
       const w = innerWidth;
       const h = innerHeight;
       // The scene projects into its own canvas; the screenshot is of the page.
       const box = scene.canvas.getBoundingClientRect();
       return points
-        .map(([x, y]) => scene.project(x, y, 1.2))
+        .map(([x, y]) => scene.project(x, y, height))
         .map((p) => ({ ...p, x: p.x + box.left, y: p.y + box.top }))
-        .filter((p) => p.visible && p.x > 40 && p.x < w - 40 && p.y > 120 && p.y < h - 120);
+        .filter((p) => p.visible && p.x > margin.x && p.x < w - margin.x && p.y > margin.y && p.y < h - margin.y);
     },
-    { expr: SCENE, points },
+    { expr: SCENE, points, height: RUNWAY_HEIGHT, margin: FRAME_MARGIN },
   );
 }
 
@@ -110,8 +110,18 @@ async function luminances(page, points) {
 
 const median = (xs) => [...xs].sort((a, b) => a - b)[Math.floor(xs.length / 2)];
 
-/** The least contrast the drawn runway holds against taxiway pavement and against the ground, by day in Light. */
+/**
+ * The least contrast the drawn runway holds against taxiway pavement and against the ground, by day in
+ * Light. Below the theme's own RUNWAY_CONTRAST (1.3, src/lib/scene/theme.ts): light, shadow, ambient
+ * occlusion and the tilt-shift blur soften the colours as drawn. Before #17 it measured 1.14.
+ */
 const MIN_DRAWN = 1.2;
+/** The runway's height in the model, metres (LAYER.runway in src/lib/scene/airport-scene.ts). */
+const RUNWAY_HEIGHT = 1.2;
+/** Points this close to the frame's edge, CSS pixels, are not sampled: the chrome sits there, and the blur. */
+const FRAME_MARGIN = { x: 40, y: 120 };
+/** How far off the runway's middle the ground is sampled, metres: clear of any mapped pavement at BTP and BFT. */
+const GROUND_OFFSET = 150;
 
 export async function runwayVisibleChecks({ browser, base, check }) {
   for (const code of ["btp", "bft"]) {
@@ -130,20 +140,19 @@ export async function runwayVisibleChecks({ browser, base, check }) {
     await page.waitForTimeout(300);
 
     const { pavement, ux, uy, length, e0 } = runwayPoints(runway);
-    // Ground: 150 m either side of the runway's middle, off any mapped pavement there.
-    const ground = [-150, 150].map((across) => [e0.x + ux * length * 0.5 - uy * across, e0.y + uy * length * 0.5 + ux * across]);
+    // Ground: GROUND_OFFSET either side of the runway's middle, off any mapped pavement there.
+    const ground = [-GROUND_OFFSET, GROUND_OFFSET].map((across) => [e0.x + ux * length * 0.5 - uy * across, e0.y + uy * length * 0.5 + ux * across]);
     const onRunway = await project(page, pavement);
     const onTaxiway = await project(page, taxiwayPoints(map));
     const onGround = await project(page, ground);
     check(`${code.toUpperCase()} light: the runway ${runway.ref} is in frame`, onRunway.length >= 4 && onTaxiway.length >= 2, `runway ${onRunway.length}, taxiway ${onTaxiway.length}, ground ${onGround.length} points`);
-    if (onRunway.length && onTaxiway.length) {
-      const r = median(await luminances(page, onRunway));
+    const r = onRunway.length ? median(await luminances(page, onRunway)) : null;
+    if (r !== null && onTaxiway.length) {
       const t = median(await luminances(page, onTaxiway));
       const detail = `runway ${r.toFixed(3)}, taxiway ${t.toFixed(3)}, contrast ${contrast(r, t).toFixed(2)}`;
       check(`${code.toUpperCase()} light: the runway is drawn clearly darker than the taxiway pavement`, r < t && contrast(r, t) >= MIN_DRAWN, detail);
     }
-    if (onRunway.length && onGround.length) {
-      const r = median(await luminances(page, onRunway));
+    if (r !== null && onGround.length) {
       const gl = median(await luminances(page, onGround));
       check(`${code.toUpperCase()} light: the runway is drawn clearly darker than the ground`, r < gl && contrast(r, gl) >= MIN_DRAWN, `runway ${r.toFixed(3)}, ground ${gl.toFixed(3)}, contrast ${contrast(r, gl).toFixed(2)}`);
     }

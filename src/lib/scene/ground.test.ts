@@ -248,6 +248,7 @@ describe("taxiwayRuns at Pittsburgh-Butler (BTP)", () => {
     }
     const a = runs.filter((r) => r.ref === "A");
     const aLength = a.flatMap((r) => segments(r.line)).reduce((s, [p, q]) => s + Math.hypot(q[0] - p[0], q[1] - p[1]), 0);
+    // A is the full-length parallel taxiway, about 77 m north of 08/26 (1593 m mapped); only its lead-ons at each end sit on the runway.
     expect(aLength).toBeGreaterThan(1200);
     expect(new Set(runs.map((r) => r.ref))).toEqual(new Set(["A", "B", "C", "D", "E", null]));
   });
