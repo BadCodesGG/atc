@@ -138,6 +138,12 @@ describe("ShareEase: the share the view takes, eased over time", () => {
     expect(ease.step(1, 60_000)).toBeLessThan(0.3);
   });
 
+  it("still arrives in its time on a device that draws a frame or two a second", () => {
+    const ease = new ShareEase();
+    ease.step(1, 0);
+    expect(ease.step(0, 700)).toBeCloseTo(1 - 0.7 / SHARE_EASE_S, 6);
+    expect(ease.step(0, 1_400)).toBe(0);
+  });
 });
 
 describe("blendPlacement: the flat Map shot eased into the 3D camera", () => {

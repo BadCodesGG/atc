@@ -46,8 +46,10 @@ export const enRouteOffered = (stage: JourneyStage): boolean => stage === "origi
 
 /** How long the share takes to go all the way between flat and 3D, seconds: at an even pace, then smoothed (blendPlacement's caller). */
 export const SHARE_EASE_S = 1.2;
-/** The longest step one frame eases, seconds: a hidden tab's long gap is one short step. */
-const MAX_STEP_S = 0.25;
+/** A frame later than this, seconds, is a hidden tab or a paused page: it eases one short step (PAUSE_STEP_S), not the whole gap. */
+const PAUSE_GAP_S = 2;
+/** The step a paused page's first frame eases, seconds. A slower frame counts in full, so a device that draws a frame or two a second still arrives in SHARE_EASE_S. */
+const PAUSE_STEP_S = 0.25;
 
 /**
  * The share of the 3D camera the view takes, moved toward its target at an even pace (all the way in
@@ -65,7 +67,8 @@ export class ShareEase {
       this.at = now;
       return target;
     }
-    const dt = Math.max(0, Math.min(MAX_STEP_S, (now - this.at) / 1000));
+    const gap = Math.max(0, (now - this.at) / 1000);
+    const dt = gap > PAUSE_GAP_S ? PAUSE_STEP_S : gap;
     this.at = now;
     const room = dt / SHARE_EASE_S;
     this.value = target > this.value ? Math.min(target, this.value + room) : Math.max(target, this.value - room);
