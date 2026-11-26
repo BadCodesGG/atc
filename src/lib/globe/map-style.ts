@@ -1,3 +1,4 @@
+import type { CalculateTileZoomFunction } from "maplibre-gl";
 import type { DataDrivenPropertyValueSpecification, ExpressionSpecification, FilterSpecification, LayerSpecification, RasterDEMSourceSpecification, SkySpecification, SourceSpecification, StyleSpecification, TerrainSpecification } from "@maplibre/maplibre-gl-style-spec";
 import { RADAR_CREDIT, RADAR_MAX_ZOOM } from "../radar";
 import { MODEL, THEMES, type ThemeKey } from "../scene/theme";
@@ -366,12 +367,50 @@ export interface HazeShell {
  */
 export function hazeShells(aboveM: number, farM = Infinity): HazeShell[] {
   if (!(aboveM > 0)) return [];
-  const end = Math.min(Math.sqrt(2 * EARTH_RADIUS_M * aboveM + aboveM * aboveM), farM * 0.98);
+  const end = Math.min(horizonM(aboveM), farM * 0.98);
   const start = HAZE_START * end;
   return Array.from({ length: HAZE_SHELLS }, (_, i) => {
     const share = (i + 1) / HAZE_SHELLS;
     return { distanceM: start + (end - start) * share ** (1 / HAZE_RISE), opacity: share };
   });
+}
+
+/** The distance to the horizon over a round Earth from `aboveM` over the ground, metres: where the haze is full (hazeShells). 0 at or under the ground. */
+export function horizonM(aboveM: number): number {
+  return aboveM > 0 ? Math.sqrt(2 * EARTH_RADIUS_M * aboveM + aboveM * aboveM) : 0;
+}
+
+/** The Satellite theme's imagery source and layer. */
+export const IMAGERY = "imagery";
+
+/**
+ * The lowest zoom of USGSImageryOnly's own large-scale imagery. At 8 and under the service serves a different,
+ * small-scale product: olive and much darker over the same ground (mean colour 54/57/17 at zoom 8 against
+ * 109/111/94 at zoom 9 over Alabama, measured on the tiles). A 3D camera looking near level has MapLibre take
+ * lower zooms with distance, so where its tiles went from 9 to 8, about 40 km out, the ground changed colour
+ * in a hard line.
+ */
+export const IMAGERY_NEAR_ZOOM = 9;
+
+/**
+ * MapLibre's own level of detail with distance on a pitched map (covering_tiles.ts in maplibre-gl:
+ * defaultMaxZoomLevelsOnScreen, defaultTileCountMaxMinRatio): `setSourceTileLodParams` with these gives the
+ * source MapLibre's default `calculateTileZoom`, which imageryTileZoom then wraps.
+ */
+export const MAPLIBRE_LOD = { maxZoomLevelsOnScreen: 9.314, tileCountMaxMinRatio: 3 } as const;
+
+/**
+ * The imagery's tile zoom in a 3D camera: MapLibre's own (`base`), but never under IMAGERY_NEAR_ZOOM for a tile
+ * nearer than `reach.metres` (the horizon, where the haze is full; read each call, so the camera moves it), so
+ * the ground in sight is all one product and the olive one is only ever under full haze. MapLibre's distances
+ * are in Mercator units, `reach.metresPerUnit` metres of ground each. A map zoomed out past zoom 9 keeps
+ * MapLibre's zooms.
+ */
+export function imageryTileZoom(base: CalculateTileZoomFunction, reach: { metres: number; metresPerUnit: number }): CalculateTileZoomFunction {
+  return (centreZoom, toTile2D, toTileZ, toCentre3D, fovDeg) => {
+    const z = base(centreZoom, toTile2D, toTileZ, toCentre3D, fovDeg);
+    return centreZoom >= IMAGERY_NEAR_ZOOM && toTile2D * reach.metresPerUnit < reach.metres ? Math.max(z, IMAGERY_NEAR_ZOOM) : z;
+  };
 }
 
 /**

@@ -1,7 +1,7 @@
 import { type LayerSpecification, validateStyleMin } from "@maplibre/maplibre-gl-style-spec";
 import { describe, expect, it } from "vitest";
 import { THEMES, type ThemeKey } from "../scene/theme";
-import { arcOpacities, buildingHeight, enRouteHaze, enRouteSky, flatSky, HAZE_SHELLS, hazeShells, hazeStrength, HILLSHADE, HILLSHADE_UNDER, hillshadeLayer, journeyIconSize, mapBackground, mapStyle, PALETTES, radarLayer, radarSource, ripple, SELECTED_SCALE, SELECTION_DIM, TERRAIN, TERRAIN_SOURCE, terrainSource } from "./map-style";
+import { arcOpacities, buildingHeight, enRouteHaze, enRouteSky, flatSky, HAZE_SHELLS, hazeShells, hazeStrength, HILLSHADE, HILLSHADE_UNDER, hillshadeLayer, horizonM, IMAGERY_NEAR_ZOOM, imageryTileZoom, journeyIconSize, mapBackground, mapStyle, PALETTES, radarLayer, radarSource, ripple, SELECTED_SCALE, SELECTION_DIM, TERRAIN, TERRAIN_SOURCE, terrainSource } from "./map-style";
 
 const KEYS = Object.keys(THEMES) as ThemeKey[];
 const paint = (key: ThemeKey, id: string, prop: string) => {
@@ -374,5 +374,43 @@ describe("hazeShells", () => {
     expect(shells.at(-1)!.distanceM).toBeLessThan(far);
     expect(shells.at(-1)!.distanceM).toBeGreaterThan(far * 0.9);
     expect(opacity(shells)).toBe(1);
+  });
+});
+
+describe("horizonM", () => {
+  it("is the distance to the horizon over a round Earth, where the haze is full", () => {
+    expect(horizonM(11_000 * 0.3048)).toBeCloseTo(206_700, -3);
+    expect(horizonM(37_000 * 0.3048)).toBeCloseTo(379_100, -3);
+    expect(hazeShells(11_000 * 0.3048).at(-1)!.distanceM).toBeCloseTo(horizonM(11_000 * 0.3048), 6);
+    expect(horizonM(0)).toBe(0);
+    expect(horizonM(Number.NaN)).toBe(0);
+  });
+});
+
+describe("imageryTileZoom", () => {
+  // MapLibre's distances are in Mercator units (the world is 1 across); at the equator one is 40,075 km of ground.
+  const reach = { metres: 200_000, metresPerUnit: 40_075_016 };
+  const km = (k: number) => (k * 1000) / reach.metresPerUnit;
+  const base = (z: number) => () => z;
+
+  it("keeps the imagery at its own large-scale product (zoom 9 or more) out to the reach, where the haze is full", () => {
+    expect(IMAGERY_NEAR_ZOOM).toBe(9);
+    // The olive small-scale product MapLibre would take 40 km out, and 190 km out, is the large-scale one.
+    expect(imageryTileZoom(base(8), reach)(15, km(40), km(3), km(4), 37)).toBe(9);
+    expect(imageryTileZoom(base(6), reach)(15, km(190), km(3), km(4), 37)).toBe(9);
+  });
+
+  it("leaves past the reach, nearer tiles already finer, and a map zoomed out past zoom 9 as MapLibre has them", () => {
+    expect(imageryTileZoom(base(6), reach)(15, km(210), km(3), km(4), 37)).toBe(6);
+    expect(imageryTileZoom(base(13), reach)(15, km(5), km(3), km(4), 37)).toBe(13);
+    expect(imageryTileZoom(base(7), reach)(8, km(5), km(3), km(4), 37)).toBe(7);
+  });
+
+  it("reads the reach as it is now, so the camera can move it every frame", () => {
+    const moving = { ...reach };
+    const zoom = imageryTileZoom(base(6), moving);
+    expect(zoom(15, km(150), km(3), km(4), 37)).toBe(9);
+    moving.metres = 100_000;
+    expect(zoom(15, km(150), km(3), km(4), 37)).toBe(6);
   });
 });
