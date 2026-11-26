@@ -10,8 +10,23 @@ import { toGeo, toLocal } from "../geo";
 /** Every camera the en-route view will have. Map is the flat World map; the rest are 3D. */
 export type EnRouteCamera = "map" | "chase" | "cockpit" | "side" | "top";
 
-/** The cameras the Journey card offers now, in its order: Map first, as Following starts there. */
-export const EN_ROUTE_OFFERED: readonly EnRouteCamera[] = ["map", "chase"];
+/** The cameras the Journey card offers, in its order: Map first, as Following starts there. */
+export const EN_ROUTE_OFFERED: readonly EnRouteCamera[] = ["map", "chase", "cockpit", "side", "top"];
+
+/** A camera's key: its place in the Journey card's order, from 1. */
+export const enRouteShortcut = (camera: EnRouteCamera): string => String(EN_ROUTE_OFFERED.indexOf(camera) + 1);
+
+/**
+ * The camera a key press picks: 1 to 5, in the Journey card's order (no other key of the page's uses a
+ * digit), or null for any other key and for one held with Ctrl, Alt or Meta (the browser's own). The
+ * digit is read from the key's place too (`code`), so the number row picks a camera on a layout where it
+ * types something else unshifted (AZERTY's & é " ' ( ), and so does the number pad.
+ */
+export function enRouteKey(e: Pick<KeyboardEvent, "key" | "code" | "ctrlKey" | "altKey" | "metaKey">): EnRouteCamera | null {
+  if (e.ctrlKey || e.altKey || e.metaKey) return null;
+  const digit = /^[1-9]$/.test(e.key) ? e.key : /^(?:Digit|Numpad)([1-9])$/.exec(e.code)?.[1];
+  return digit ? (EN_ROUTE_OFFERED[Number(digit) - 1] ?? null) : null;
+}
 
 /** Whether a camera tilts the map into 3D, with terrain and the aircraft's model. */
 export const is3D = (camera: EnRouteCamera): camera is Exclude<EnRouteCamera, "map"> => camera !== "map";
@@ -83,24 +98,84 @@ export function enRoutePose(fix: PoseFix, groundM: number): AircraftPose {
   return { latitude: fix.latitude, longitude: fix.longitude, altitudeM, trackDeg: wrap360(fix.headingDeg), pitchDeg };
 }
 
-/** The camera's placement for `pose`, for an aircraft drawn `lengthM` long. */
-export function enRouteShot(pose: AircraftPose, camera: Exclude<EnRouteCamera, "map">, lengthM: number): EnRouteShot {
-  // Only Chase is built; the others are later tickets and frame as Chase until then.
-  void camera;
-  const distanceM = Math.max(CHASE.minDistanceM, CHASE.lengths * lengthM);
-  const pitchDeg = Math.min(MAX_PITCH, 90 - CHASE.downDeg);
-  const back = distanceM * Math.sin(pitchDeg * RAD);
-  const up = distanceM * Math.cos(pitchDeg * RAD);
-  const t = pose.trackDeg * RAD;
-  const [latitude, longitude] = toGeo(pose, -Math.sin(t) * back, -Math.cos(t) * back);
-  return {
-    center: { latitude: pose.latitude, longitude: pose.longitude },
-    elevationM: pose.altitudeM,
-    distanceM,
-    bearingDeg: wrap360(pose.trackDeg),
-    pitchDeg,
-    eye: { latitude, longitude, altitudeM: pose.altitudeM + up },
-  };
+/** Side: abeam on the left at wing height, this many of the aircraft's lengths out (never nearer than the minimum), looking across at it. */
+export const SIDE = { lengths: 5, minDistanceM: 150 } as const;
+/** Top: straight above the aircraft, this many of its lengths up (never nearer than the minimum), looking down, track up. */
+export const TOP = { lengths: 14, minDistanceM: 500 } as const;
+/**
+ * Cockpit: the eye is just ahead of the nose (the model's nose is half its length ahead of its origin,
+ * scene/aircraft-model.ts) and a little up, at the flight deck's height, so the model never fills the view;
+ * the map's centre is the point this far ahead along the look.
+ */
+export const COCKPIT = { aheadLengths: 0.55, upLengths: 0.08, lookM: 300 } as const;
+
+/** A drag's look round the framing: degrees added to the camera's bearing and to its tilt. */
+export interface Peek {
+  bearingDeg: number;
+  pitchDeg: number;
+}
+
+export const NO_PEEK: Peek = { bearingDeg: 0, pitchDeg: 0 };
+
+const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
+const clampPitch = (deg: number) => clamp(deg, 0, MAX_PITCH);
+
+/** Where a placement's eye is: back from the centre against the bearing, and up, by its distance and tilt. */
+function eyeOf(p: EnRoutePlacement): EnRouteShot["eye"] {
+  const back = p.distanceM * Math.sin(p.pitchDeg * RAD);
+  const up = p.distanceM * Math.cos(p.pitchDeg * RAD);
+  const b = p.bearingDeg * RAD;
+  const [latitude, longitude] = toGeo(p.center, -Math.sin(b) * back, -Math.cos(b) * back);
+  return { latitude, longitude, altitudeM: p.elevationM + up };
+}
+
+/** The placement whose eye is `eye`, looking along `bearingDeg` tilted `pitchDeg` from straight down, centred `distanceM` along that look. */
+function fromEye(eye: EnRouteShot["eye"], distanceM: number, bearingDeg: number, pitchDeg: number): EnRoutePlacement {
+  const ahead = distanceM * Math.sin(pitchDeg * RAD);
+  const down = distanceM * Math.cos(pitchDeg * RAD);
+  const b = bearingDeg * RAD;
+  const [latitude, longitude] = toGeo(eye, Math.sin(b) * ahead, Math.cos(b) * ahead);
+  return { center: { latitude, longitude }, elevationM: eye.altitudeM - down, distanceM, bearingDeg: wrap360(bearingDeg), pitchDeg };
+}
+
+/**
+ * A placement looked round by a drag's `peek`: Chase, Side and Top orbit the point they look at (the
+ * aircraft), so the aircraft stays in the middle of the frame; Cockpit keeps its eye at the nose and turns
+ * the look. The tilt stays between straight down and the map's limit.
+ */
+export function peekPlacement(placement: EnRoutePlacement, camera: Exclude<EnRouteCamera, "map">, peek: Peek): EnRoutePlacement {
+  if (peek.bearingDeg === 0 && peek.pitchDeg === 0) return placement;
+  const bearingDeg = wrap360(placement.bearingDeg + peek.bearingDeg);
+  const pitchDeg = clampPitch(placement.pitchDeg + peek.pitchDeg);
+  if (camera === "cockpit") return fromEye(eyeOf(placement), placement.distanceM, bearingDeg, pitchDeg);
+  return { ...placement, bearingDeg, pitchDeg };
+}
+
+/**
+ * The camera's placement for `pose`, for an aircraft drawn `lengthM` long, looked round by a drag's
+ * `peek`. MapLibre tilts no further than MAX_PITCH (12 degrees above straight ahead is out of reach), so
+ * Side's level look and Cockpit's climb are held there: Side looks down at the aircraft 12 degrees, and
+ * Cockpit's pitch follows the attitude only in a descent steeper than 12 degrees.
+ */
+export function enRouteShot(pose: AircraftPose, camera: Exclude<EnRouteCamera, "map">, lengthM: number, peek: Peek = NO_PEEK): EnRouteShot {
+  const at = { latitude: pose.latitude, longitude: pose.longitude };
+  const track = wrap360(pose.trackDeg);
+  let placement: EnRoutePlacement;
+  if (camera === "cockpit") {
+    const t = track * RAD;
+    const ahead = COCKPIT.aheadLengths * lengthM;
+    const [latitude, longitude] = toGeo(at, Math.sin(t) * ahead, Math.cos(t) * ahead);
+    const eye = { latitude, longitude, altitudeM: pose.altitudeM + COCKPIT.upLengths * lengthM };
+    placement = fromEye(eye, COCKPIT.lookM, track, clampPitch(90 + pose.pitchDeg));
+  } else if (camera === "side") {
+    placement = { center: at, elevationM: pose.altitudeM, distanceM: Math.max(SIDE.minDistanceM, SIDE.lengths * lengthM), bearingDeg: wrap360(track + 90), pitchDeg: MAX_PITCH };
+  } else if (camera === "top") {
+    placement = { center: at, elevationM: pose.altitudeM, distanceM: Math.max(TOP.minDistanceM, TOP.lengths * lengthM), bearingDeg: track, pitchDeg: 0 };
+  } else {
+    placement = { center: at, elevationM: pose.altitudeM, distanceM: Math.max(CHASE.minDistanceM, CHASE.lengths * lengthM), bearingDeg: track, pitchDeg: Math.min(MAX_PITCH, 90 - CHASE.downDeg) };
+  }
+  const placed = peekPlacement(placement, camera, peek);
+  return { ...placed, eye: eyeOf(placed) };
 }
 
 /**
@@ -175,5 +250,62 @@ export class EnRouteRig {
     s.pitchDeg += (target.pitchDeg - s.pitchDeg) * (1 - keep);
     const [latitude, longitude] = toGeo(target.center, s.east, s.north);
     return { center: { latitude, longitude }, elevationM: target.elevationM + s.up, distanceM: s.distanceM, bearingDeg: s.bearingDeg, pitchDeg: Math.min(MAX_PITCH, s.pitchDeg) };
+  }
+}
+
+/** A drag's turn, degrees per CSS pixel: across the screen turns the bearing, up and down the tilt. */
+export const PEEK_DEG_PER_PX = 0.3;
+/** Below this a released peek is the framing again, degrees. */
+const PEEK_DONE_DEG = 0.05;
+
+/**
+ * A drag's look round the en-route camera's framing (peekPlacement): held as dragged, at once, and eased
+ * back to nothing once let go, as the rig eases (EASE_S), so the camera returns to its framing.
+ */
+export class EnRoutePeek {
+  private offset: Peek = NO_PEEK;
+  private held = false;
+  private last: number | null = null;
+
+  /** Whether a drag is on. */
+  get dragging(): boolean {
+    return this.held;
+  }
+
+  /**
+   * The pointer moved `dxPx` right and `dyPx` down while dragging: the scene follows it, so a drag to the
+   * right turns the camera left round the aircraft, and a drag up tilts it toward the horizon.
+   */
+  drag(dxPx: number, dyPx: number): void {
+    this.held = true;
+    this.last = null;
+    const bearingDeg = clamp(this.offset.bearingDeg - dxPx * PEEK_DEG_PER_PX, -180, 180);
+    const pitchDeg = clamp(this.offset.pitchDeg - dyPx * PEEK_DEG_PER_PX, -90, 90);
+    this.offset = { bearingDeg, pitchDeg };
+  }
+
+  /** The drag is over, at `now` (ms): from here the peek eases back. */
+  release(now: number): void {
+    this.held = false;
+    this.last = now;
+  }
+
+  /** Back to the framing at once (a camera switch). */
+  reset(): void {
+    this.offset = NO_PEEK;
+    this.held = false;
+    this.last = null;
+  }
+
+  /** The peek at `now` (ms): as dragged while held, else eased toward nothing since the last frame. */
+  at(now: number): Peek {
+    if (this.held || this.offset === NO_PEEK) return this.offset;
+    const dt = this.last === null ? 0 : Math.max(0, Math.min(MAX_STEP_S, (now - this.last) / 1000));
+    this.last = now;
+    const keep = Math.exp(-dt / EASE_S);
+    const bearingDeg = this.offset.bearingDeg * keep;
+    const pitchDeg = this.offset.pitchDeg * keep;
+    this.offset = Math.abs(bearingDeg) < PEEK_DONE_DEG && Math.abs(pitchDeg) < PEEK_DONE_DEG ? NO_PEEK : { bearingDeg, pitchDeg };
+    return this.offset;
   }
 }

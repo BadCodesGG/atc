@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { toLocal } from "../geo";
-import { aircraftMatrix, type AircraftPose, CHASE, EN_ROUTE_OFFERED, enRoutePose, enRouteShot, EnRouteRig, is3D, MAX_PITCH } from "./en-route";
+import { aircraftMatrix, type AircraftPose, CHASE, COCKPIT, EASE_S, EN_ROUTE_OFFERED, enRouteKey, EnRoutePeek, enRouteShortcut, enRoutePose, enRouteShot, EnRouteRig, is3D, MAX_PITCH, NO_PEEK, PEEK_DEG_PER_PX, peekPlacement, SIDE, TOP } from "./en-route";
 
 const cruise: AircraftPose = { latitude: 35, longitude: -100, altitudeM: 10_000, trackDeg: 90, pitchDeg: 0 };
 
@@ -56,11 +56,203 @@ describe("enRouteShot: Chase", () => {
   });
 });
 
+/** Metres of `eye` along and across the track from the aircraft (across: positive to the right). */
+function alongAcross(pose: AircraftPose, eye: { east: number; north: number }) {
+  const t = (pose.trackDeg * Math.PI) / 180;
+  return { along: eye.east * Math.sin(t) + eye.north * Math.cos(t), across: eye.east * Math.cos(t) - eye.north * Math.sin(t) };
+}
+
+describe("enRouteShot: Cockpit", () => {
+  it("has its eye just ahead of the nose, a little up, on the track, so the model is behind it", () => {
+    for (const trackDeg of [0, 90, 200, 315]) {
+      const pose = { ...cruise, trackDeg };
+      const shot = enRouteShot(pose, "cockpit", 40);
+      const eye = eyeFrom(pose, shot);
+      const { along, across } = alongAcross(pose, eye);
+      expect(along).toBeCloseTo(COCKPIT.aheadLengths * 40, 3);
+      expect(along).toBeGreaterThan(20);
+      expect(Math.abs(across)).toBeLessThan(0.01);
+      expect(eye.up).toBeCloseTo(COCKPIT.upLengths * 40, 3);
+      expect(shot.bearingDeg).toBeCloseTo(trackDeg, 6);
+    }
+  });
+
+  it("looks forward along the track: the point it looks at is ahead of the eye and below it", () => {
+    const shot = enRouteShot(cruise, "cockpit", 40);
+    const [east, north] = toLocal(shot.eye, shot.center.latitude, shot.center.longitude);
+    expect(east).toBeGreaterThan(0);
+    expect(Math.abs(north)).toBeLessThan(0.01);
+    expect(shot.elevationM).toBeLessThan(shot.eye.altitudeM);
+  });
+
+  it("is pitched by the attitude, held at the map's limit: a climb or level look at 78, a steep descent below it", () => {
+    expect(enRouteShot(cruise, "cockpit", 40).pitchDeg).toBe(MAX_PITCH);
+    expect(enRouteShot({ ...cruise, pitchDeg: 5 }, "cockpit", 40).pitchDeg).toBe(MAX_PITCH);
+    expect(enRouteShot({ ...cruise, pitchDeg: -15 }, "cockpit", 40).pitchDeg).toBeCloseTo(75, 9);
+    expect(enRouteShot({ ...cruise, pitchDeg: -18 }, "cockpit", 40).pitchDeg).toBeLessThan(enRouteShot({ ...cruise, pitchDeg: -15 }, "cockpit", 40).pitchDeg);
+  });
+});
+
+describe("enRouteShot: Side", () => {
+  it("stands abeam on the left of the track and looks across at the aircraft", () => {
+    for (const trackDeg of [0, 90, 200, 315]) {
+      const pose = { ...cruise, trackDeg };
+      const shot = enRouteShot(pose, "side", 40);
+      expect(shot.center).toEqual({ latitude: 35, longitude: -100 });
+      expect(shot.elevationM).toBe(10_000);
+      const { along, across } = alongAcross(pose, eyeFrom(pose, shot));
+      expect(across).toBeLessThan(-100);
+      expect(Math.abs(along)).toBeLessThan(0.5);
+      expect(shot.bearingDeg).toBeCloseTo((trackDeg + 90) % 360, 6);
+    }
+  });
+
+  it("is at wing height as near as the map's tilt allows: 12 degrees above it", () => {
+    const shot = enRouteShot(cruise, "side", 40);
+    expect(shot.pitchDeg).toBe(MAX_PITCH);
+    const eye = eyeFrom(cruise, shot);
+    const down = (Math.atan2(eye.up, Math.hypot(eye.east, eye.north)) * 180) / Math.PI;
+    expect(down).toBeCloseTo(90 - MAX_PITCH, 1);
+    expect(shot.distanceM).toBe(Math.max(SIDE.minDistanceM, SIDE.lengths * 40));
+  });
+});
+
+describe("enRouteShot: Top", () => {
+  it("looks straight down at the aircraft from above it, track up", () => {
+    for (const trackDeg of [0, 90, 200]) {
+      const pose = { ...cruise, trackDeg };
+      const shot = enRouteShot(pose, "top", 40);
+      expect(shot.pitchDeg).toBe(0);
+      expect(shot.bearingDeg).toBeCloseTo(trackDeg, 6);
+      expect(shot.center).toEqual({ latitude: 35, longitude: -100 });
+      const eye = eyeFrom(pose, shot);
+      expect(Math.hypot(eye.east, eye.north)).toBeLessThan(0.01);
+      expect(eye.up).toBeCloseTo(Math.max(TOP.minDistanceM, TOP.lengths * 40), 3);
+    }
+  });
+});
+
+describe("enRouteShot: a drag's peek", () => {
+  it("orbits Chase, Side and Top round the aircraft: it stays where they look, at the same distance", () => {
+    for (const camera of ["chase", "side", "top"] as const) {
+      const framed = enRouteShot(cruise, camera, 40);
+      const peeked = enRouteShot(cruise, camera, 40, { bearingDeg: 40, pitchDeg: 10 });
+      expect(peeked.center).toEqual(framed.center);
+      expect(peeked.distanceM).toBe(framed.distanceM);
+      expect(peeked.bearingDeg).toBeCloseTo((framed.bearingDeg + 40) % 360, 6);
+      expect(peeked.pitchDeg).toBeCloseTo(Math.min(MAX_PITCH, framed.pitchDeg + 10), 6);
+      const eye = eyeFrom(cruise, peeked);
+      expect(Math.hypot(eye.east, eye.north, eye.up)).toBeCloseTo(framed.distanceM, 0);
+    }
+  });
+
+  it("turns Cockpit's look round its eye, which stays at the nose", () => {
+    const framed = enRouteShot(cruise, "cockpit", 40);
+    const peeked = enRouteShot(cruise, "cockpit", 40, { bearingDeg: -60, pitchDeg: -20 });
+    // Within a centimetre: the local metres round a point are not quite a plane.
+    expect(Math.hypot(...toLocal(framed.eye, peeked.eye.latitude, peeked.eye.longitude))).toBeLessThan(0.01);
+    expect(peeked.eye.altitudeM).toBeCloseTo(framed.eye.altitudeM, 6);
+    expect(peeked.bearingDeg).toBeCloseTo(30, 6);
+    expect(peeked.pitchDeg).toBeCloseTo(MAX_PITCH - 20, 6);
+  });
+
+  it("never tilts past the map's limit nor past straight down", () => {
+    expect(enRouteShot(cruise, "side", 40, { bearingDeg: 0, pitchDeg: 30 }).pitchDeg).toBe(MAX_PITCH);
+    expect(enRouteShot(cruise, "top", 40, { bearingDeg: 0, pitchDeg: -30 }).pitchDeg).toBe(0);
+  });
+
+  it("with no peek is the framing", () => {
+    expect(enRouteShot(cruise, "side", 40, NO_PEEK)).toEqual(enRouteShot(cruise, "side", 40));
+  });
+});
+
+describe("peekPlacement", () => {
+  it("leaves a placement as it is with no peek", () => {
+    const p = enRouteShot(cruise, "chase", 40);
+    expect(peekPlacement(p, "chase", NO_PEEK)).toBe(p);
+  });
+});
+
+describe("EnRoutePeek", () => {
+  it("holds a drag as dragged: right turns the bearing back, up tilts toward the horizon", () => {
+    const peek = new EnRoutePeek();
+    peek.drag(100, -20);
+    expect(peek.dragging).toBe(true);
+    expect(peek.at(0)).toEqual({ bearingDeg: -100 * PEEK_DEG_PER_PX, pitchDeg: 20 * PEEK_DEG_PER_PX });
+    // Held, it does not ease back, however long.
+    expect(peek.at(5_000)).toEqual({ bearingDeg: -100 * PEEK_DEG_PER_PX, pitchDeg: 20 * PEEK_DEG_PER_PX });
+  });
+
+  it("eases back to the framing once let go: never past it, always nearer, and arrives", () => {
+    const peek = new EnRoutePeek();
+    peek.drag(-200, 50);
+    peek.release(1_000);
+    expect(peek.dragging).toBe(false);
+    let last = peek.at(1_000);
+    expect(last.bearingDeg).toBeCloseTo(60, 9);
+    for (let t = 1_016; t <= 8_000; t += 16) {
+      const next = peek.at(t);
+      expect(next.bearingDeg).toBeGreaterThanOrEqual(0);
+      expect(next.bearingDeg).toBeLessThanOrEqual(last.bearingDeg);
+      expect(next.pitchDeg).toBeLessThanOrEqual(0);
+      expect(next.pitchDeg).toBeGreaterThanOrEqual(last.pitchDeg);
+      last = next;
+    }
+    expect(last).toEqual(NO_PEEK);
+  });
+
+  it("is halfway back in about half a second, as the rig eases", () => {
+    const peek = new EnRoutePeek();
+    peek.drag(-100, 0);
+    peek.release(0);
+    for (let t = 16; t <= 480; t += 16) peek.at(t);
+    expect(peek.at(EASE_S * Math.LN2 * 1000).bearingDeg).toBeCloseTo(15, 0);
+  });
+
+  it("goes at once on reset (a camera switch)", () => {
+    const peek = new EnRoutePeek();
+    peek.drag(300, 300);
+    peek.reset();
+    expect(peek.dragging).toBe(false);
+    expect(peek.at(0)).toEqual(NO_PEEK);
+  });
+
+  it("is held to half a turn either way however far the drag", () => {
+    const peek = new EnRoutePeek();
+    peek.drag(-100_000, 100_000);
+    expect(peek.at(0)).toEqual({ bearingDeg: 180, pitchDeg: -90 });
+  });
+});
+
 describe("the cameras offered", () => {
-  it("are Map and Chase for now, Map first, and only Chase is 3D", () => {
-    expect(EN_ROUTE_OFFERED).toEqual(["map", "chase"]);
+  it("are all five, Map first, and only Map is flat", () => {
+    expect(EN_ROUTE_OFFERED).toEqual(["map", "chase", "cockpit", "side", "top"]);
     expect(is3D("map")).toBe(false);
-    expect(is3D("chase")).toBe(true);
+    for (const camera of ["chase", "cockpit", "side", "top"] as const) expect(is3D(camera)).toBe(true);
+  });
+});
+
+describe("enRouteKey", () => {
+  const press = (key: string, mods: Partial<Record<"ctrlKey" | "altKey" | "metaKey", boolean>> = {}, code = "") => enRouteKey({ key, code, ctrlKey: false, altKey: false, metaKey: false, ...mods });
+
+  it("picks the cameras with 1 to 5, in the card's order, each button showing its key", () => {
+    expect(["1", "2", "3", "4", "5"].map((k) => press(k))).toEqual(["map", "chase", "cockpit", "side", "top"]);
+    expect(EN_ROUTE_OFFERED.map(enRouteShortcut)).toEqual(["1", "2", "3", "4", "5"]);
+  });
+
+  it("reads the number row by its place on a layout that types something else there, and the number pad", () => {
+    // AZERTY: the 3 key types a double quote unshifted.
+    expect(press('"', {}, "Digit3")).toBe("cockpit");
+    expect(press("4", {}, "Numpad4")).toBe("side");
+    expect(press("&", { ctrlKey: true }, "Digit1")).toBeNull();
+    expect(press("q", {}, "KeyA")).toBeNull();
+  });
+
+  it("leaves every other key, and the browser's own chords, alone", () => {
+    for (const key of ["0", "6", "9", "q", "e", "/", "Escape", "ArrowUp", "+"]) expect(press(key)).toBeNull();
+    expect(press("2", { ctrlKey: true })).toBeNull();
+    expect(press("2", { altKey: true })).toBeNull();
+    expect(press("2", { metaKey: true })).toBeNull();
   });
 });
 

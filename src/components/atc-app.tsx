@@ -11,7 +11,7 @@ import type { GlobeMap } from "@/lib/globe/globe-map";
 import { AIRCRAFT_GLYPH, BEACON_RADIUS_PX, GLYPH_BOX, GLYPH_PX } from "@/lib/globe/aircraft-glyph";
 import { groundView, liftView, mapHashCamera, orbitToMap, withoutBadMapHash } from "@/lib/globe/camera";
 import { journeyIconSize, PALETTES } from "@/lib/globe/map-style";
-import { EN_ROUTE_OFFERED, type EnRouteCamera } from "@/lib/globe/en-route";
+import { EN_ROUTE_OFFERED, type EnRouteCamera, enRouteKey } from "@/lib/globe/en-route";
 import { fogReach } from "@/lib/journey";
 import { type Band, landingAirport, overAirport, reveal, revealMask } from "@/lib/globe/handover";
 import { type Filters, filterOptions, type FilterOptions, filtersActive, Ghosts, GHOST_MS, matches, NO_OPTIONS, rememberSeen, snapshotSubject, type Subject, subjectOfEntry, withFilters } from "@/lib/filters";
@@ -40,6 +40,7 @@ import type { FlightCard as FlightCardData, TrafficEntry, TrafficView } from "@/
 import type { OpsView, PathPulse } from "@/lib/path-pulse";
 import { CameraMenu, CameraSwitch, COLUMN_BESIDE, ColumnPanel, Counts, DataCredit, ESTIMATES_NOTE, FlightCard, Header, JourneyCard, Legend, MapStyleMenu, PHONE, RadarToggle, Search, SideColumn, STACKED, ThemeSwitch, TimeBar, type TimeBarReplay, useMedia, useTrafficReadout, ViewControls, WeatherReadout, WIDE } from "./chrome";
 import { FilterControl } from "./filter-control";
+import { isTypingTarget } from "./search-box";
 import { ShareControl } from "./share-control";
 import { quietArrival } from "@/lib/journey-arrival";
 import { journeyFrame, type ReaderAction, releasesJourney } from "@/lib/journey-release";
@@ -381,9 +382,26 @@ export function AtcApp({ initialTheme, initialAirport, initialFilters }: { initi
     if (!globe) return;
     const left = globe.setEnRouteCamera(camera);
     const j = journeyRef.current;
-    if (left && j?.stage === "map") j.toMap(left, airportByCode(globe.airportCode) ?? j.origin, performance.now());
+    // Only back on the flat map: from one 3D camera to another the journey's own shot runs on untouched.
+    if (left && camera === "map" && j?.stage === "map") j.toMap(left, airportByCode(globe.airportCode) ?? j.origin, performance.now());
     setEnRoute(camera);
   };
+  // The cameras' keys (1 to 5, enRouteKey) while the Journey card offers them, outside a field being typed in.
+  const enRouteKeys = useRef({ offered: false, choose: chooseEnRoute });
+  useEffect(() => {
+    enRouteKeys.current = { offered: journey?.stage === "map", choose: chooseEnRoute };
+  });
+  useEffect(() => {
+    const onKey = (e: globalThis.KeyboardEvent) => {
+      if (!enRouteKeys.current.offered || e.defaultPrevented || e.repeat || isTypingTarget(e.target)) return;
+      const camera = enRouteKey(e);
+      if (!camera) return;
+      e.preventDefault();
+      enRouteKeys.current.choose(camera);
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, []);
   /** Back to Map with the journey over or handed to a diorama: no camera of the journey's to ease in. */
   const flattenEnRoute = () => {
     globeRef.current?.setEnRouteCamera("map");
@@ -441,7 +459,9 @@ export function AtcApp({ initialTheme, initialAirport, initialFilters }: { initi
         globe.setJourney(j.hex, j.features(steer.view, steer.frame));
       } else {
         // A 3D camera frames the flight itself, from the same fix; the journey's lines lie on its true ground track.
-        globe.steerEnRoute(steer.fix, steer.view, steer.frame, frame);
+        // The Handover reads the journey's own shot as it would settle, not one still easing out of a 3D
+        // camera just left: that one is close in, and would read as the flight coming into an airport's band.
+        globe.steerEnRoute(steer.fix, steer.ideal, steer.frame, frame);
         globe.setJourney(j.hex, j.features(null, steer.frame));
       }
       // The card cites what the map was just given, in the same task: not a timer's tick later.

@@ -7,7 +7,7 @@ import { describeWeather, describeWind, formatVisibility, type Metar } from "@/l
 import { cutMovements, MOVEMENT_ROWS, type Movements as MovementsData, movementsFoot } from "@/lib/movements";
 import type { OpsBoardRow, OpsView } from "@/lib/path-pulse";
 import type { CameraMode } from "@/lib/scene/cameras";
-import type { EnRouteCamera } from "@/lib/globe/en-route";
+import { type EnRouteCamera, enRouteShortcut } from "@/lib/globe/en-route";
 import type { ReplayRate } from "@/lib/replay";
 import type { ThemeKey } from "@/lib/scene/theme";
 import { TURN_STEP, ZOOM_STEP } from "@/lib/scene/view-keys";
@@ -428,16 +428,19 @@ const EN_ROUTE_LABELS: Record<EnRouteCamera, string> = { map: "Map", chase: "Cha
 
 /**
  * The En-route view's camera switch on the Journey card: the flat map, or a 3D camera riding along with the
- * flight. Offered while the map follows the flight (`cameras`), on every viewport.
+ * flight. Offered while the map follows the flight (`cameras`), on every viewport; the keys 1 to 5 pick
+ * them too (enRouteKey), as each button's shortcut says.
  */
 export function EnRouteSwitch({ camera, cameras, onChange }: { camera: EnRouteCamera; cameras: readonly EnRouteCamera[]; onChange: (camera: EnRouteCamera) => void }) {
   return (
-    <div role="group" aria-label="En-route camera" className="flex gap-1 self-start rounded-full bg-well p-1">
+    <div role="group" aria-label="En-route camera" className="flex flex-wrap gap-1 self-start rounded-2xl bg-well p-1">
       {cameras.map((key) => (
         <button
           key={key}
           type="button"
           aria-pressed={key === camera}
+          aria-keyshortcuts={enRouteShortcut(key)}
+          title={`${EN_ROUTE_LABELS[key]} (${enRouteShortcut(key)})`}
           onClick={() => onChange(key)}
           className={`min-h-11 rounded-full px-3.5 text-sm font-semibold xl:min-h-8 ${key === camera ? "bg-accent text-on-accent" : "bg-transparent text-ink-2"}`}
         >

@@ -20,7 +20,7 @@ import { waitForTruthy } from "./smoke-journey-procedures.mjs";
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /** The map's instance (GlobeMap), found through React's fiber from `main`. */
-const GLOBE = `(() => {
+export const GLOBE = `(() => {
   const el = document.querySelector("main");
   const key = el && Object.keys(el).find((k) => k.startsWith("__reactFiber$"));
   if (!key) return null;
@@ -34,7 +34,7 @@ const GLOBE = `(() => {
 })()`;
 
 /** What the map has of the En-route view now. */
-const STATE = `(() => {
+export const STATE = `(() => {
   const g = ${GLOBE};
   if (!g) return null;
   const m = g.map;
@@ -85,14 +85,14 @@ function flatTile(heightM, size = 256) {
   header.set([8, 2, 0, 0, 0], 8);
   return Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk("IHDR", header), chunk("IDAT", deflateSync(raw)), chunk("IEND", Buffer.alloc(0))]);
 }
-const TILE = flatTile(300);
+export const TILE = flatTile(300);
 
 /**
  * JBU1897 (hex a37fb0) is in the fixture's sky 51 NM west of Atlanta. Picked on the map and followed, its
  * own reads have it cruising west at 11,000 ft, climbing gently, with no route: the journey stays on the map.
  */
-const HEX = "a37fb0";
-const CALLSIGN = "JBU1897";
+export const HEX = "a37fb0";
+export const CALLSIGN = "JBU1897";
 
 export async function enRouteChaseChecks({ browser, base, check, shots = null }) {
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
