@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { FEET, KNOTS, toLocal } from "../geo";
 import { MAX_PITCH } from "./camera";
-import { aircraftMatrix, type AircraftPose, bandPadding, blendPadding, CHASE, COCKPIT, EASE_S, EN_ROUTE_MAX_PITCH, EN_ROUTE_OFFERED, enRouteKey, EnRoutePeek, enRouteShortcut, enRoutePose, enRouteShot, EnRouteRig, fitDistance, is3D, mapNearPlane, NO_PEEK, PEEK_DEG_PER_PX, peekPlacement, SIDE, SIGHT_MIN_M, sightPlacement, TOP } from "./en-route";
+import { aircraftMatrix, type AircraftPose, bandPadding, blendPadding, CHASE, COCKPIT, EASE_S, EN_ROUTE_MAX_PITCH, EN_ROUTE_OFFERED, enRouteKey, EnRoutePeek, enRouteShortcut, enRoutePose, type EnRouteShot, enRouteShot, EnRouteRig, fitDistance, is3D, mapCamera, mapEye, mapNearPlane, NO_PEEK, PEEK_DEG_PER_PX, peekPlacement, SIDE, SIGHT_MIN_M, sightPlacement, TOP } from "./en-route";
 
 const cruise: AircraftPose = { latitude: 35, longitude: -100, altitudeM: 10_000, trackDeg: 90, pitchDeg: 0 };
 
@@ -193,6 +193,13 @@ describe("sightPlacement: the map's centre moved along the camera's line of sigh
     expect(b.bearingDeg).toBeCloseTo(a.bearingDeg, 9);
     expect(b.pitchDeg).toBeCloseTo(a.pitchDeg, 9);
   };
+  /**
+   * MapLibre's world measures a metre by the latitude (one over its cosine, up and across alike), and the centre
+   * goes out along the look in that world: a look across the parallels (Side's, here) takes the moved centre's
+   * distance and height in the metres at the aircraft's latitude (`from`, the shot's centre), where its height is
+   * given. Side's eye stands 200 m off it, across which that metre changes by 2e-5: centimetres in 10 km.
+   */
+  const atEye = (metres: number, moved: EnRouteShot, from = cruise.latitude) => (metres * Math.cos((from * Math.PI) / 180)) / Math.cos((moved.center.latitude * Math.PI) / 180);
 
   it("keeps the eye and the look, so the picture is the same", () => {
     for (const camera of ["chase", "cockpit", "side", "top"] as const) {
@@ -223,7 +230,7 @@ describe("sightPlacement: the map's centre moved along the camera's line of sigh
     const side = enRouteShot(cruise, "side", 40);
     const moved = sightPlacement(side, { groundM: 0, nearestM: side.distanceM, fovDeg });
     expect(moved.distanceM).toBeGreaterThan(side.distanceM);
-    expect(moved.elevationM).toBeCloseTo(side.elevationM, 6);
+    expect(atEye(moved.elevationM, moved)).toBeCloseTo(side.elevationM, 2);
     const up = enRouteShot({ ...cruise, pitchDeg: 8 }, "cockpit", 40);
     expect(sightPlacement(up, { groundM: 0, nearestM: 10_000, fovDeg }).elevationM).toBeGreaterThan(up.eye.altitudeM);
   });
@@ -236,13 +243,15 @@ describe("sightPlacement: the map's centre moved along the camera's line of sigh
     expectSameSight(chase, moved);
     // Side looks level, so never meets the ground: the same, not the near plane's farthest.
     const side = enRouteShot(cruise, "side", 40);
-    expect(sightPlacement(side, { groundM: 300, nearestM: 1_000_000, fovDeg }).distanceM).toBeCloseTo(side.eye.altitudeM - 300, 6);
+    const level = sightPlacement(side, { groundM: 300, nearestM: 1_000_000, fovDeg });
+    expect(atEye(level.distanceM, level)).toBeCloseTo(side.eye.altitudeM - 300, 1);
   });
 
   it("takes the centre out at least SIGHT_MIN_M near the ground, so the terrain's skirts close the gaps between tiles", () => {
     const low: AircraftPose = { ...cruise, altitudeM: 800 };
     const side = enRouteShot(low, "side", 40);
-    expect(sightPlacement(side, { groundM: 0, nearestM: 1_000, fovDeg }).distanceM).toBeCloseTo(SIGHT_MIN_M, 6);
+    const out = sightPlacement(side, { groundM: 0, nearestM: 1_000, fovDeg });
+    expect(atEye(out.distanceM, out)).toBeCloseTo(SIGHT_MIN_M, 1);
     // Unless the ground comes first: a look down meets it nearer.
     const top = enRouteShot(low, "top", 40);
     expect(sightPlacement(top, { groundM: 0, nearestM: 1_000, fovDeg }).elevationM).toBeCloseTo(0, 6);
@@ -252,6 +261,104 @@ describe("sightPlacement: the map's centre moved along the camera's line of sigh
     const shot = enRouteShot(cruise, "chase", 40);
     expect(sightPlacement(shot, { groundM: 0, nearestM: 1, fovDeg }).distanceM).toBe(shot.distanceM);
     expect(sightPlacement(shot, { groundM: 20_000, nearestM: 500, fovDeg })).toEqual(shot);
+  });
+
+  it("keeps MapLibre's own eye where it was, in its Mercator world, on any track and at any height", () => {
+    for (const trackDeg of [0, 45, 90, 160, 225, 270, 330]) {
+      for (const altitudeM of [3_000, 12_000, 15_500]) {
+        for (const camera of ["chase", "cockpit", "side", "top"] as const) {
+          const shot = enRouteShot({ ...cruise, trackDeg, altitudeM }, camera, 40);
+          const moved = sightPlacement(shot, { groundM: 300, nearestM: 200, fovDeg });
+          const [a, b] = [mapEye(shot), mapEye(moved)];
+          // A millimetre of the world at this latitude is about 2e-10 of it.
+          const mm = 1e-3 / (2 * Math.PI * 6_371_008.8 * Math.cos((cruise.latitude * Math.PI) / 180));
+          expect(Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z), `${camera} ${trackDeg} ${altitudeM}`).toBeLessThan(mm);
+        }
+      }
+    }
+  });
+});
+
+/**
+ * MapLibre's camera, built as the map builds it from what the controller hands jumpTo (MercatorTransform: the
+ * centre and its elevation in the Web Mercator world, the camera back along the look by the camera-to-centre
+ * distance over the world's size, an off-axis lens that draws the centre in the middle of the padded view), and
+ * a point placed as MercatorCoordinate.fromLngLat places the aircraft's model: where on the screen it is drawn.
+ */
+function mapPixel(cam: ReturnType<typeof mapCamera>, screen: { width: number; height: number; fovDeg: number }, padding: { top: number; bottom: number; left: number; right: number }, point: { latitude: number; longitude: number; altitudeM: number }) {
+  const RADIUS = 6_371_008.8;
+  const R2 = Math.PI / 180;
+  const world = (lat: number, lng: number, alt: number) => ({ x: (180 + lng) / 360, y: (180 - (180 / Math.PI) * Math.log(Math.tan(Math.PI / 4 + (lat * Math.PI) / 360))) / 360, z: alt / (2 * Math.PI * RADIUS * Math.cos(lat * R2)) });
+  const focal = screen.height / 2 / Math.tan((screen.fovDeg * R2) / 2);
+  const d = focal / (512 * 2 ** cam.zoom);
+  const [p, b] = [cam.pitch * R2, cam.bearing * R2];
+  const look = { x: Math.sin(p) * Math.sin(b), y: -Math.sin(p) * Math.cos(b), z: -Math.cos(p) };
+  const c = world(cam.center[1], cam.center[0], cam.elevation);
+  const eye = { x: c.x - look.x * d, y: c.y - look.y * d, z: c.z - look.z * d };
+  // The screen's right (east at bearing 0) and up, square to the look.
+  const right = { x: Math.cos(b), y: Math.sin(b), z: 0 };
+  const up = { x: right.y * look.z - right.z * look.y, y: right.z * look.x - right.x * look.z, z: right.x * look.y - right.y * look.x };
+  const sign = up.z < 0 || (up.z === 0 && up.y > 0) ? -1 : 1;
+  const q = world(point.latitude, point.longitude, point.altitudeM);
+  const v = { x: q.x - eye.x, y: q.y - eye.y, z: q.z - eye.z };
+  const dot = (a: typeof v, w: typeof v) => a.x * w.x + a.y * w.y + a.z * w.z;
+  const ahead = dot(v, look);
+  return {
+    x: (padding.left + screen.width - padding.right) / 2 + (focal * dot(v, right)) / ahead,
+    y: (padding.top + screen.height - padding.bottom) / 2 - (focal * sign * dot(v, up)) / ahead,
+  };
+}
+
+describe("the aircraft's place in the frame, from 1,000 to 51,000 ft (the controller's steer, drawn by MapLibre's maths)", () => {
+  const fovDeg = 36.87;
+  const lengthM = 37.6;
+  const screens = [
+    { name: "1440x900", width: 1440, height: 900, band: null },
+    { name: "375x812", width: 375, height: 812, band: { left: 16, right: 359, top: 430, bottom: 613 } },
+    { name: "320x700", width: 320, height: 700, band: { left: 16, right: 304, top: 354, bottom: 483 } },
+  ];
+  const own = { top: 0, bottom: 0, left: 420, right: 0 };
+
+  /** What steer hands the map for a settled camera: the shot, fitted in the band, its centre out along the line of sight. */
+  function placed(pose: AircraftPose, camera: "chase" | "side" | "top", groundM: number, screen: (typeof screens)[number]) {
+    const lens = { height: screen.height, fovDeg };
+    const ideal = enRouteShot(pose, camera, lengthM);
+    const shot = screen.band ? { ...ideal, distanceM: fitDistance(ideal.distanceM, camera, lengthM, lens, screen.band) } : ideal;
+    const [east, north] = toLocal(shot.eye, pose.latitude, pose.longitude);
+    const nearestM = Math.min(Math.hypot(east, north, pose.altitudeM - shot.eye.altitudeM), shot.eye.altitudeM - groundM);
+    const moved = sightPlacement(shot, { groundM, nearestM, fovDeg });
+    return { cam: mapCamera(moved, lens), padding: screen.band ? bandPadding(screen, screen.band) : own };
+  }
+
+  for (const camera of ["chase", "side", "top"] as const) {
+    it(`${camera}: the aircraft is drawn on the framing point at every height, track, latitude and ground, with and without the band's padding`, () => {
+      for (const screen of screens) {
+        for (const latitude of [0, 35, 62]) {
+          for (const trackDeg of [0, 45, 90, 135, 200, 270, 315]) {
+            for (const groundM of [0, 300, 1_500, 3_000]) {
+              for (const feet of [1_000, 11_000, 25_000, 39_000, 40_000, 47_000, 51_000]) {
+                const altitudeM = feet * FEET;
+                if (altitudeM <= groundM + 50) continue;
+                const pose: AircraftPose = { latitude, longitude: -100, altitudeM, trackDeg, pitchDeg: 0 };
+                const { cam, padding } = placed(pose, camera, groundM, screen);
+                const at = mapPixel(cam, { ...screen, fovDeg }, padding, pose);
+                const want = { x: (padding.left + screen.width - padding.right) / 2, y: (padding.top + screen.height - padding.bottom) / 2 };
+                const label = `${screen.name} lat ${latitude} track ${trackDeg} ground ${groundM} ${feet} ft`;
+                expect(Math.abs(at.x - want.x), label).toBeLessThan(0.5);
+                expect(Math.abs(at.y - want.y), label).toBeLessThan(0.5);
+              }
+            }
+          }
+        }
+      }
+    });
+  }
+
+  it("takes the zoom in MapLibre's own metres, so the model's size and the camera's distance agree", () => {
+    const lens = { height: 900, fovDeg };
+    const cam = mapCamera({ center: { latitude: 35, longitude: -100 }, elevationM: 0, distanceM: 1_000, bearingDeg: 0, pitchDeg: 0 }, lens);
+    const pxPerMetre = (512 * 2 ** cam.zoom) / (2 * Math.PI * 6_371_008.8 * Math.cos((35 * Math.PI) / 180));
+    expect(pxPerMetre * 1_000).toBeCloseTo(lens.height / 2 / Math.tan((fovDeg * Math.PI) / 360), 6);
   });
 });
 

@@ -5,7 +5,7 @@ import type { JourneyFix } from "../journey-follow";
 import type { OrbitView } from "../scene/orbit";
 import type { ThemeKey } from "../scene/theme";
 import { groundView, type Lens, type MapCamera, mapToOrbit, MAX_PITCH, orbitToMap } from "./camera";
-import { bandPadding, blendPadding, EN_ROUTE_MAX_PITCH, type EnRouteCamera, EnRoutePeek, type EnRoutePlacement, enRoutePose, EnRouteRig, enRouteShot, eyeOf, fitDistance, type Insets, is3D, peekPlacement, sightPlacement } from "./en-route";
+import { bandPadding, blendPadding, EN_ROUTE_MAX_PITCH, type EnRouteCamera, EnRoutePeek, type EnRoutePlacement, enRoutePose, EnRouteRig, enRouteShot, eyeOf, fitDistance, type Insets, is3D, mapCamera, peekPlacement, sightPlacement } from "./en-route";
 import { blendPlacement, FALLBACK_NOTICE, type FallbackCause, FrameWatch, RETURN_TO_MAP_S, shareBlend, ShareEase } from "./en-route-journey";
 import type { EnRouteLayer } from "./en-route-layer";
 import type { Rect } from "./journey-frame";
@@ -237,12 +237,11 @@ export class EnRouteController {
     const toModel = Math.hypot(east, north, pose.altitudeM - eye.altitudeM);
     const nearestM = camera === "cockpit" ? overGround : Math.min(toModel, overGround);
     const placed = sightPlacement({ ...eased, eye }, { groundM: ground, nearestM, fovDeg: lens.fovDeg });
-    const orbit: OrbitView = { azimuthDeg: placed.bearingDeg, elevationDeg: 90 - placed.pitchDeg, target: [0, 0], height: 0, distance: placed.distanceM };
-    const cam = orbitToMap(orbit, placed.center, lens);
     // The band's padding eases in with the 3D camera, so at none of it the map has its own and the flat shot never steps.
     const own = this.host.padding();
     const padding = band ? blendPadding(own, bandPadding({ width: container.clientWidth, height: container.clientHeight }, band), shareBlend(share)) : own;
-    this.host.place({ center: [cam.lng, cam.lat], zoom: cam.zoom, bearing: cam.bearing, pitch: cam.pitch, elevation: placed.elevationM, padding });
+    // In MapLibre's own metres (mapCamera), the ones sightPlacement moved the centre in and the model is drawn to.
+    this.host.place({ ...mapCamera(placed, lens), padding });
     // From the Cockpit the aircraft is the one the eye sits in: its model is not drawn, so a peek back never fills the view with it.
     this.layer?.setAircraft(camera === "cockpit" ? null : pose, aircraftClass.model, aircraftClass.lengthM);
     // The far ground's haze round the eye, in the theme's horizon colour (a look near level sees the ground to it).
