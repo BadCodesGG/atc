@@ -448,7 +448,7 @@ export function AtcApp({ initialTheme, initialAirport, initialFilters }: { initi
       setGlobeReady(true);
       globe.setFilters(filtersRef.current);
       globe.setSelectionListener(setMapFlight);
-      globe.setCardRect(() => mapCardRef.current?.firstElementChild?.getBoundingClientRect() ?? null);
+      globe.setCardRect(() => mapCardRef.current?.querySelector("section[aria-label^='Selected flight']")?.getBoundingClientRect() ?? null);
       // On a phone the followed flight and its approach are kept between the journey's card and the controls at the foot.
       globe.setFrameBand(() =>
         window.matchMedia(WIDE).matches

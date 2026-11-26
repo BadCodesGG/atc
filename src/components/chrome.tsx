@@ -1,4 +1,4 @@
-import { type KeyboardEvent, type ReactNode, type Ref, useCallback, useId, useState, useSyncExternalStore } from "react";
+import { type KeyboardEvent, type ReactNode, type Ref, useCallback, useEffect, useId, useRef, useState, useSyncExternalStore } from "react";
 import type { FlightState, TrafficCounts } from "@/lib/aircraft-state";
 import { type Airport, AIRPORTS } from "@/lib/airports";
 import { currentFeedStatus, type FeedChannel, type FeedStatus, liveDot, type LiveState, readoutNote, type TrafficReadout, trafficReadout, watchFeed } from "@/lib/feed-health";
@@ -238,6 +238,12 @@ export function FlightCard({ card, procedure = null, here, status, following, on
   const [openFor, setOpenFor] = useState<string | null>(null);
   // The diorama's card and the map's can both be on the page: each names its own details.
   const details = useId();
+  // On a wide screen the card heads a column that scrolls: a flight picked from further down (or on the map) brings it back into view.
+  const sectionRef = useRef<HTMLElement>(null);
+  const cardId = card?.id;
+  useEffect(() => {
+    if (cardId) sectionRef.current?.closest("[data-column-scroll]")?.scrollTo({ top: 0 });
+  }, [cardId]);
   if (!card) return null;
   const open = !compact || openFor === card.id;
   const { route, direction, gate } = card;
@@ -261,6 +267,7 @@ export function FlightCard({ card, procedure = null, here, status, following, on
   const toggle = following ? "bg-selected text-ink shadow-[0_0_0_1px_var(--color-selected-ring)]" : "bg-accent text-on-accent";
   return (
     <section
+      ref={sectionRef}
       aria-label={`Selected flight ${card.callsign}`}
       className="pointer-events-auto relative flex shrink-0 flex-col gap-2 rounded-2xl bg-surface px-4 py-3.5 shadow-[0_8px_24px_rgba(20,20,20,0.08),0_0_0_1px_var(--color-hairline)] max-xl:order-last max-xl:mt-auto cramped:group-has-[[data-open=true]]/side:hidden max-xl:group-has-[[data-open=true]_[data-expanded]]/side:hidden xl:p-4 roomy:gap-3 roomy:p-5"
     >
@@ -701,7 +708,7 @@ export function CameraMenu({ camera, available, onChange, className = "" }: Came
 
 /**
  * The selected flight and the traffic panel. On wide screens, the right-hand column: the flight
- * above the panel, the panel taking what height is left above the map-style switch. On phones and
+ * above the panel, down to the map-style switch. On phones and
  * tablets, the band between the traffic tabs and the legend: the tabs at its top (the view buttons' column
  * at their right), the flight at its foot, and the open panel only ever in the space between, so the two
  * can never overlap; where that space is too short for a useful list, or the movements list is expanded
@@ -711,14 +718,29 @@ export function CameraMenu({ camera, available, onChange, className = "" }: Came
  * only the children take clicks, so the empty part of the band never blocks the map. On a tablet the
  * band is no wider than a phone's, at the left: a card stretched across 1000 px reads as a banner, its
  * facts far apart.
+ *
+ * On a wide screen the card and the panel keep their own heights and the column scrolls as one, so a tall
+ * card never squeezes the panel to a clipped row. The scroller reaches 12 px past the column each way so
+ * the cards' rings and shadows are not cut, and the column's own box, which the scene measures, stays where
+ * it was. Like the column it takes no clicks itself: the wheel over a card scrolls it, and its margins, the
+ * gap between the cards and the space below a short column are the map's. Its scrollbar is hidden (it would take its width from the cards): the fade at its
+ * foot says there is more below. Narrower, the scroller is no box at all (`contents`).
  */
 export function SideColumn({ children, ref }: { children: ReactNode; ref?: Ref<HTMLDivElement> }) {
+  const [scrollRef, moreBelow] = useMoreBelow<HTMLDivElement>();
   return (
     <div
       ref={ref}
       className="side-column group/side pointer-events-none absolute inset-x-4 bottom-[132px] top-[184px] flex flex-col gap-2 max-xl:short:bottom-[76px] max-xl:in-data-on-map:bottom-[172px] max-xl:short:in-data-on-map:bottom-[172px] max-xl:short:in-data-on-map:top-[128px] md:max-w-[28rem] xl:bottom-[96px] xl:left-auto xl:right-8 xl:top-[104px] xl:w-[300px] xl:gap-3"
     >
-      {children}
+      <div
+        ref={scrollRef}
+        data-column-scroll
+        data-more-below={moreBelow || undefined}
+        className={`max-xl:contents xl:-m-3 xl:flex xl:max-h-[calc(100%+1.5rem)] xl:flex-col xl:gap-3 xl:overflow-y-auto xl:overscroll-contain xl:p-3 xl:[scrollbar-width:none] ${FADE_BELOW}`}
+      >
+        {children}
+      </div>
     </div>
   );
 }
@@ -745,9 +767,14 @@ function useMoreBelow<T extends HTMLElement>(): [(el: T | null) => (() => void) 
     check();
     el.addEventListener("scroll", check, { passive: true });
     // The list grows and shrinks as the sheet folds or the window changes, and its rows come and go with the traffic.
+    // Its children too: one can grow inside a list held at its height (a card opening its details) and add no node.
     const resized = new ResizeObserver(check);
-    resized.observe(el);
-    const changed = new MutationObserver(check);
+    const observe = () => [el, ...el.children].forEach((c) => resized.observe(c));
+    observe();
+    const changed = new MutationObserver(() => {
+      observe();
+      check();
+    });
     changed.observe(el, { childList: true, subtree: true });
     return () => {
       el.removeEventListener("scroll", check);
@@ -884,7 +911,8 @@ export function ColumnPanel({ movements, ops, onSelect, filtered = false, readou
   };
   const count = movements ? movements.rows.length + movements.more : null;
   return (
-    <section aria-label="Traffic" data-open={shown} className="pointer-events-none flex min-h-0 flex-col items-start gap-1.5 *:pointer-events-auto xl:items-stretch">
+    // Its own height on a wide screen, where the column scrolls (SideColumn); below, the space between the tabs and the card, its lists scrolling in it.
+    <section aria-label="Traffic" data-open={shown} className="pointer-events-none flex min-h-0 flex-col items-start gap-1.5 *:pointer-events-auto xl:shrink-0 xl:items-stretch">
       <div role="tablist" aria-label="Traffic" onKeyDown={onKeyDown} className={`flex shrink-0 gap-0.5 rounded-full bg-surface p-1 ${RAISED}`}>
         {COLUMN_TABS.map((t) => {
           const on = t.key === tab;
