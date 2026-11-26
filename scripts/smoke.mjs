@@ -60,8 +60,17 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
  */
 const GL_DRIVER_NOTE = /^\[\.WebGL-0x[0-9a-f]+\]GL Driver Message \(OpenGL, Performance, /;
 
-/** A console message that counts against a clean console: an error or a warning, but for the driver's performance notes. */
-const isConsoleProblem = (m) => (m.type() === "error" || m.type() === "warning") && !GL_DRIVER_NOTE.test(m.text());
+/**
+ * A blit the software GPU (ANGLE on SwiftShader) rejects now and then, about once in 80 runs of the share
+ * steps, on origin/main as on the branch: "[.WebGL-0x…] GL_INVALID_OPERATION: glBlitFramebuffer: Blit feedback
+ * loop: the read and draw framebuffers are the same." A probe on the page's own blitFramebuffer (three.js's
+ * MSAA resolve, about 25 a page) found the read and draw bindings the same in none of 70 runs, so it is taken
+ * for Chrome's own blit, not the page's. Only this exact message is let through; any other GL error still counts.
+ */
+const GL_BLIT_FEEDBACK = /^\[\.WebGL-0x[0-9a-f]+\] GL_INVALID_OPERATION: glBlitFramebuffer: Blit feedback loop: the read and draw framebuffers are the same\.$/;
+
+/** A console message that counts against a clean console: an error or a warning, but for the driver's own messages above. */
+const isConsoleProblem = (m) => (m.type() === "error" || m.type() === "warning") && !GL_DRIVER_NOTE.test(m.text()) && !GL_BLIT_FEEDBACK.test(m.text());
 
 async function waitFor(url, ms = 60_000) {
   const end = Date.now() + ms;
