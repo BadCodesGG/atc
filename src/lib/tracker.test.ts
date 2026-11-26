@@ -758,6 +758,7 @@ describe("Tracker shared by every view, over the recorded ATL sequence", () => {
     return frames;
   }
 
+  // These two replay the whole recorded sequence, so they are slow by design and exceed 5 s on CI's slower runner.
   it("gives the Diorama, the World map and the Journey the same pose in one frame, and keeps the motion rules for each", () => {
     const followed = snapshots[0].aircraft.find((a) => !a.onGround)!.id;
     const journey: Reader = (tracker, clock) => {
@@ -790,14 +791,14 @@ describe("Tracker shared by every view, over the recorded ATL sequence", () => {
     );
     expect(moves).toBeGreaterThan(50_000);
     expect(out.slice(0, 20), `${out.length} violations`).toEqual([]);
-  });
+  }, 30_000);
 
   it("smooths an aircraft the same whether one view reads it or three", () => {
     const alone = shared([diorama]);
     const together = shared([worldMap, diorama, (tracker, clock) => tracker.at(clock)]);
     expect(together.length).toBe(alone.length);
     alone.forEach((f, i) => expect(together[i].views[1]).toEqual(f.views[0]));
-  });
+  }, 30_000);
 
   it("draws the Diorama where the airport's own tracker draws it, to within a metre for every 10 km from the field", () => {
     const end = snapshots.at(-1)!.time + PLAYBACK_DELAY;
