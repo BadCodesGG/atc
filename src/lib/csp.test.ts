@@ -20,11 +20,14 @@ describe("the Content-Security-Policy", () => {
     expect(directive(prod, "connect-src")).toEqual(expect.arrayContaining(["https://tiles.openfreemap.org", "https://basemap.nationalmap.gov", "https://api.rainviewer.com", "https://*.rainviewer.com", "https://api.planespotters.net"]));
     expect(directive(prod, "img-src")).toEqual(expect.arrayContaining(["data:", "blob:", "https://*.plnspttrs.net", "https://*.planespotters.net", "https://*.rainviewer.com", "https://basemap.nationalmap.gov"]));
     expect(directive(prod, "worker-src")).toEqual(["'self'", "blob:"]);
-    // The en-route view's terrain tiles, which MapLibre's workers fetch and decode as images.
-    // Only the terrain bucket's path, not every bucket on the S3 host.
-    expect(directive(prod, "connect-src")).toContain("https://s3.amazonaws.com/elevation-tiles-prod/");
-    expect(directive(prod, "img-src")).toContain("https://s3.amazonaws.com/elevation-tiles-prod/");
-    expect(prod).not.toMatch(/https:\/\/s3\.amazonaws\.com[ ;]/);
+    // The en-route view's terrain tiles, which MapLibre's workers fetch (connect-src) and decode from the
+    // fetched bytes, never as an <img>. Only the Terrarium path the style requests, in connect-src only.
+    const terrarium = "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/";
+    expect(directive(prod, "connect-src")).toContain(terrarium);
+    expect(directive(prod, "connect-src").filter((s) => s.includes("amazonaws"))).toEqual([terrarium]);
+    expect(directive(prod, "img-src").some((s) => s.includes("amazonaws"))).toBe(false);
+    expect(prod).not.toMatch(/https:\/\/s3\.amazonaws\.com\/?[ ;]/);
+    expect(prod).not.toMatch(/elevation-tiles-prod\/[ ;]/);
     expect(prod).not.toMatch(/(^|[ ;])\*([ ;]|$)/);
     expect(directive(prod, "object-src")).toEqual(["'none'"]);
   });
