@@ -50,8 +50,8 @@ it, with no second canvas.
   is on, a `hillshade` layer (`hillshadeLayer`, under every other layer) shades the terrain from the same
   Terrarium source, in colours named per theme beside the map's palette (`reliefShadow`, `reliefLight`,
   `reliefStrength`: subtle by day, plainer by night, a touch over the imagery), and the style's `sky` is the
-  Diorama's own air in a close camera (`enRouteSky`: the theme's `eyeLevel` zenith over its horizon, the
-  far terrain hazed into its ground colour), so the view has a horizon in every theme, Satellite included.
+  Diorama's own air in a close camera (`enRouteSky`: the theme's `eyeLevel` horizon graded up to its zenith
+  over most of the sky, `sky-horizon-blend` 0.9), so the view has a horizon in every theme, Satellite included.
   Both come and go with the terrain: Map has neither, and keeps its own sky (`flatSky`, the page colour all
   round) exactly as before; a theme switch carries both in the new style. No new tile host: the CSP is
   unchanged.
@@ -66,13 +66,47 @@ it, with no second canvas.
   (centre and its elevation, distance, bearing, pitch, eye). Chase stands behind and above along the
   track; Cockpit has its eye just ahead of the nose looking along the track; Side stands abeam on the
   left looking across at the aircraft; Top looks straight down, track up (ticket #22).
-- **The map's 78 degree tilt bounds the cameras.** This app sets the map's `maxPitch` option to 78
-  (`MAX_PITCH`, the Diorama's limit too); it is the app's own bound, not a limit of MapLibre's, and with
-  it no camera can look level or up. Side's level look is held at 78: its eye is 12 degrees
-  above wing height. Cockpit's pitch is `90 + attitude` held at 78, so it follows the attitude only in a
-  descent steeper than 12 degrees, and a climb or level flight looks 12 degrees below the horizon. The
-  Cockpit does not draw the aircraft's model at all (its eye is inside it), so no look round ever fills
-  the view with it.
+- **The 3D cameras tilt past level; the flat map keeps 78.** The flat map and the Diorama keep the map's
+  `maxPitch` at 78 (`MAX_PITCH`), the app's own bound, not MapLibre's. While a 3D camera is on, the
+  controller raises it to `EN_ROUTE_MAX_PITCH` (110, `90 + MAX_ATTITUDE_DEG`), and puts 78 back on Map,
+  once the 3D camera has handed the tilt back at or under 78, so `setMaxPitch` never clamps a camera mid-ease (owner's decision,
+  ticket #23). Side looks level at wing height (pitch 90). Cockpit's pitch is `90 + attitude`, the
+  attitude bounded at 20 degrees each way, so a climb looks up and a descent down. Chase (75) and Top (0)
+  keep their framing, and a drag may tilt up to the same limit. The Cockpit does not draw the aircraft's
+  model at all (its eye is inside it), so no look round ever fills the view with it.
+- **The map's centre sits on the line of sight, not at the aircraft** (`sightPlacement`). MapLibre sizes
+  tile detail, terrain skirts and the near plane from the centre's height and distance: with the centre
+  at the aircraft, kilometres above the ground, Top fetched far more tiles than it draws (about 20 to 30
+  fps on this GPU) and short skirts let the page's paper show through between tiles (the green slivers in
+  the Satellite sky). The camera's eye, bearing and pitch stay the same; only the centre moves along the
+  line of sight, as far as the eye is over the ground (at least 2 km, `SIGHT_MIN_M`, for the skirts), or
+  to the ground if the look meets it first (Top), and never so far that the near plane would clip the
+  aircraft (Cockpit: the ground). Farther (where Chase's slanting look meets the ground, or the near
+  plane's farthest for a level look) the frame rate fell to 55 to 85.
+- **The far ground fades into the horizon's haze, drawn by the layer.** MapLibre's own fog cannot do it on
+  a look near level: its fog starts at its fog matrix's near plane, the map centre's height over sea level
+  over the cosine of a pitch near 89 degrees (about 250 km out at 11,000 ft), so it only touched the last
+  pixels before the horizon, and the far ground showed as a band of low-zoom imagery with a hard seam
+  against the near relief and a white line at the horizon (ticket #23's review; a probe with a magenta fog
+  showed it). So the En-route layer draws the haze itself, before the aircraft (`hazeShells`): 24 spheres
+  round the eye, from 8% of the way to the horizon (past Chase's ground) out to full haze at the horizon's
+  distance over a round Earth (`sqrt(2Rh)`), or just inside the map's far plane when that comes first.
+  The shells are first only counted, in the stencil, against the map's depth buffer (never written to
+  it): a pixel's count is how many shells are nearer than the ground there. Then each count's haze is
+  drawn where the stencil holds it, an equal 1/24 share a shell (too small a step to show as an edge), so
+  every pixel is blended once: blended shell by shell, 24 faint layers each rounded to 8 bits tinted and
+  darkened the sky in a line. The stencil is cleared after. Over level the haze thins out within about 3
+  degrees, so the horizon is soft and a ridge over level fades as the sky beside it does. The haze is
+  in full on a look near level (pitch 85 and past: Cockpit, Side) and none at Chase's 75 or steeper
+  (`hazeStrength`), so Chase and Top look as they did; a drag tilting Chase up eases it in. The haze, the map's background past the farthest tile (`mapBackground`)
+  and the sky's horizon are one colour per theme (`enRouteHaze`, the theme's `eyeLevel` horizon), so the
+  ground, the haze and the sky meet without a line. Map has none of it.
+- **The address carries the journey's flat shot in a 3D camera.** The map writes its camera into the
+  address's `#map=` itself (`GlobeMap.addressCamera`, `withMapHash`, at most every 300 ms), not through
+  MapLibre's own hash: that wrote the 3D camera's view past level (pitch 90), which on a reload MapLibre
+  refused for being past the map's 78 and opened the world instead. In a 3D camera the address and the
+  share link carry the journey's flat shot, so a reload opens on the flat map where the flight is; a
+  `#map=` past 78 (an address made before) names no camera (`mapHashCamera`) and is dropped.
 - **A drag peeks, and eases back.** In a 3D camera MapLibre's own drag, rotate, pinch and double-click
   handlers are off and the map's canvas takes pointer drags (mouse and touch alike) itself: a drag adds
   a bearing and tilt offset (`EnRoutePeek`, `peekPlacement`) on top of the rig's eased framing, so the

@@ -25,6 +25,7 @@ import { sharedTrackerChecks } from "./smoke-shared-tracker.mjs";
 import { enRouteChaseChecks } from "./smoke-en-route-chase.mjs";
 import { enRouteCameraChecks } from "./smoke-en-route-cameras.mjs";
 import { enRouteJourneyChecks } from "./smoke-en-route-journey.mjs";
+import { airportPickChecks } from "./smoke-airport-pick.mjs";
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
 const PORT = Number(process.env.SMOKE_PORT ?? 3119);
@@ -1159,6 +1160,9 @@ try {
 
   // The En-route view in the Journey: Chase from Atlanta's Diorama to Charlotte's Approach, the switch on phone and tablet, and the fallback to Map (scripts/smoke-en-route-journey.mjs).
   await enRouteJourneyChecks({ browser, base: BASE, check });
+
+  // The header's airport picker with motion on: the map flies to the airport picked and lands there, never back to the one left (scripts/smoke-airport-pick.mjs).
+  await airportPickChecks({ base: BASE, check });
 } catch (error) {
   check("smoke run completed", false, String(error));
 } finally {

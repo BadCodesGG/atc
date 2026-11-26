@@ -438,7 +438,9 @@ const EN_ROUTE_LABELS: Record<EnRouteCamera, string> = { map: "Map", chase: "Cha
  * flight. Offered from the origin's Diorama (on the flight card there) until the destination's has the
  * flight (`cameras`), on every viewport; the keys 1 to 5 pick them too (enRouteKey), as each button's
  * shortcut says. One row at every width: a column a camera, each as wide as its name, with the type and the
- * padding a size smaller on the narrowest phones and on the wide screens' card, where five would not fit.
+ * padding a size smaller on the narrowest phones and on the wide screens' card, where five would not fit, and
+ * still 6 px clear of each pill's ends. Focused, a button is ringed in the ink colour with a gap of the card's
+ * own colour, so the ring reads round the pressed pill (the ink colour itself in Light) as round the others.
  */
 export function EnRouteSwitch({ camera, cameras, onChange }: { camera: EnRouteCamera; cameras: readonly EnRouteCamera[]; onChange: (camera: EnRouteCamera) => void }) {
   return (
@@ -451,7 +453,7 @@ export function EnRouteSwitch({ camera, cameras, onChange }: { camera: EnRouteCa
           aria-keyshortcuts={enRouteShortcut(key)}
           title={`${EN_ROUTE_LABELS[key]} (${enRouteShortcut(key)})`}
           onClick={() => onChange(key)}
-          className={`min-h-11 whitespace-nowrap rounded-full px-2.5 text-sm font-semibold max-[22.5rem]:px-1 max-[22.5rem]:text-[13px] xl:min-h-8 xl:px-1 xl:text-[13px] ${key === camera ? "bg-accent text-on-accent" : "bg-transparent text-ink-2"}`}
+          className={`min-h-11 whitespace-nowrap rounded-full px-2.5 text-sm font-semibold outline-none focus-visible:relative focus-visible:z-10 focus-visible:shadow-[0_0_0_2px_var(--color-surface),0_0_0_4px_var(--color-ink)] max-[22.5rem]:px-1.5 max-[22.5rem]:text-[13px] xl:min-h-8 xl:px-1.5 xl:text-[13px] ${key === camera ? "bg-accent text-on-accent" : "bg-transparent text-ink-2"}`}
         >
           {EN_ROUTE_LABELS[key]}
         </button>

@@ -14,12 +14,12 @@ import { journeyIconSize, PALETTES } from "@/lib/globe/map-style";
 import { EN_ROUTE_OFFERED, type EnRouteCamera, enRouteKey } from "@/lib/globe/en-route";
 import { arrivalCamera, enRouteOffered, enRouteShare, mapCamera, shareReach } from "@/lib/globe/en-route-journey";
 import { fogReach } from "@/lib/journey";
-import { type Band, landingAirport, overAirport, reveal, revealMask } from "@/lib/globe/handover";
+import { type Band, landingAirport, overAirport, reveal, revealMask, switchesToLanding } from "@/lib/globe/handover";
 import { type Filters, filterOptions, type FilterOptions, filtersActive, Ghosts, GHOST_MS, matches, NO_OPTIONS, rememberSeen, snapshotSubject, type Subject, subjectOfEntry, withFilters } from "@/lib/filters";
 import { toGeo, toLocal } from "@/lib/geo";
 import type { JourneyFix } from "@/lib/journey-follow";
 import { withAirport } from "@/lib/airport-url";
-import { parseMapHash, shareLink } from "@/lib/share-link";
+import { mapHashOf, parseMapHash, shareLink } from "@/lib/share-link";
 import type { FeedSource } from "@/lib/feed-source";
 import { Journey, type JourneyStatus } from "@/lib/journey-follow";
 import { feedSourceFor } from "@/lib/journey-source";
@@ -836,7 +836,8 @@ function Viewer({ airport, theme, onTheme, onAirport, filters, onFilters, focusP
       flight: onMap ? (mapFlight ? (mapFlight.callsign ?? mapFlight.id.toUpperCase()) : null) : (chrome.card?.callsign ?? null),
       camera: chrome.camera,
       filters,
-      map: onMap ? parseMapHash(window.location.hash) : null,
+      // The camera the address carries (from an En-route 3D camera the journey's flat shot), now rather than as last written.
+      map: onMap ? (globeRef.current ? mapHashOf(globeRef.current.addressCamera) : parseMapHash(window.location.hash)) : null,
     }).href;
   // /share
 
@@ -1574,10 +1575,10 @@ function Viewer({ airport, theme, onTheme, onAirport, filters, onFilters, focusP
           const v = journeying ? globe.journeyView : globe.view;
           // Coming down on another built airport: switch to it, so its diorama is ready by the time the
           // camera reaches it. This one is not drawn again.
-          const centre = globe.camera;
+          const centre = journeying ? globe.journeyCamera : globe.camera;
           const below = landingAirport({ lat: centre.lat, lng: centre.lng }, v.distance, AIRPORTS);
-          // A followed flight's map comes down only on the flight's destination.
-          if (below && below.code !== airport.code && (!journeying || below.code === j.destination?.code)) {
+          // Not the airport just left while a pick flies on, and a followed flight's map only on its destination.
+          if (below && switchesToLanding(below, { here: airport.code, flyingTo: globe.flyingTo, journey: journeying ? { destination: j.destination?.code ?? null } : null })) {
             actionsRef.current.onAirport(below.code, undefined, "landing");
             stage.style.opacity = "0";
             shownNow = 0;

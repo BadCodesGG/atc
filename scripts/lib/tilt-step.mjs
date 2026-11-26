@@ -6,8 +6,8 @@
 
 /** The share's ease all the way between flat and 3D, seconds: SHARE_EASE_S of src/lib/globe/en-route-journey.ts. */
 export const SHARE_EASE_S = 1.2;
-/** The map's tilt limit: MAX_PITCH of src/lib/globe/en-route.ts. */
-export const MAX_PITCH = 78;
+/** The map's tilt limit while an En-route 3D camera is on, past level (Side looks level, Cockpit with the climb): EN_ROUTE_MAX_PITCH of src/lib/globe/en-route.ts. */
+export const EN_ROUTE_MAX_PITCH = 110;
 /** The most the tilt may change between drawn frames close together, degrees. */
 export const TILT_STEP_DEG = 12;
 /** Frames this close on the ease's clock are judged as a pair too, not only neighbours: the old check's sampling interval, ms. */
@@ -28,11 +28,11 @@ export const blend = (share) => share * share * (3 - 2 * share);
 /**
  * How far apart in tilt the journey's flat shot and the 3D camera's framing stand, from the frames far enough
  * into 3D to tell (the map's tilt is the flat shot's moved toward the 3D camera's by the blend), at most the
- * map's whole tilt range, which is also the answer when neither frame can tell.
+ * 3D cameras' whole tilt range, which is also the answer when neither frame can tell.
  */
 function tiltApart(a, b) {
   const known = [a, b].filter((f) => f.flatPitch != null && blend(f.share) >= 0.1).map((f) => Math.abs(f.pitch - f.flatPitch) / blend(f.share));
-  return Math.min(MAX_PITCH, known.length ? Math.max(...known) : MAX_PITCH);
+  return Math.min(EN_ROUTE_MAX_PITCH, known.length ? Math.max(...known) : EN_ROUTE_MAX_PITCH);
 }
 
 /**

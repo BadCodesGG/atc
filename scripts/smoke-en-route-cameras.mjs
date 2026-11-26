@@ -7,9 +7,11 @@
  *
  * The followed flight flies due west (track 270) at 11,000 ft, so:
  *   Chase   bearing 270, pitch 75 (15 degrees down at it)
- *   Cockpit bearing 270, pitch 78 (the map's limit), the map's centre ahead of the aircraft, no model drawn
- *   Side    bearing 0 (from the left of a westbound track, looking north at it), pitch 78
+ *   Cockpit bearing 270, pitch 91 (90 plus its climb's 1.1 degrees: 800 fpm at 420 kt), the map's limit past
+ *           level while a 3D camera is on, the camera looking ahead of the aircraft, no model drawn
+ *   Side    bearing 0 (from the left of a westbound track, looking north at it), pitch 90 (level, at wing height)
  *   Top     bearing 270, pitch 0
+ * and the map's tilt limit is the En-route cameras' (110) in each 3D camera, the flat map's 78 back on Map.
  *
  * On its own, against a server already running:
  *
@@ -24,8 +26,8 @@ const TRACK = 270;
 /** What each camera's map camera should be for the westbound flight: bearing, pitch, each to within `tol` degrees. */
 const FRAMING = {
   chase: { bearing: 270, pitch: 75 },
-  cockpit: { bearing: 270, pitch: 78 },
-  side: { bearing: 0, pitch: 78 },
+  cockpit: { bearing: 270, pitch: 91.1 },
+  side: { bearing: 0, pitch: 90 },
   top: { bearing: 270, pitch: 0 },
 };
 const LABEL = { map: "Map", chase: "Chase", cockpit: "Cockpit", side: "Side", top: "Top" };
@@ -47,9 +49,12 @@ const CAMERA = `(() => {
     ...s,
     credit: undefined,
     bearing: ((m.getBearing() % 360) + 360) % 360,
+    maxPitch: m.getMaxPitch(),
     centre: [c.lng, c.lat],
     aircraft: mark ? mark.geometry.coordinates : null,
     modelPosed: layer ? !!layer.implementation.pose : null,
+    haze: layer ? layer.implementation.hazeDrawn : null,
+    hashPitch: Number((/(?:^#|&)map=([^&]*)/.exec(location.hash)?.[1] ?? "").split("/")[4] ?? 0),
   };
 })()`;
 
@@ -87,7 +92,7 @@ export async function enRouteCameraChecks({ browser, base, check }) {
     if (camera === "map") {
       const flat = await waitForTruthy(page, `(() => { const s = ${CAMERA}; return s && s.terrain === null && s.layer === null; })()`, 10_000).then(() => true, () => false);
       const s = await page.evaluate(CAMERA);
-      check(`cameras (${how}): Map is back, flat, the terrain and the model's layer gone`, on && flat && s.pitch <= 60, JSON.stringify(s));
+      check(`cameras (${how}): Map is back, flat, the terrain and the model's layer gone, the tilt limit 78 again`, on && flat && s.pitch <= 60 && s.maxPitch === 78, JSON.stringify(s));
       return s;
     }
     // The rig eases in over a second or two (EASE_S 0.7 s, at most 0.25 s a frame): software WebGL draws a
@@ -102,7 +107,7 @@ export async function enRouteCameraChecks({ browser, base, check }) {
     await sleep(1_000);
     s = await page.evaluate(CAMERA);
     const { bearingOff, pitchOff } = off(s);
-    check(`cameras (${how}): ${LABEL[camera]} is on, its button pressed, with terrain`, on && !!s.terrain && s.layer === "custom", JSON.stringify(s));
+    check(`cameras (${how}): ${LABEL[camera]} is on, its button pressed, with terrain, the tilt limit 110`, on && !!s.terrain && s.layer === "custom" && s.maxPitch === 110, JSON.stringify(s));
     check(`cameras (${how}): ${LABEL[camera]} frames the track: bearing ${want.bearing}, pitch ${want.pitch}`, bearingOff < 3 && pitchOff < 1.5, `bearing ${s.bearing.toFixed(1)}, pitch ${s.pitch.toFixed(1)}`);
     if (camera === "cockpit") {
       // Westbound: the point the cockpit looks at is west of the aircraft, and the model it sits in is not drawn.
@@ -111,6 +116,9 @@ export async function enRouteCameraChecks({ browser, base, check }) {
     } else {
       check(`cameras (${how}): ${LABEL[camera]} draws the aircraft's model`, s.modelPosed === true, `posed ${s.modelPosed}`);
     }
+    if (camera === "cockpit" || camera === "side") check(`cameras (${how}): ${LABEL[camera]} hazes the far ground to the horizon`, s.haze > 0, `${s.haze} shells`);
+    // Not the 3D view past level, which the map refuses on a reload and opens on the world instead.
+    check(`cameras (${how}): the address carries the journey's flat shot in ${LABEL[camera]} (pitch at most 78), which a reload opens on`, Number.isFinite(s.hashPitch) && s.hashPitch <= 78, `pitch ${s.hashPitch}`);
     return s;
   };
 
@@ -148,31 +156,49 @@ export async function enRouteCameraChecks({ browser, base, check }) {
   })();
   await sleep(500);
   const held = await page.evaluate(CAMERA);
-  check("cameras: Side holds across two feed reads, still framing the track", twoReads && held.camera === "side" && held.pressed === "Side" && Math.abs(turn(0, held.bearing)) < 3 && Math.abs(held.pitch - 78) < 1.5, `${reads - readsFrom} reads, ${JSON.stringify({ camera: held.camera, pressed: held.pressed, bearing: held.bearing, pitch: held.pitch })}`);
+  check("cameras: Side holds across two feed reads, still framing the track", twoReads && held.camera === "side" && held.pressed === "Side" && Math.abs(turn(0, held.bearing)) < 3 && Math.abs(held.pitch - 90) < 1.5, `${reads - readsFrom} reads, ${JSON.stringify({ camera: held.camera, pressed: held.pressed, bearing: held.bearing, pitch: held.pitch })}`);
 
   // A drag peeks round the aircraft and eases back on release; it neither ends the journey nor changes the camera.
   const box = await page.evaluate(`(() => { const r = ${GLOBE}.map.getContainer().getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
   const start = { x: box.x - 250, y: box.y + 120 };
-  await page.mouse.move(start.x, start.y);
-  await page.mouse.down();
-  // Right and down: the bearing turns and the camera tilts down toward the aircraft.
-  for (let i = 1; i <= 10; i++) await page.mouse.move(start.x + i * 20, start.y + i * 6);
-  await sleep(600);
-  const dragged = await page.evaluate(CAMERA);
-  const turned = Math.abs(turn(0, dragged.bearing));
-  check("cameras: a mouse drag in Side turns and tilts the camera round the aircraft while held", turned > 40 && dragged.pitch < 70 && dragged.camera === "side", `bearing ${dragged.bearing.toFixed(1)} (${turned.toFixed(1)} off the framing), pitch ${dragged.pitch.toFixed(1)}`);
-  await page.mouse.up();
-  /** Waits up to 8 s for Side's framing again: the ease back runs on the map's frames. */
-  const easedBack = async () => {
+  /** The camera while a drag is held, once `turned` holds or after 6 s: software GL draws Side about once a second, so the drag's turn shows on the next frame, not at once. */
+  const heldTurn = async (turned) => {
+    await sleep(600);
     let s = await page.evaluate(CAMERA);
-    for (let i = 0; i < 16 && (Math.abs(turn(0, s.bearing)) >= 2 || Math.abs(s.pitch - 78) >= 1.5); i++) {
+    for (let i = 0; i < 11 && !turned(s); i++) {
       await sleep(500);
       s = await page.evaluate(CAMERA);
     }
     return s;
   };
+  await page.mouse.move(start.x, start.y);
+  await page.mouse.down();
+  // Right and down: the bearing turns and the camera tilts down toward the aircraft.
+  for (let i = 1; i <= 10; i++) await page.mouse.move(start.x + i * 20, start.y + i * 6);
+  const dragged = await heldTurn((s) => Math.abs(turn(0, s.bearing)) > 40 && s.pitch < 82);
+  const turned = Math.abs(turn(0, dragged.bearing));
+  check("cameras: a mouse drag in Side turns and tilts the camera round the aircraft while held", turned > 40 && dragged.pitch < 82 && dragged.camera === "side", `bearing ${dragged.bearing.toFixed(1)} (${turned.toFixed(1)} off the framing), pitch ${dragged.pitch.toFixed(1)}`);
+  await page.mouse.up();
+  /**
+   * Waits for Side's framing again, or for the camera to stop moving (unchanged for 6 s: the frames there come a second or two apart), at most 40 s: the
+   * ease back runs on the map's frames, and the smokes' software GL draws Side with its haze about one frame a
+   * second (1.1 s a frame, 0.6 s without the haze), so the ease takes about 14 s there (2.6 s on hardware GL).
+   */
+  const easedBack = async () => {
+    const framedAgain = (s) => Math.abs(turn(0, s.bearing)) < 2 && Math.abs(s.pitch - 90) < 1.5;
+    const until = Date.now() + 40_000;
+    let s = await page.evaluate(CAMERA);
+    let moved = Date.now();
+    while (!framedAgain(s) && Date.now() - moved < 6_000 && Date.now() < until) {
+      await sleep(500);
+      const next = await page.evaluate(CAMERA);
+      if (Math.abs(turn(s.bearing, next.bearing)) > 0.01 || Math.abs(next.pitch - s.pitch) > 0.01) moved = Date.now();
+      s = next;
+    }
+    return s;
+  };
   const eased = await easedBack();
-  check("cameras: let go, the camera eases back to Side's framing", Math.abs(turn(0, eased.bearing)) < 2 && Math.abs(eased.pitch - 78) < 1.5, `bearing ${eased.bearing.toFixed(1)}, pitch ${eased.pitch.toFixed(1)}`);
+  check("cameras: let go, the camera eases back to Side's framing", Math.abs(turn(0, eased.bearing)) < 2 && Math.abs(eased.pitch - 90) < 1.5, `bearing ${eased.bearing.toFixed(1)}, pitch ${eased.pitch.toFixed(1)}`);
   check("cameras: the drag kept the journey and the camera", eased.camera === "side" && eased.pressed === "Side" && (await page.locator("section[aria-label^='Followed flight']").count()) > 0, JSON.stringify({ camera: eased.camera, pressed: eased.pressed }));
 
   // A touch drag takes the same path: touch pointer events on the map's canvas.
@@ -182,8 +208,7 @@ export async function enRouteCameraChecks({ browser, base, check }) {
     at("pointerdown", ${start.x}, ${start.y});
     for (let i = 1; i <= 10; i++) { at("pointermove", ${start.x} - i * 20, ${start.y}); await new Promise((r) => setTimeout(r, 16)); }
   })()`);
-  await sleep(600);
-  const touched = await page.evaluate(CAMERA);
+  const touched = await heldTurn((s) => turn(0, s.bearing) > 40);
   const touchTurn = turn(0, touched.bearing);
   check("cameras: a touch drag in Side turns the camera too (left drag, bearing up)", touchTurn > 40, `bearing ${touched.bearing.toFixed(1)}`);
   await page.evaluate(`(() => { ${GLOBE}.map.getCanvasContainer().dispatchEvent(new PointerEvent("pointerup", { pointerId: 7, pointerType: "touch", isPrimary: true, bubbles: true })); })()`);

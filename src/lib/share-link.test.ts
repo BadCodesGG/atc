@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { type Filters, NO_FILTERS } from "./filters";
-import { formatMapHash, parseMapHash, readShareView, shareLink, type ShareView } from "./share-link";
+import { formatMapHash, mapHashOf, parseMapHash, readShareView, shareLink, type ShareView, withMapHash } from "./share-link";
 
 const BASE = "http://atc.test/";
 
@@ -34,6 +34,35 @@ describe("formatMapHash", () => {
   it("round trips through parseMapHash", () => {
     const h = { zoom: 5.5, lat: -12.25, lng: 130.125, bearing: -20, pitch: 30 };
     expect(parseMapHash(formatMapHash(h))).toEqual(h);
+  });
+});
+
+describe("mapHashOf", () => {
+  it("rounds a map camera as MapLibre's own hash does, and reads back through parseMapHash", () => {
+    const h = mapHashOf({ zoom: 9.123456, lat: 33.6123456, lng: -84.4123456, bearing: -90.4, pitch: 52.6 });
+    expect(h).toEqual({ zoom: 9.12, lat: 33.61235, lng: -84.41235, bearing: -90, pitch: 53 });
+    expect(parseMapHash(formatMapHash(h))).toEqual(h);
+  });
+});
+
+describe("withMapHash", () => {
+  const cam = { zoom: 9.96, lat: 33.70105, lng: -85.44859, bearing: -87, pitch: 39 };
+
+  it("puts the map's camera into an address hash, rounded as mapHashOf, in the form parseMapHash reads", () => {
+    expect(withMapHash("", cam)).toBe("#map=9.96/33.70105/-85.44859/-87/39");
+    expect(withMapHash("", { ...cam, zoom: 9.9612, lat: 33.701049 })).toBe("#map=9.96/33.70105/-85.44859/-87/39");
+    expect(parseMapHash(withMapHash("", cam))).toEqual(cam);
+  });
+
+  it("replaces the camera it held and keeps any other part of the hash", () => {
+    expect(withMapHash("#map=15.6/33.7/-85.45/-90/90", cam)).toBe("#map=9.96/33.70105/-85.44859/-87/39");
+    expect(withMapHash("#x=1&map=3/1/2&y=2", cam)).toBe("#x=1&map=9.96/33.70105/-85.44859/-87/39&y=2");
+    expect(withMapHash("#x=1", cam)).toBe("#x=1&map=9.96/33.70105/-85.44859/-87/39");
+  });
+
+  it("leaves the hash as it was for a camera that is not all finite numbers (a hidden tab once wrote NaN)", () => {
+    expect(withMapHash("#x=1&map=3/1/2", { ...cam, lat: Number.NaN })).toBe("#x=1&map=3/1/2");
+    expect(withMapHash("", { ...cam, zoom: Number.POSITIVE_INFINITY })).toBe("");
   });
 });
 

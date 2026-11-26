@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { FEET, KNOTS, toLocal } from "../geo";
-import { aircraftMatrix, type AircraftPose, bandPadding, blendPadding, CHASE, COCKPIT, EASE_S, EN_ROUTE_OFFERED, enRouteKey, EnRoutePeek, enRouteShortcut, enRoutePose, enRouteShot, EnRouteRig, fitDistance, is3D, MAX_PITCH, NO_PEEK, PEEK_DEG_PER_PX, peekPlacement, SIDE, TOP } from "./en-route";
+import { MAX_PITCH } from "./camera";
+import { aircraftMatrix, type AircraftPose, bandPadding, blendPadding, CHASE, COCKPIT, EASE_S, EN_ROUTE_MAX_PITCH, EN_ROUTE_OFFERED, enRouteKey, EnRoutePeek, enRouteShortcut, enRoutePose, enRouteShot, EnRouteRig, fitDistance, is3D, mapNearPlane, NO_PEEK, PEEK_DEG_PER_PX, peekPlacement, SIDE, SIGHT_MIN_M, sightPlacement, TOP } from "./en-route";
 
 const cruise: AircraftPose = { latitude: 35, longitude: -100, altitudeM: 10_000, trackDeg: 90, pitchDeg: 0 };
 
@@ -77,19 +78,26 @@ describe("enRouteShot: Cockpit", () => {
     }
   });
 
-  it("looks forward along the track: the point it looks at is ahead of the eye and below it", () => {
-    const shot = enRouteShot(cruise, "cockpit", 40);
+  it("looks forward along the track: the point it looks at is ahead of the eye, and below it in a descent", () => {
+    const shot = enRouteShot({ ...cruise, pitchDeg: -3 }, "cockpit", 40);
     const [east, north] = toLocal(shot.eye, shot.center.latitude, shot.center.longitude);
     expect(east).toBeGreaterThan(0);
     expect(Math.abs(north)).toBeLessThan(0.01);
     expect(shot.elevationM).toBeLessThan(shot.eye.altitudeM);
   });
 
-  it("is pitched by the attitude, held at the map's limit: a climb or level look at 78, a steep descent below it", () => {
-    expect(enRouteShot(cruise, "cockpit", 40).pitchDeg).toBe(MAX_PITCH);
-    expect(enRouteShot({ ...cruise, pitchDeg: 5 }, "cockpit", 40).pitchDeg).toBe(MAX_PITCH);
+  it("is pitched with the attitude: level flight looks at the horizon, a climb above it, a descent below it", () => {
+    expect(enRouteShot(cruise, "cockpit", 40).pitchDeg).toBe(90);
+    expect(enRouteShot({ ...cruise, pitchDeg: 5 }, "cockpit", 40).pitchDeg).toBeCloseTo(95, 9);
     expect(enRouteShot({ ...cruise, pitchDeg: -15 }, "cockpit", 40).pitchDeg).toBeCloseTo(75, 9);
-    expect(enRouteShot({ ...cruise, pitchDeg: -18 }, "cockpit", 40).pitchDeg).toBeLessThan(enRouteShot({ ...cruise, pitchDeg: -15 }, "cockpit", 40).pitchDeg);
+    // The steepest attitude drawn (enRoutePose holds it to 20 degrees) is within the En-route limit, so it is never cut short.
+    expect(enRouteShot({ ...cruise, pitchDeg: 20 }, "cockpit", 40).pitchDeg).toBeCloseTo(110, 9);
+    expect(enRouteShot({ ...cruise, pitchDeg: 20 }, "cockpit", 40).pitchDeg).toBeLessThanOrEqual(EN_ROUTE_MAX_PITCH);
+  });
+
+  it("looking level, the point it looks at is at the eye's own height", () => {
+    const shot = enRouteShot(cruise, "cockpit", 40);
+    expect(shot.elevationM).toBeCloseTo(shot.eye.altitudeM, 6);
   });
 });
 
@@ -107,12 +115,12 @@ describe("enRouteShot: Side", () => {
     }
   });
 
-  it("is at wing height as near as the map's tilt allows: 12 degrees above it", () => {
+  it("stands at wing height, looking level at the aircraft", () => {
     const shot = enRouteShot(cruise, "side", 40);
-    expect(shot.pitchDeg).toBe(MAX_PITCH);
+    expect(shot.pitchDeg).toBe(90);
     const eye = eyeFrom(cruise, shot);
-    const down = (Math.atan2(eye.up, Math.hypot(eye.east, eye.north)) * 180) / Math.PI;
-    expect(down).toBeCloseTo(90 - MAX_PITCH, 1);
+    expect(Math.abs(eye.up)).toBeLessThan(1e-6);
+    expect(Math.hypot(eye.east, eye.north)).toBeCloseTo(shot.distanceM, 0);
     expect(shot.distanceM).toBe(Math.max(SIDE.minDistanceM, SIDE.lengths * 40));
   });
 });
@@ -140,7 +148,7 @@ describe("enRouteShot: a drag's peek", () => {
       expect(peeked.center).toEqual(framed.center);
       expect(peeked.distanceM).toBe(framed.distanceM);
       expect(peeked.bearingDeg).toBeCloseTo((framed.bearingDeg + 40) % 360, 6);
-      expect(peeked.pitchDeg).toBeCloseTo(Math.min(MAX_PITCH, framed.pitchDeg + 10), 6);
+      expect(peeked.pitchDeg).toBeCloseTo(Math.min(EN_ROUTE_MAX_PITCH, framed.pitchDeg + 10), 6);
       const eye = eyeFrom(cruise, peeked);
       expect(Math.hypot(eye.east, eye.north, eye.up)).toBeCloseTo(framed.distanceM, 0);
     }
@@ -153,16 +161,97 @@ describe("enRouteShot: a drag's peek", () => {
     expect(Math.hypot(...toLocal(framed.eye, peeked.eye.latitude, peeked.eye.longitude))).toBeLessThan(0.01);
     expect(peeked.eye.altitudeM).toBeCloseTo(framed.eye.altitudeM, 6);
     expect(peeked.bearingDeg).toBeCloseTo(30, 6);
-    expect(peeked.pitchDeg).toBeCloseTo(MAX_PITCH - 20, 6);
+    expect(peeked.pitchDeg).toBeCloseTo(70, 6);
   });
 
-  it("never tilts past the map's limit nor past straight down", () => {
-    expect(enRouteShot(cruise, "side", 40, { bearingDeg: 0, pitchDeg: 30 }).pitchDeg).toBe(MAX_PITCH);
+  it("tilts up past level to the En-route limit, never past it nor past straight down", () => {
+    expect(enRouteShot(cruise, "side", 40, { bearingDeg: 0, pitchDeg: 10 }).pitchDeg).toBeCloseTo(100, 9);
+    expect(enRouteShot(cruise, "side", 40, { bearingDeg: 0, pitchDeg: 30 }).pitchDeg).toBe(EN_ROUTE_MAX_PITCH);
     expect(enRouteShot(cruise, "top", 40, { bearingDeg: 0, pitchDeg: -30 }).pitchDeg).toBe(0);
   });
 
   it("with no peek is the framing", () => {
     expect(enRouteShot(cruise, "side", 40, NO_PEEK)).toEqual(enRouteShot(cruise, "side", 40));
+  });
+});
+
+describe("the tilt limits", () => {
+  it("are the map's 78 degrees on Map and in the Diorama, and past level for the En-route cameras, within MapLibre's 180", () => {
+    expect(MAX_PITCH).toBe(78);
+    expect(EN_ROUTE_MAX_PITCH).toBeGreaterThan(90);
+    expect(EN_ROUTE_MAX_PITCH).toBeLessThanOrEqual(180);
+  });
+});
+
+describe("sightPlacement: the map's centre moved along the camera's line of sight", () => {
+  const fovDeg = 22;
+  /** The eye and the look of a placement: what the picture is made from. */
+  type Sight = { eye: { latitude: number; longitude: number; altitudeM: number }; bearingDeg: number; pitchDeg: number };
+  const expectSameSight = (a: Sight, b: Sight) => {
+    expect(Math.hypot(...toLocal(a.eye, b.eye.latitude, b.eye.longitude))).toBeLessThan(0.05);
+    expect(b.eye.altitudeM).toBeCloseTo(a.eye.altitudeM, 3);
+    expect(b.bearingDeg).toBeCloseTo(a.bearingDeg, 9);
+    expect(b.pitchDeg).toBeCloseTo(a.pitchDeg, 9);
+  };
+
+  it("keeps the eye and the look, so the picture is the same", () => {
+    for (const camera of ["chase", "cockpit", "side", "top"] as const) {
+      const shot = enRouteShot(cruise, camera, 40);
+      expectSameSight(shot, sightPlacement(shot, { groundM: 300, nearestM: 200, fovDeg }));
+    }
+  });
+
+  it("puts Top's centre on the ground straight under the aircraft, so the map's zoom is the ground's", () => {
+    const shot = enRouteShot(cruise, "top", 40);
+    const moved = sightPlacement(shot, { groundM: 300, nearestM: shot.distanceM, fovDeg });
+    expect(moved.elevationM).toBeCloseTo(300, 6);
+    expect(moved.distanceM).toBeCloseTo(shot.distanceM + 10_000 - 300, 6);
+    expect(Math.hypot(...toLocal(shot.center, moved.center.latitude, moved.center.longitude))).toBeLessThan(0.01);
+  });
+
+  it("goes no farther than keeps MapLibre's near plane at half the distance to the nearest thing drawn", () => {
+    const high: AircraftPose = { ...cruise, altitudeM: 11_300 };
+    for (const camera of ["chase", "side", "top"] as const) {
+      const shot = enRouteShot(high, camera, 40);
+      const moved = sightPlacement(shot, { groundM: 0, nearestM: shot.distanceM, fovDeg });
+      expect(mapNearPlane(moved.distanceM, fovDeg), camera).toBeLessThanOrEqual(shot.distanceM / 2 + 1e-6);
+      expectSameSight(shot, moved);
+    }
+  });
+
+  it("moves a look at or above the horizon out along it too, never down to a ground it does not meet", () => {
+    const side = enRouteShot(cruise, "side", 40);
+    const moved = sightPlacement(side, { groundM: 0, nearestM: side.distanceM, fovDeg });
+    expect(moved.distanceM).toBeGreaterThan(side.distanceM);
+    expect(moved.elevationM).toBeCloseTo(side.elevationM, 6);
+    const up = enRouteShot({ ...cruise, pitchDeg: 8 }, "cockpit", 40);
+    expect(sightPlacement(up, { groundM: 0, nearestM: 10_000, fovDeg }).elevationM).toBeGreaterThan(up.eye.altitudeM);
+  });
+
+  it("takes a slanting or level look out only as far as the eye's height over the ground, not to where it meets the ground", () => {
+    // Chase at cruise looks 15 degrees down: the ground is 37 km along the look, the eye 9.7 km over it.
+    const chase = enRouteShot(cruise, "chase", 40);
+    const moved = sightPlacement(chase, { groundM: 300, nearestM: 1_000, fovDeg });
+    expect(moved.distanceM).toBeCloseTo(chase.eye.altitudeM - 300, 6);
+    expectSameSight(chase, moved);
+    // Side looks level, so never meets the ground: the same, not the near plane's farthest.
+    const side = enRouteShot(cruise, "side", 40);
+    expect(sightPlacement(side, { groundM: 300, nearestM: 1_000_000, fovDeg }).distanceM).toBeCloseTo(side.eye.altitudeM - 300, 6);
+  });
+
+  it("takes the centre out at least SIGHT_MIN_M near the ground, so the terrain's skirts close the gaps between tiles", () => {
+    const low: AircraftPose = { ...cruise, altitudeM: 800 };
+    const side = enRouteShot(low, "side", 40);
+    expect(sightPlacement(side, { groundM: 0, nearestM: 1_000, fovDeg }).distanceM).toBeCloseTo(SIGHT_MIN_M, 6);
+    // Unless the ground comes first: a look down meets it nearer.
+    const top = enRouteShot(low, "top", 40);
+    expect(sightPlacement(top, { groundM: 0, nearestM: 1_000, fovDeg }).elevationM).toBeCloseTo(0, 6);
+  });
+
+  it("never brings the centre nearer than the camera's own, nor moves it with the eye at or under the ground", () => {
+    const shot = enRouteShot(cruise, "chase", 40);
+    expect(sightPlacement(shot, { groundM: 0, nearestM: 1, fovDeg }).distanceM).toBe(shot.distanceM);
+    expect(sightPlacement(shot, { groundM: 20_000, nearestM: 500, fovDeg })).toEqual(shot);
   });
 });
 
@@ -374,10 +463,14 @@ describe("EnRouteRig", () => {
     expect(rig.step(shot, 0)).toEqual({ center, elevationM, distanceM, bearingDeg, pitchDeg });
   });
 
-  it("never tilts the camera past the map's limit, wherever it eases from", () => {
+  it("never tilts the camera past the En-route limit, wherever it eases from", () => {
     const rig = new EnRouteRig();
-    rig.start({ ...shot, pitchDeg: 85 }, shot, 0);
-    expect(rig.step(shot, 16).pitchDeg).toBeLessThanOrEqual(MAX_PITCH);
+    rig.start({ ...shot, pitchDeg: 150 }, shot, 0);
+    expect(rig.step(shot, 16).pitchDeg).toBeLessThanOrEqual(EN_ROUTE_MAX_PITCH);
+    // A level look eases in untouched.
+    const side = enRouteShot(cruise, "side", 40);
+    rig.start(shot, side, 0);
+    expect(rig.step(side, 100_000).pitchDeg).toBeGreaterThan(MAX_PITCH);
   });
 
   it("eases from where the camera was toward the shot, never overshooting, and arrives", () => {

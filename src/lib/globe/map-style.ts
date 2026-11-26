@@ -318,12 +318,71 @@ export function flatSky(key: ThemeKey): SkySpecification {
 
 /**
  * The En-route view's sky, while a 3D camera is on: the Diorama's own air in a close camera (the theme's
- * eyeLevel), its zenith over its horizon, and the far terrain hazed into the ground's colour there, so the
- * view has a horizon and the sky reads apart from the ground.
+ * eyeLevel), graded from its horizon up to its zenith over most of the sky, so the view has a horizon and the
+ * sky reads apart from the ground. MapLibre's own fog is in the horizon's haze too (enRouteHaze), but it only
+ * reaches the last of the ground on a look near level: its fog starts at the map's centre's height over sea
+ * level over the cosine of a pitch near 89 degrees, about 250 km out at 11,000 ft. The far ground's haze is the
+ * En-route layer's (hazeShells).
  */
 export function enRouteSky(key: ThemeKey): SkySpecification {
   const air = THEMES[key].eyeLevel;
-  return { "sky-color": air.zenith, "horizon-color": air.horizon, "fog-color": air.ground ?? air.horizon, "sky-horizon-blend": 0.2, "horizon-fog-blend": 0.3, "fog-ground-blend": 0.25, "atmosphere-blend": 0 };
+  return { "sky-color": air.zenith, "horizon-color": air.horizon, "fog-color": enRouteHaze(key), "sky-horizon-blend": 0.9, "horizon-fog-blend": 0.3, "fog-ground-blend": 0.25, "atmosphere-blend": 0 };
+}
+
+/** The haze the far ground fades into in a 3D camera: the horizon's own colour, so the ground, the haze over it and the sky meet without a line. */
+export const enRouteHaze = (key: ThemeKey): string => THEMES[key].eyeLevel.horizon;
+
+/** How many shells the far ground's haze is drawn in: each adds an equal share of it, small enough that no shell's edge on the ground shows. */
+export const HAZE_SHELLS = 24;
+/** Where the haze starts, as a share of the way to where it is full: past the ground near the aircraft (Chase's 13 km at 11,000 ft). */
+const HAZE_START = 0.08;
+/** How the haze thickens with distance past its start: as a power of the share of the way (under 1, quickly at first, as air does). */
+const HAZE_RISE = 0.7;
+const EARTH_RADIUS_M = 6_371_000;
+
+/**
+ * How much of the haze a 3D camera draws, by its pitch: in full on a look near level (85 degrees and past),
+ * where the far ground is in view, none at Chase's 75 or steeper, so Chase and Top look as they did; between,
+ * as a drag tilts Chase up, it eases in.
+ */
+export function hazeStrength(pitchDeg: number): number {
+  const t = Math.min(1, Math.max(0, (pitchDeg - 75) / 10));
+  return t * t * (3 - 2 * t);
+}
+
+export interface HazeShell {
+  /** From the eye, metres. */
+  distanceM: number;
+  /** The haze's opacity over ground beyond it, with every shell nearer: an equal share more than the shell before. */
+  opacity: number;
+}
+
+/**
+ * The far ground's haze in a 3D camera, as spheres round the eye that the ground nearer than each hides
+ * (the En-route layer draws them against the map's depth): for an eye `aboveM` over the ground, from a little
+ * way out to full haze at the horizon (the distance to it over a round Earth, which the flat map does not
+ * have), or just inside the map's far plane (`farM`) where the ground drawn ends first. The haze thickens
+ * in equal steps, the last shell opaque.
+ */
+export function hazeShells(aboveM: number, farM = Infinity): HazeShell[] {
+  if (!(aboveM > 0)) return [];
+  const end = Math.min(Math.sqrt(2 * EARTH_RADIUS_M * aboveM + aboveM * aboveM), farM * 0.98);
+  const start = HAZE_START * end;
+  return Array.from({ length: HAZE_SHELLS }, (_, i) => {
+    const share = (i + 1) / HAZE_SHELLS;
+    return { distanceM: start + (end - start) * share ** (1 / HAZE_RISE), opacity: share };
+  });
+}
+
+/**
+ * The map's background colour: flat, the land's (under the imagery, the page's); in a 3D camera the sky's
+ * haze (enRouteHaze), since a look near level sees past the farthest tile MapLibre draws, and the
+ * ground there should read as the haze at the horizon, not as bare land.
+ */
+export function mapBackground(key: ThemeKey, terrain = false): string {
+  if (terrain) return enRouteSky(key)["fog-color"] as string;
+  const theme = THEMES[key];
+  return key === "satellite" ? theme.background : theme.surfaces.ground;
 }
 
 /** The En-route view's hillshade layer id, and the layer it goes under (the first drawn over the land), in the style and when added to the map. */
@@ -369,7 +428,7 @@ export function mapStyle(key: ThemeKey, { globe = false, radar = null, terrain =
   }
   const arc = arcOpacities(key);
   const layers: LayerSpecification[] = [
-    { id: "background", type: "background", paint: { "background-color": satellite ? theme.background : theme.surfaces.ground } },
+    { id: "background", type: "background", paint: { "background-color": mapBackground(key, terrain) } },
     ...(satellite ? [{ id: "imagery", type: "raster", source: "imagery", paint: { "raster-saturation": -0.1 } } satisfies LayerSpecification] : []),
     ...(terrain ? [hillshadeLayer(key)] : []),
     // The shore is the fill's own outline, not a line layer over the same polygons: a lake's outline is one ring of thousands of points (Lake Lanier is 6,500 at zoom 10), and a

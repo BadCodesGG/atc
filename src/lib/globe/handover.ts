@@ -109,6 +109,20 @@ export function landingAirport(center: { lat: number; lng: number }, cameraDista
 }
 
 /**
+ * Whether the page switches to `below`, the airport the map is coming down on (landingAirport): never to
+ * the one on show; while the map flies to an airport picked (`flyingTo`), only to that one, since the
+ * camera starts low over the airport just left; and a followed flight's map only to its destination.
+ */
+export function switchesToLanding(
+  below: Airport | null,
+  { here, flyingTo, journey }: { here: Airport["code"]; flyingTo: Airport["code"] | null; journey: { destination: Airport["code"] | null } | null },
+): boolean {
+  if (!below || below.code === here) return false;
+  if (flyingTo !== null && below.code !== flyingTo) return false;
+  return !journey || below.code === journey.destination;
+}
+
+/**
  * Whether the world view may be drawn as a globe on this renderer (the WebGL unmasked renderer string).
  * Software renderers drew MapLibre's globe without any of its lines, so they keep the flat map; so does
  * a browser that will not name its renderer.

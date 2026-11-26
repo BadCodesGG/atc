@@ -16,11 +16,11 @@ The app keeps no database. The airport layouts and procedures are committed JSON
 | | |
 |---|---|
 | **Fly in** | Start on the world map, where each airport shows its live aircraft count, and scroll into one. The map tilts and the airport's ground plan rises out of it. |
-| **Pick an airport** | Any of the 67 in the picker, or by URL (`?airport=atl`). |
+| **Pick an airport** | Any of the 67 in the picker, or by URL (`?airport=atl`). The map flies there and lands on it. |
 | **Select a flight** | Click an aircraft for its card: callsign, type, route, altitude, speed, state (parked, pushing back, taxiing, holding, climbing, on approach) and, where Planespotters has one, a photo. |
 | **See where it is going** | The predicted taxi route along the airport's taxiway graph, and the FAA's published approach or departure drawn for the runway in use. |
 | **Follow a journey** | The camera follows a flight from its origin diorama over the map and into the destination's diorama. |
-| **Ride along in 3D** | On the Journey card, or with the keys `1` to `5`: Map (the flat world map, where following starts), Chase (behind and above the aircraft), Cockpit (from the nose, looking ahead), Side (abeam on the left) and Top (straight down, track up), over 3D terrain with the aircraft's own model. Drag to peek round the aircraft; it eases back on release. Near each airport the 3D camera eases into the usual hand-over. If WebGL fails or the frame rate stays low, the view falls back to Map with a short notice. |
+| **Ride along in 3D** | On the Journey card, or with the keys `1` to `5`: Map (the flat world map, where following starts), Chase (behind and above the aircraft), Cockpit (from the nose, looking ahead), Side (abeam on the left) and Top (straight down, track up), over 3D terrain with the aircraft's own model. Cockpit and Side look level along and across the track (Cockpit pitches with the climb), the far ground fading into the haze at the horizon. Drag to peek round the aircraft; it eases back on release. Near each airport the 3D camera eases into the usual hand-over. If WebGL fails or the frame rate stays low, the view falls back to Map with a short notice. |
 | **Change the camera** | Orbit, tower, drone (chases the selected flight) and approach cameras, plus arrow-key, `Q`/`E` and `+`/`-` controls for the view. |
 | **Read the airport** | A departures and arrivals board built from what the feed has observed, runways in use, FAA ground stops and delay programs, and the airport's METAR. |
 | **Search and filter** | Search by flight, airline, registration or gate; filter the traffic by airline, aircraft type, altitude, speed and ground state. |
