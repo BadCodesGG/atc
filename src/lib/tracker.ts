@@ -46,6 +46,8 @@ export const STEP_SECONDS = 1;
 export const STEP_FLOOR = 5;
 /** A move shorter than this, metres, says nothing about which way an aircraft is going. */
 const MIN_MOVE = 1e-3;
+/** Floating-point error, metres, in a move taken apart into directions and put back. */
+const ROUNDING = 1e-12;
 /**
  * Frames further apart than this, seconds, are not one motion (a hidden tab, a seek, a coarse replay):
  * the aircraft is drawn on its path, with nothing carried over from the frame before.
@@ -100,15 +102,49 @@ interface Sample {
   verticalRateFpm: number | null;
 }
 
+/** Metres [east, north]. */
+type Vector = [number, number];
+/** A unit Vector: a way to go. */
+type Direction = [number, number];
+
 /** Where an aircraft was last drawn, and which way it was going: what the next frame's move is held to. */
 interface Drawn {
   /** The playback moment it was drawn at. */
   t: number;
   pose: Pose;
-  /** Unit [east, north] of the way its path was last going (kept while the path stands still); null when unknown or at rest. */
-  travel: [number, number] | null;
-  /** Unit [east, north] of its move in the frame before; null when it did not move. */
-  last: [number, number] | null;
+  /** The way its path was last going (kept while the path stands still); null when unknown or at rest. */
+  travel: Direction | null;
+  /** The way it moved in the frame before; null when it did not move. */
+  last: Direction | null;
+}
+
+/** The direction of a move, or null for one too short to say. */
+function unit([x, y]: Vector): Direction | null {
+  const length = Math.hypot(x, y);
+  return length > MIN_MOVE ? [x / length, y / length] : null;
+}
+
+/**
+ * A move with whatever part of it runs against any of `ways` taken out, so it never goes back along one
+ * of them. Ways more than a right angle apart leave no move forward at all: then it stands still.
+ */
+function holdForward(move: Vector, ways: (Direction | null)[]): Vector {
+  let [x, y] = move;
+  const held = ways.filter((u) => u !== null);
+  for (const [ux, uy] of held) {
+    const along = x * ux + y * uy;
+    if (along < 0) {
+      x -= along * ux;
+      y -= along * uy;
+    }
+  }
+  return held.some(([ux, uy]) => x * ux + y * uy < -ROUNDING) ? [0, 0] : [x, y];
+}
+
+/** A move cut down to `most` metres, in the same direction. */
+function clampLength(move: Vector, most: number): Vector {
+  const length = Math.hypot(...move);
+  return length > most ? [(move[0] * most) / length, (move[1] * most) / length] : move;
 }
 
 interface Track {
@@ -296,67 +332,47 @@ export class Tracker {
    */
   private draw(track: Track, t: number): Pose {
     const target = this.state(track, t);
-    const before = track.drawn;
-    if (!before || t - before.t > MAX_FRAME_GAP || t < before.t) {
+    const previous = track.drawn;
+    if (!previous || t - previous.t > MAX_FRAME_GAP || t < previous.t) {
       track.drawn = { t, pose: target, travel: null, last: null };
       return target;
     }
-    if (t === before.t) return before.pose;
-    const dt = t - before.t;
-    const from = before.pose;
+    if (t === previous.t) return previous.pose;
+    const dt = t - previous.t;
+    const from = previous.pose;
     // How the path itself moved over the frame, as it stands now.
-    const was = this.state(track, before.t);
-    const pathX = target.x - was.x;
-    const pathY = target.y - was.y;
-    const pathAlt = target.altitudeFt - was.altitudeFt;
-    const pathTurn = turn(was.headingDeg, target.headingDeg);
+    const pathThen = this.state(track, previous.t);
+    const pathStep: Vector = [target.x - pathThen.x, target.y - pathThen.y];
+    const pathClimb = target.altitudeFt - pathThen.altitudeFt;
+    const pathTurn = turn(pathThen.headingDeg, target.headingDeg);
     // What still separates the drawn aircraft from its path once carried on with it.
-    const errX = target.x - (from.x + pathX);
-    const errY = target.y - (from.y + pathY);
+    const errX = target.x - (from.x + pathStep[0]);
+    const errY = target.y - (from.y + pathStep[1]);
     const error = Math.hypot(errX, errY);
     if (error > CORRECTION_SNAP) {
       track.drawn = { t, pose: target, travel: null, last: null };
       return target;
     }
-    const k = 1 - Math.exp(-dt / Math.min(CORRECTION_DECAY_MAX, Math.max(CORRECTION_DECAY, error / CORRECTION_SPEED)));
-    let x = pathX + errX * k;
-    let y = pathY + errY * k;
+    const chase = 1 - Math.exp(-dt / Math.min(CORRECTION_DECAY_MAX, Math.max(CORRECTION_DECAY, error / CORRECTION_SPEED)));
+    let step: Vector = [pathStep[0] + errX * chase, pathStep[1] + errY * chase];
 
-    // Never against the way its path is going, nor back on its last move, nor (in the air, where the
-    // reported track is the way over the ground) against the track it is drawn on; unless it was at rest.
-    // A correction that would pull it back holds it instead, while its path catches up.
-    const pathMoved = Math.hypot(pathX, pathY);
     const atRest = from.groundSpeedKt !== null && from.groundSpeedKt < STOPPED_KT;
-    const travel: [number, number] | null = pathMoved > MIN_MOVE ? [pathX / pathMoved, pathY / pathMoved] : atRest ? null : before.travel;
+    const travel = unit(pathStep) ?? (atRest ? null : previous.travel);
     if (!atRest) {
-      const flown: [number, number] | null = !from.onGround && from.headingKnown ? [Math.sin(from.headingDeg * RAD), Math.cos(from.headingDeg * RAD)] : null;
-      const ways = [travel, before.last, flown].filter((u) => u !== null);
-      for (const u of ways) {
-        const along = x * u[0] + y * u[1];
-        if (along < 0) {
-          x -= along * u[0];
-          y -= along * u[1];
-        }
-      }
-      // Two directions more than a right angle apart leave no way forward: it stands still for the frame.
-      if (ways.some((u) => x * u[0] + y * u[1] < -1e-12)) [x, y] = [0, 0];
+      // In the air the reported track is the way over the ground, so it is a way forward too.
+      const flown: Direction | null = !from.onGround && from.headingKnown ? [Math.sin(from.headingDeg * RAD), Math.cos(from.headingDeg * RAD)] : null;
+      step = holdForward(step, [travel, previous.last, flown]);
     }
     // Never more than about a second of its own speed in a frame: the reported one, else its path's.
-    const speed = from.groundSpeedKt !== null ? from.groundSpeedKt * KNOTS : Math.hypot(pathX, pathY) / dt;
-    const bound = Math.max(speed * STEP_SECONDS, STEP_FLOOR);
-    const step = Math.hypot(x, y);
-    if (step > bound) {
-      x *= bound / step;
-      y *= bound / step;
-    }
+    const speed = from.groundSpeedKt !== null ? from.groundSpeedKt * KNOTS : Math.hypot(...pathStep) / dt;
+    step = clampLength(step, Math.max(speed * STEP_SECONDS, STEP_FLOOR));
 
-    const altitudeFt = Math.max(0, from.altitudeFt + pathAlt + (target.altitudeFt - from.altitudeFt - pathAlt) * k);
+    const altitudeFt = Math.max(0, from.altitudeFt + pathClimb + (target.altitudeFt - from.altitudeFt - pathClimb) * chase);
     const heading = from.headingDeg + pathTurn;
-    const pose: Pose = { ...target, x: from.x + x, y: from.y + y, altitudeFt, headingDeg: wrap360(heading + turn(heading, target.headingDeg) * k) };
-    const moved = Math.hypot(x, y);
+    const pose: Pose = { ...target, x: from.x + step[0], y: from.y + step[1], altitudeFt, headingDeg: wrap360(heading + turn(heading, target.headingDeg) * chase) };
     // A frame it stood still in leaves it free to set off any way its path goes next (a hairpin turn
     // between two ground fixes): what it may not do is turn straight back on a move it just made.
-    track.drawn = { t, pose, travel, last: moved > MIN_MOVE ? [x / moved, y / moved] : null };
+    track.drawn = { t, pose, travel, last: unit(step) };
     return pose;
   }
 

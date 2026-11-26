@@ -14,7 +14,10 @@
 import { launchChrome } from "./lib/chrome.mjs";
 import { waitForTruthy } from "./smoke-journey-procedures.mjs";
 
-/** The same figures as src/lib/tracker.ts: knots in m/s, rest below 1 kt, the snap distance, the step floor. */
+/**
+ * The same figures as src/lib/tracker.ts (KNOTS, STOPPED_KT, CORRECTION_SNAP, STEP_FLOOR, MAX_FRAME_GAP),
+ * restated because a plain Node script cannot import the TypeScript module: change them together.
+ */
 const KNOTS = 1852 / 3600;
 const AT_REST_KT = 1;
 const SNAP_M = 1500;

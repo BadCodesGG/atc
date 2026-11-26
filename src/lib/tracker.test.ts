@@ -520,6 +520,19 @@ describe("Tracker motion rules", () => {
     expect(jumps.filter((j) => j > 100)).toHaveLength(1);
   });
 
+  it("holds to the rules for an aircraft that reports no ground speed, bounding its step by its path's own", () => {
+    // No speed reported: its path between fixes is its only speed. The late report is off its line.
+    const bare = (x: number, y: number, age = 0) => aircraft("a", x, y, { trackDeg: 90, positionAge: age });
+    const frames = play(new Tracker(), [snapshot(100, bare(0, 0)), snapshot(105, bare(500, 0)), snapshot(120, bare(1000, 300, 5))], 108, 130);
+    const path = xs(frames);
+    expect(path.length).toBeGreaterThan(600);
+    for (let i = 1; i < path.length; i++) expect(path[i]).toBeGreaterThanOrEqual(path[i - 1] - 1e-9);
+    const ys = frames.flatMap((f) => (f.aircraft.has("a") ? [f.aircraft.get("a")!.y] : []));
+    // Never more than a second of its 100 m/s path in a frame, and no jump onto the new line.
+    expect(Math.max(...ys.slice(1).map((y, i) => Math.abs(y - ys[i])))).toBeLessThan(10);
+    expect(ys.at(-1)).toBeCloseTo(300, 0);
+  });
+
   it("keeps a taxiing aircraft moving across a gap between reads", () => {
     // Taxiing east at 10 m/s, read every 5 s, but two reads in a row are missed: 15 s between fixes.
     const taxi = (t: number) => aircraft("a", 10 * (t - 100), 0, { onGround: true, altitudeFt: 0, groundSpeedKt: 10 * MPS, trackDeg: 90 });

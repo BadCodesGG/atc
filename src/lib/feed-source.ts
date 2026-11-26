@@ -29,37 +29,43 @@ const SYNC_WINDOW_S = 60;
 /** The fastest the feed clock is pulled onto a new estimate, seconds per second: the picture plays at most 10% fast or slow while it is. */
 const SYNC_SLEW = 0.1;
 
+/**
+ * Seconds after the first answer in which the clock takes each new estimate outright: the picture plays
+ * 8 s behind the feed, so nothing is drawn yet, and a first answer served old is not slewed off for minutes.
+ */
+const SYNC_SETTLE_S = 8;
+
 /** The network, on the wall's clock, offset to the feed's own: set by the first answer and re-synced by every one after. */
 export function liveSource(): FeedSource {
   const now = () => Date.now() / 1000;
-  /** Offsets (answer time minus the wall's) heard within the window, and when. */
-  let heard: { at: number; offset: number }[] = [];
-  /** The offset in use, and when it was last moved toward the estimate. */
-  let offset: number | null = null;
+  /** Offsets (answer time minus the wall's) of the answers heard within the window, and when each was heard. */
+  let answers: { at: number; offset: number }[] = [];
+  /** When the first answer was heard; the offset in use; and when that was last moved toward the estimate. */
+  let first: number | null = null;
+  let offset = 0;
   let moved = 0;
-  const advance = (wall: number) => {
-    if (offset === null || heard.length === 0) return;
-    const target = Math.max(...heard.map((h) => h.offset));
-    const most = SYNC_SLEW * Math.max(0, wall - moved);
-    offset += Math.max(-most, Math.min(most, target - offset));
+  /** Moves the offset in use toward the freshest answer in the window, as far as the time since it last moved allows. */
+  const resync = (wall: number) => {
+    answers = answers.filter((a) => wall - a.at < SYNC_WINDOW_S);
+    if (first === null || answers.length === 0) return;
+    const estimate = Math.max(...answers.map((a) => a.offset));
+    const most = wall - first < SYNC_SETTLE_S ? Infinity : SYNC_SLEW * Math.max(0, wall - moved);
+    offset += Math.max(-most, Math.min(most, estimate - offset));
     moved = wall;
   };
   return {
     now,
     clock: () => {
       const wall = now();
-      advance(wall);
-      return wall + (offset ?? 0);
+      resync(wall);
+      return wall + offset;
     },
     heard: (time) => {
       const wall = now();
-      advance(wall);
-      heard = heard.filter((h) => wall - h.at < SYNC_WINDOW_S);
-      heard.push({ at: wall, offset: time - wall });
-      if (offset === null) {
-        offset = time - wall;
-        moved = wall;
-      }
+      resync(wall);
+      answers.push({ at: wall, offset: time - wall });
+      first ??= wall;
+      resync(wall);
     },
     get: (path) => fetch(path, { cache: "no-store" }),
     every: (seconds, fn) => {

@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fixtureSource, liveSource } from "./feed-source";
+import { PLAYBACK_DELAY } from "./tracker";
 
 beforeEach(() => vi.useFakeTimers());
 afterEach(() => vi.useRealTimers());
@@ -61,8 +62,12 @@ describe("the feed's clock", () => {
     return samples;
   }
 
-  /** The clock only ever runs forward, at close to the wall's pace: re-syncing it never jumps the picture. */
-  function expectSmooth(samples: { wall: number; clock: number }[]) {
+  /**
+   * The clock only ever runs forward, at close to the wall's pace: re-syncing it never jumps the picture.
+   * In its first 8 s nothing is drawn yet (the picture plays 8 s behind), and it takes each answer outright.
+   */
+  function expectSmooth(all: { wall: number; clock: number }[]) {
+    const samples = all.filter((s) => s.wall >= 1000 + PLAYBACK_DELAY);
     for (let i = 1; i < samples.length; i++) {
       const rate = (samples[i].clock - samples[i - 1].clock) / (samples[i].wall - samples[i - 1].wall);
       expect(rate).toBeGreaterThan(0.85);
@@ -77,6 +82,15 @@ describe("the feed's clock", () => {
     expectSmooth(samples);
     const end = samples.at(-1)!;
     expect(Math.abs(end.clock - upstream(end.wall))).toBeLessThan(0.5);
+  });
+
+  it("live, takes a fresh answer straight away when the first one was served old, before anything is drawn", () => {
+    const upstream = (wall: number) => wall + 12;
+    // The first answer comes out of a cache 30 s old; the next, 5 s on, is fresh.
+    const samples = session(upstream, 60, (i) => (i === 0 ? 30 : 0));
+    const settled = samples.find((s) => s.wall >= 1006)!;
+    expect(settled.clock).toBeCloseTo(upstream(settled.wall), 6);
+    expectSmooth(samples);
   });
 
   it("live, follows an upstream clock that drifts behind, and is not dragged back by an answer served old", () => {
