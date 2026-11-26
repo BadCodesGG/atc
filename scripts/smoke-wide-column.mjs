@@ -75,6 +75,19 @@ export async function wideColumnChecks({ browser, base, check }) {
   const open = await measure(page);
   check("1440x880: with the card open, the column holds more than it shows, so it scrolls", open.scrollHeight > open.clientHeight + 40, JSON.stringify(open));
 
+  // The scroller takes no clicks of its own: its 12 px margin beside the card and the gap under the card are the map's.
+  const through = await page.evaluate(([scroller, card, panel]) => {
+    const s = document.querySelector(scroller).getBoundingClientRect();
+    const c = document.querySelector(card).getBoundingClientRect();
+    const p = document.querySelector(panel).getBoundingClientRect();
+    const at = (x, y) => {
+      const hit = document.elementFromPoint(x, y);
+      return hit ? (hit.closest(scroller) ? "column" : hit.tagName) : null;
+    };
+    return { margin: at(s.left + 6, c.top + c.height / 2), gap: at(c.left + c.width / 2, (c.bottom + p.top) / 2) };
+  }, [SCROLLER, CARD, PANEL]);
+  check("1440x880: beside the card and in the gap under it, the map, not the column, is what a click finds", through.margin !== "column" && through.gap !== "column", JSON.stringify(through));
+
   // The panel's height for each tab, with the card and (the card taken out) without it.
   const heights = {};
   for (const tab of ["movements", "pulse", "board"]) {

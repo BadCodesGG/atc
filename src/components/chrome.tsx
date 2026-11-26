@@ -240,10 +240,10 @@ export function FlightCard({ card, procedure = null, here, status, following, on
   const details = useId();
   // On a wide screen the card heads a column that scrolls: a flight picked from further down (or on the map) brings it back into view.
   const sectionRef = useRef<HTMLElement>(null);
-  const id = card?.id;
+  const cardId = card?.id;
   useEffect(() => {
-    if (id) sectionRef.current?.closest("[data-column-scroll]")?.scrollTo({ top: 0 });
-  }, [id]);
+    if (cardId) sectionRef.current?.closest("[data-column-scroll]")?.scrollTo({ top: 0 });
+  }, [cardId]);
   if (!card) return null;
   const open = !compact || openFor === card.id;
   const { route, direction, gate } = card;
@@ -720,10 +720,10 @@ export function CameraMenu({ camera, available, onChange, className = "" }: Came
  * facts far apart.
  *
  * On a wide screen the card and the panel keep their own heights and the column scrolls as one, so a tall
- * card never squeezes the panel to a clipped row. The scroller is as tall as what it holds, up to the
- * column's foot, so below a short column the map still takes the clicks; it reaches 12 px past the column
- * each way so the cards' rings and shadows are not cut, and the column's own box, which the scene measures,
- * stays where it was. Its scrollbar is hidden (it would take its width from the cards): the fade at its
+ * card never squeezes the panel to a clipped row. The scroller reaches 12 px past the column each way so
+ * the cards' rings and shadows are not cut, and the column's own box, which the scene measures, stays where
+ * it was. Like the column it takes no clicks itself: the wheel over a card scrolls it, and its margins, the
+ * gap between the cards and the space below a short column are the map's. Its scrollbar is hidden (it would take its width from the cards): the fade at its
  * foot says there is more below. Narrower, the scroller is no box at all (`contents`).
  */
 export function SideColumn({ children, ref }: { children: ReactNode; ref?: Ref<HTMLDivElement> }) {
@@ -737,7 +737,7 @@ export function SideColumn({ children, ref }: { children: ReactNode; ref?: Ref<H
         ref={scrollRef}
         data-column-scroll
         data-more-below={moreBelow || undefined}
-        className={`max-xl:contents xl:pointer-events-auto xl:-m-3 xl:flex xl:max-h-[calc(100%+1.5rem)] xl:flex-col xl:gap-3 xl:overflow-y-auto xl:overscroll-contain xl:p-3 xl:[scrollbar-width:none] ${FADE_BELOW}`}
+        className={`max-xl:contents xl:-m-3 xl:flex xl:max-h-[calc(100%+1.5rem)] xl:flex-col xl:gap-3 xl:overflow-y-auto xl:overscroll-contain xl:p-3 xl:[scrollbar-width:none] ${FADE_BELOW}`}
       >
         {children}
       </div>
@@ -767,9 +767,14 @@ function useMoreBelow<T extends HTMLElement>(): [(el: T | null) => (() => void) 
     check();
     el.addEventListener("scroll", check, { passive: true });
     // The list grows and shrinks as the sheet folds or the window changes, and its rows come and go with the traffic.
+    // Its children too: one can grow inside a list held at its height (a card opening its details) and add no node.
     const resized = new ResizeObserver(check);
-    resized.observe(el);
-    const changed = new MutationObserver(check);
+    const observe = () => [el, ...el.children].forEach((c) => resized.observe(c));
+    observe();
+    const changed = new MutationObserver(() => {
+      observe();
+      check();
+    });
     changed.observe(el, { childList: true, subtree: true });
     return () => {
       el.removeEventListener("scroll", check);
