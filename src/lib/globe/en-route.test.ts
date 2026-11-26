@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { FEET, KNOTS, toLocal } from "../geo";
-import { aircraftMatrix, type AircraftPose, CHASE, COCKPIT, EASE_S, EN_ROUTE_OFFERED, enRouteKey, EnRoutePeek, enRouteShortcut, enRoutePose, enRouteShot, EnRouteRig, is3D, MAX_PITCH, NO_PEEK, PEEK_DEG_PER_PX, peekPlacement, SIDE, TOP } from "./en-route";
+import { aircraftMatrix, type AircraftPose, bandPadding, blendPadding, CHASE, COCKPIT, EASE_S, EN_ROUTE_OFFERED, enRouteKey, EnRoutePeek, enRouteShortcut, enRoutePose, enRouteShot, EnRouteRig, fitDistance, is3D, MAX_PITCH, NO_PEEK, PEEK_DEG_PER_PX, peekPlacement, SIDE, TOP } from "./en-route";
 
 const cruise: AircraftPose = { latitude: 35, longitude: -100, altitudeM: 10_000, trackDeg: 90, pitchDeg: 0 };
 
@@ -221,6 +221,54 @@ describe("EnRoutePeek", () => {
     const peek = new EnRoutePeek();
     peek.drag(-100_000, 100_000);
     expect(peek.at(0)).toEqual({ bearingDeg: 180, pitchDeg: -90 });
+  });
+});
+
+describe("framing in the free band below the Journey card (phones and tablets)", () => {
+  // 375x812: the card ends at 418, the foot's first control starts at 625; freeBand leaves 12 px of air each side.
+  const phone = { width: 375, height: 812 };
+  const band = { left: 16, right: 359, top: 430, bottom: 613 };
+  const lens = { height: 812, fovDeg: 26 };
+  /** How many CSS pixels a metre `distanceM` from the eye spans through `lens`. */
+  const pxPerMetre = (distanceM: number, l = lens) => l.height / (2 * distanceM * Math.tan((l.fovDeg * Math.PI) / 360));
+
+  it("pads the map so its centre, which every 3D camera looks at, is the middle of the band", () => {
+    const p = bandPadding(phone, band);
+    expect((p.top + phone.height - p.bottom) / 2).toBe((band.top + band.bottom) / 2);
+    expect((p.left + phone.width - p.right) / 2).toBe((band.left + band.right) / 2);
+    expect(Math.min(p.top, p.bottom, p.left, p.right)).toBeGreaterThanOrEqual(0);
+  });
+
+  it("eases from the map's own padding into the band's by the share of the 3D camera, so the flat shot never steps", () => {
+    const flat = { top: 64, bottom: 0, left: 0, right: 0 };
+    const padded = bandPadding(phone, band);
+    expect(blendPadding(flat, padded, 0)).toEqual(flat);
+    expect(blendPadding(flat, padded, 1)).toEqual(padded);
+    expect(blendPadding(flat, padded, 0.5).top).toBeCloseTo((64 + padded.top) / 2, 9);
+  });
+
+  it("stands Chase, Side and Top back until the whole aircraft fits the band, never nearer than their own shot", () => {
+    const narrow = { left: 16, right: 304, top: 354, bottom: 483 };
+    const small = { height: 700, fovDeg: 26 };
+    for (const camera of ["chase", "side", "top"] as const) {
+      const shot = enRouteShot(cruise, camera, 37.6);
+      const d = fitDistance(shot.distanceM, camera, 37.6, small, narrow);
+      expect(d, camera).toBeGreaterThanOrEqual(shot.distanceM);
+      // The span across, at most most of the band's width; and the aircraft's height on screen, most of its depth.
+      expect(1.05 * 37.6 * pxPerMetre(d, small), camera).toBeLessThanOrEqual(0.8 * (narrow.right - narrow.left) + 1e-9);
+    }
+    // Top shows the aircraft's whole length up the screen: it fits the band's depth too.
+    const top = fitDistance(enRouteShot(cruise, "top", 37.6).distanceM, "top", 37.6, small, narrow);
+    expect(1.05 * 37.6 * pxPerMetre(top, small)).toBeLessThanOrEqual(0.8 * (narrow.bottom - narrow.top) + 1e-9);
+  });
+
+  it("leaves a shot that already fits as it is, and Cockpit (no model drawn) always", () => {
+    const roomy = { left: 0, right: 1440, top: 0, bottom: 900 };
+    for (const camera of ["chase", "side", "top"] as const) {
+      const shot = enRouteShot(cruise, camera, 37.6);
+      expect(fitDistance(shot.distanceM, camera, 37.6, { height: 900, fovDeg: 26 }, roomy), camera).toBe(shot.distanceM);
+    }
+    expect(fitDistance(300, "cockpit", 37.6, lens, { left: 0, right: 10, top: 0, bottom: 10 })).toBe(300);
   });
 });
 

@@ -1,4 +1,6 @@
 import { FEET, KNOTS, toGeo, toLocal, turn, wrap360 } from "../geo";
+import type { Lens } from "./camera";
+import type { Rect } from "./journey-frame";
 
 /**
  * The En-route view's cameras (CONTEXT.md): how the World map frames a followed flight in 3D. Pure: a pose
@@ -200,6 +202,56 @@ export function aircraftMatrix(origin: { x: number; y: number; z: number }, metr
   const k = metre * size;
   const cols = r.map((c) => toMercator(c).map((v) => v * k));
   return [...cols[0], 0, ...cols[1], 0, ...cols[2], 0, origin.x, origin.y, origin.z, 1];
+}
+
+/** The map's padding, CSS pixels: MapLibre draws the point it looks at in the middle of what is left. */
+export interface Insets {
+  top: number;
+  bottom: number;
+  left: number;
+  right: number;
+}
+
+/**
+ * On a phone or tablet the Journey card covers the top of the map: a 3D camera frames the aircraft in the
+ * free band between the card's foot and the controls at the map's (journey-frame.ts freeBand), as the flat
+ * shot does. Every 3D camera looks at the aircraft (Cockpit at a point ahead of it), and MapLibre draws the
+ * point it looks at in the middle of its padded view: this is the padding that puts it in the band's middle.
+ */
+export function bandPadding(screen: { width: number; height: number }, band: Rect): Insets {
+  return { top: Math.max(0, band.top), bottom: Math.max(0, screen.height - band.bottom), left: Math.max(0, band.left), right: Math.max(0, screen.width - band.right) };
+}
+
+/** Padding `from` eased toward `to` by `t` (0 to 1): the 3D camera's share, so at none of it the map has its own padding. */
+export function blendPadding(from: Insets, to: Insets, t: number): Insets {
+  const k = Math.max(0, Math.min(1, t));
+  const mix = (a: number, b: number) => a + (b - a) * k;
+  return { top: mix(from.top, to.top), bottom: mix(from.bottom, to.bottom), left: mix(from.left, to.left), right: mix(from.right, to.right) };
+}
+
+/** How much of the band the aircraft may fill, each way: air round it, so its wingtips and fin stay in the band. */
+const BAND_FILL = 0.8;
+/** How each camera that draws the model shows it, in its lengths: across the screen and up it (Chase sees the span and the fin over the wing, Side the length and the fin, Top the length up and the span across). */
+const MODEL_EXTENT: Record<"chase" | "side" | "top", { across: number; up: number }> = {
+  chase: { across: 1.05, up: 0.45 },
+  side: { across: 1.05, up: 0.4 },
+  top: { across: 1.05, up: 1.05 },
+};
+
+/**
+ * The camera's distance for an aircraft drawn `lengthM` long, framed in `band` through `lens` (the map's
+ * height and vertical field of view): its own shot's distance, or further back when the whole aircraft
+ * would not fit the band at that. Cockpit draws no model, so its distance stands.
+ */
+export function fitDistance(distanceM: number, camera: Exclude<EnRouteCamera, "map">, lengthM: number, lens: Lens, band: Rect): number {
+  if (camera === "cockpit") return distanceM;
+  const extent = MODEL_EXTENT[camera];
+  // Pixels a metre spans at a metre from the eye; at d metres, this over d.
+  const focal = lens.height / (2 * Math.tan((lens.fovDeg * RAD) / 2));
+  const width = Math.max(1, band.right - band.left);
+  const height = Math.max(1, band.bottom - band.top);
+  const needed = focal * lengthM * Math.max(extent.across / (BAND_FILL * width), extent.up / (BAND_FILL * height));
+  return Math.max(distanceM, needed);
 }
 
 /** How quickly the camera settles on its shot, seconds (an exponential ease). */

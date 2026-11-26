@@ -84,6 +84,8 @@ export class EnRouteLayer implements CustomLayerInterface {
   private colours = { body: hexToRgb("#eeeeea"), paint: hexToRgb("#6d28d9") };
   /** How many frames the layer has drawn the aircraft in: read by the smoke check. */
   drawnFrames = 0;
+  /** Where it last drew the aircraft's origin, in normalised device coordinates (x right, y up, -1 to 1 across the map): read by the smoke check. */
+  drawnAt: { x: number; y: number } | null = null;
   private failed = false;
 
   /** `onFail` is told, once, if drawing fails (the context cannot build the mesh); the layer then draws nothing. */
@@ -185,6 +187,7 @@ export class EnRouteLayer implements CustomLayerInterface {
     const model = aircraftMatrix(at, at.meterInMercatorCoordinateUnits(), pose, this.lengthM / MODEL_LENGTH[this.model]);
     // The map's projection (doubles) times the model's, multiplied here in doubles, then handed to the GPU.
     const clip = multiply(args.defaultProjectionData.mainMatrix as ArrayLike<number>, model);
+    this.drawnAt = { x: clip[12] / clip[15], y: clip[13] / clip[15] };
     // The rotation alone, for the normals: the model matrix's columns without their scale.
     const scale = Math.hypot(model[0], model[1], model[2]);
     const rotation = [model[0], model[1], model[2], model[4], model[5], model[6], model[8], model[9], model[10]].map((v) => v / scale);

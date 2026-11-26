@@ -437,11 +437,12 @@ const EN_ROUTE_LABELS: Record<EnRouteCamera, string> = { map: "Map", chase: "Cha
  * The En-route view's camera switch on the Journey card: the flat map, or a 3D camera riding along with the
  * flight. Offered from the origin's Diorama (on the flight card there) until the destination's has the
  * flight (`cameras`), on every viewport; the keys 1 to 5 pick them too (enRouteKey), as each button's
- * shortcut says.
+ * shortcut says. One row at every width: a column a camera, each as wide as its name, with the type and the
+ * padding a size smaller on the narrowest phones and on the wide screens' card, where five would not fit.
  */
 export function EnRouteSwitch({ camera, cameras, onChange }: { camera: EnRouteCamera; cameras: readonly EnRouteCamera[]; onChange: (camera: EnRouteCamera) => void }) {
   return (
-    <div role="group" aria-label="En-route camera" className="flex flex-wrap gap-1 self-start rounded-2xl bg-well p-1">
+    <div role="group" aria-label="En-route camera" className="grid auto-cols-auto grid-flow-col gap-1 self-start rounded-2xl bg-well p-1">
       {cameras.map((key) => (
         <button
           key={key}
@@ -450,7 +451,7 @@ export function EnRouteSwitch({ camera, cameras, onChange }: { camera: EnRouteCa
           aria-keyshortcuts={enRouteShortcut(key)}
           title={`${EN_ROUTE_LABELS[key]} (${enRouteShortcut(key)})`}
           onClick={() => onChange(key)}
-          className={`min-h-11 rounded-full px-3.5 text-sm font-semibold xl:min-h-8 ${key === camera ? "bg-accent text-on-accent" : "bg-transparent text-ink-2"}`}
+          className={`min-h-11 whitespace-nowrap rounded-full px-2.5 text-sm font-semibold max-[22.5rem]:px-1 max-[22.5rem]:text-[13px] xl:min-h-8 xl:px-1 xl:text-[13px] ${key === camera ? "bg-accent text-on-accent" : "bg-transparent text-ink-2"}`}
         >
           {EN_ROUTE_LABELS[key]}
         </button>
@@ -487,6 +488,9 @@ export function JourneyCard({
     ...(journey.arrival ? [["ETA", journey.arrival] as [string, string]] : []),
   ];
   const toggle = "bg-selected text-ink shadow-[0_0_0_1px_var(--color-selected-ring)]";
+  // In a 3D camera on a short phone (320x700) the card folds to its head, the switch and the progress, so
+  // the band below it still holds the whole aircraft: the facts and the notes come back on Map.
+  const fold = camera !== "map" ? "cramped:hidden" : "";
   return (
     <section
       aria-label={`Followed flight ${journey.callsign}`}
@@ -515,7 +519,7 @@ export function JourneyCard({
         {notice}
       </p>
       <JourneyPanel journey={journey} />
-      <dl className="flex justify-between gap-x-6 max-xl:short:hidden">
+      <dl className={`flex justify-between gap-x-6 max-xl:short:hidden ${fold}`}>
         {facts.map(([label, value]) => (
           <div key={label} title={label === "ETA" ? ESTIMATE : undefined} className="flex flex-col gap-0.5">
             <dt className="text-xs text-muted">{label}</dt>
@@ -525,16 +529,16 @@ export function JourneyCard({
       </dl>
       {/* What the map draws of the way ahead that is published, cited as the diorama's flight card cites its own. */}
       {journey.procedures.map((line) => (
-        <p key={line} data-journey-procedure className="text-xs text-muted">
+        <p key={line} data-journey-procedure className={`text-xs text-muted ${fold}`}>
           {line}
         </p>
       ))}
       {journey.estimated && (
-        <p data-note className="text-xs text-muted">
+        <p data-note className={`text-xs text-muted ${fold}`}>
           {ESTIMATES_NOTE}
         </p>
       )}
-      {journey.endLine && <p className={END_LINE}>{journey.endLine}</p>}
+      {journey.endLine && <p className={`${END_LINE} ${fold}`}>{journey.endLine}</p>}
       <button type="button" aria-pressed onClick={onStop} className={`hidden min-h-11 items-center justify-center gap-2 rounded-[10px] text-[15px] font-semibold roomy:flex ${toggle}`}>
         {CHECK}
         Follow this flight
