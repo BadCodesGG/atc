@@ -134,7 +134,8 @@ export class Replay {
   private trailing = false;
 
   constructor(
-    private readonly live: Tracker,
+    /** The live picture: the airport's feed of the page's tracker, in the airport's metres. */
+    private readonly live: Pick<Tracker, "at">,
     {
       elevationFt,
       ground = null,
