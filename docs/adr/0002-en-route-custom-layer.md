@@ -113,7 +113,9 @@ it, with no second canvas.
   is full), so the ground in sight is all the large-scale product and the olive one is only ever under full
   haze; Map gets MapLibre's own back. It costs zoom-9 tiles to the horizon: imagery tiles drawn, floor off
   against on in the same page with the tiles loaded, Cockpit 4 to 6 against 14 to 22 and Side 5 to 8
-  against 16 to 33 (11,000 and 37,000 ft); Chase and Top barely change. With the tiles loaded the frame
+  against 16 to 33 (11,000 and 37,000 ft); Chase and Top barely change. Imagery requests on entering
+  Cockpit from a fresh page: 107 at 11,000 ft and 131 at 37,000 ft (91 and 214 before, so within the
+  run-to-run spread), then Side 17 and 54 more (5 and 10 before). With the tiles loaded the frame
   rate was the same either way on hardware GL, within the runs' own spread (Cockpit 123 to 148 fps off,
   140 to 148 on); while the extra tiles are still arriving the first seconds of a camera run slower.
   Light and Dark have no imagery and are unchanged. What still shows is the imagery's own

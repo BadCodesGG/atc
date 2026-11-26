@@ -400,13 +400,23 @@ export const IMAGERY_NEAR_ZOOM = 9;
 export const MAPLIBRE_LOD = { maxZoomLevelsOnScreen: 9.314, tileCountMaxMinRatio: 3 } as const;
 
 /**
+ * How far the 3D camera's imagery keeps its large-scale product (imageryTileZoom): `metres` of ground from the
+ * eye, and the metres of ground in one of MapLibre's Mercator units there. The camera updates it each frame;
+ * imageryTileZoom reads it on every tile, so it is shared, not copied.
+ */
+export interface ImageryReach {
+  metres: number;
+  metresPerUnit: number;
+}
+
+/**
  * The imagery's tile zoom in a 3D camera: MapLibre's own (`base`), but never under IMAGERY_NEAR_ZOOM for a tile
  * nearer than `reach.metres` (the horizon, where the haze is full; read each call, so the camera moves it), so
  * the ground in sight is all one product and the olive one is only ever under full haze. MapLibre's distances
  * are in Mercator units, `reach.metresPerUnit` metres of ground each. A map zoomed out past zoom 9 keeps
  * MapLibre's zooms.
  */
-export function imageryTileZoom(base: CalculateTileZoomFunction, reach: { metres: number; metresPerUnit: number }): CalculateTileZoomFunction {
+export function imageryTileZoom(base: CalculateTileZoomFunction, reach: ImageryReach): CalculateTileZoomFunction {
   return (centreZoom, toTile2D, toTileZ, toCentre3D, fovDeg) => {
     const z = base(centreZoom, toTile2D, toTileZ, toCentre3D, fovDeg);
     return centreZoom >= IMAGERY_NEAR_ZOOM && toTile2D * reach.metresPerUnit < reach.metres ? Math.max(z, IMAGERY_NEAR_ZOOM) : z;
@@ -463,12 +473,12 @@ export function mapStyle(key: ThemeKey, { globe = false, radar = null, terrain =
   if (radar) sources.radar = radarSource(radar);
   if (terrain) sources[TERRAIN_SOURCE] = terrainSource();
   if (satellite) {
-    sources.imagery = { type: "raster", tiles: [USGS_IMAGERY], tileSize: 256, maxzoom: 16, attribution: "Imagery: USDA, USGS The National Map: Orthoimagery" };
+    sources[IMAGERY] = { type: "raster", tiles: [USGS_IMAGERY], tileSize: 256, maxzoom: 16, attribution: "Imagery: USDA, USGS The National Map: Orthoimagery" };
   }
   const arc = arcOpacities(key);
   const layers: LayerSpecification[] = [
     { id: "background", type: "background", paint: { "background-color": mapBackground(key, terrain) } },
-    ...(satellite ? [{ id: "imagery", type: "raster", source: "imagery", paint: { "raster-saturation": -0.1 } } satisfies LayerSpecification] : []),
+    ...(satellite ? [{ id: IMAGERY, type: "raster", source: IMAGERY, paint: { "raster-saturation": -0.1 } } satisfies LayerSpecification] : []),
     ...(terrain ? [hillshadeLayer(key)] : []),
     // The shore is the fill's own outline, not a line layer over the same polygons: a lake's outline is one ring of thousands of points (Lake Lanier is 6,500 at zoom 10), and a
     // line bucket asks for ten vertices a point, past the 65,535 a segment holds ("Max vertices per segment is 65535" in the console, the line drawn wrong). A fill asks for one a point.

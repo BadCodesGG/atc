@@ -372,10 +372,15 @@ export class GlobeMap {
   viewBounds(): GroundBounds {
     const b = this.map.getBounds();
     const own = { west: b.getWest(), south: b.getSouth(), east: b.getEast(), north: b.getNorth() };
-    const shot = this.enRouteBlend > 0 ? this.enRoute.journeyCamera : null;
+    const shot = this.flatShot;
     const container = this.map.getContainer();
     const frame = { width: container.clientWidth, height: container.clientHeight, fovDeg: this.map.getVerticalFieldOfView() };
     return viewArea(own, shot && frame.width > 0 && frame.height > 0 ? { camera: shot, frame, padding: this.anchorPadding } : null);
+  }
+
+  /** While an En-route 3D camera has the flight (its share above 0), the journey's flat Map camera, which "in view" reads; null on Map. */
+  private get flatShot(): MapCamera | null {
+    return this.enRouteBlend > 0 ? this.enRoute.journeyCamera : null;
   }
 
   /** How many aircraft the map draws in view; null while it is zoomed out past them or has read none. */
@@ -1207,8 +1212,7 @@ export class GlobeMap {
    */
   private visibleBounds() {
     const b = this.viewBounds();
-    const flat = this.enRouteBlend > 0 ? this.enRoute.journeyCamera : null;
-    const c = flat ?? this.map.getCenter();
+    const c = this.flatShot ?? this.map.getCenter();
     const reach = 6;
     return {
       west: Math.max(b.west, c.lng - reach),

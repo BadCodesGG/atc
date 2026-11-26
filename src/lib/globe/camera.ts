@@ -1,5 +1,6 @@
 import { type Origin, toGeo, toLocal, wrap360 } from "../geo";
 import type { OrbitView } from "../scene/orbit";
+import type { Insets } from "./en-route";
 
 /**
  * The map's tilt limit on Map and under the Diorama, this app's own `maxPitch` map option (globe-map.ts): the
@@ -99,7 +100,7 @@ const MAX_HORIZON_DEG = 89.25;
  * point at the padded centre. The pitch is kept to the flat map's own limit (MAX_PITCH), so the box is always a
  * real area round the centre, even for a camera at the horizon.
  */
-export function shotBounds(cam: MapCamera, frame: ShotFrame, padding: { top: number; bottom: number; left: number; right: number }): GroundBounds {
+export function shotBounds(cam: MapCamera, frame: ShotFrame, padding: Insets): GroundBounds {
   const pitch = Math.max(0, Math.min(MAX_PITCH, cam.pitch)) * RAD;
   const d = cameraToCentrePx(frame);
   const cx = padding.left + (frame.width - padding.left - padding.right) / 2;
@@ -141,7 +142,7 @@ export function shotBounds(cam: MapCamera, frame: ShotFrame, padding: { top: num
  * while an En-route 3D camera has the flight, the journey's flat Map shot's (shotBounds), exactly as if the reader
  * were on Map. A 3D camera's own bounds are a point at pitch 90, or a small odd area down its line of sight.
  */
-export function viewArea(own: GroundBounds, flat: { camera: MapCamera; frame: ShotFrame; padding: { top: number; bottom: number; left: number; right: number } } | null): GroundBounds {
+export function viewArea(own: GroundBounds, flat: { camera: MapCamera; frame: ShotFrame; padding: Insets } | null): GroundBounds {
   return flat ? shotBounds(flat.camera, flat.frame, flat.padding) : own;
 }
 
