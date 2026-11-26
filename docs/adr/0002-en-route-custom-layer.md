@@ -66,13 +66,26 @@ it, with no second canvas.
   (centre and its elevation, distance, bearing, pitch, eye). Chase stands behind and above along the
   track; Cockpit has its eye just ahead of the nose looking along the track; Side stands abeam on the
   left looking across at the aircraft; Top looks straight down, track up (ticket #22).
-- **The map's 78 degree tilt bounds the cameras.** This app sets the map's `maxPitch` option to 78
-  (`MAX_PITCH`, the Diorama's limit too); it is the app's own bound, not a limit of MapLibre's, and with
-  it no camera can look level or up. Side's level look is held at 78: its eye is 12 degrees
-  above wing height. Cockpit's pitch is `90 + attitude` held at 78, so it follows the attitude only in a
-  descent steeper than 12 degrees, and a climb or level flight looks 12 degrees below the horizon. The
-  Cockpit does not draw the aircraft's model at all (its eye is inside it), so no look round ever fills
-  the view with it.
+- **The 3D cameras tilt past level; the flat map keeps 78.** The flat map and the Diorama keep the map's
+  `maxPitch` at 78 (`MAX_PITCH`), the app's own bound, not MapLibre's. While a 3D camera is on, the
+  controller raises it to `EN_ROUTE_MAX_PITCH` (110, `90 + MAX_ATTITUDE_DEG`), and puts 78 back on Map,
+  once the 3D camera has handed the tilt back at or under 78, so `setMaxPitch` never clamps a camera mid-ease (owner's decision,
+  ticket #23). Side looks level at wing height (pitch 90). Cockpit's pitch is `90 + attitude`, the
+  attitude bounded at 20 degrees each way, so a climb looks up and a descent down. Chase (75) and Top (0)
+  keep their framing, and a drag may tilt up to the same limit. The Cockpit does not draw the aircraft's
+  model at all (its eye is inside it), so no look round ever fills the view with it.
+- **The map's centre sits on the line of sight, not at the aircraft** (`sightPlacement`). MapLibre sizes
+  tile detail, terrain skirts and the near plane from the centre's height and distance: with the centre
+  at the aircraft, kilometres above the ground, Top fetched far more tiles than it draws (about 20 to 30
+  fps on this GPU) and short skirts let the page's paper show through between tiles (the green slivers in
+  the Satellite sky). The camera's eye, bearing and pitch stay the same; only the centre moves along the
+  line of sight, as far as the eye is over the ground (at least 2 km, `SIGHT_MIN_M`, for the skirts), or
+  to the ground if the look meets it first (Top), and never so far that the near plane would clip the
+  aircraft (Cockpit: the ground). Farther (where Chase's slanting look meets the ground, or the near
+  plane's farthest for a level look) the frame rate fell to 55 to 85.
+- **Past the farthest tile, haze.** A look near level sees beyond the last tile MapLibre draws, where
+  the map's background shows: in a 3D camera that background is the sky's fog colour (`mapBackground`),
+  so the band reads as the haze at the horizon, not as bare land; Map puts the land's colour back.
 - **A drag peeks, and eases back.** In a 3D camera MapLibre's own drag, rotate, pinch and double-click
   handlers are off and the map's canvas takes pointer drags (mouse and touch alike) itself: a drag adds
   a bearing and tilt offset (`EnRoutePeek`, `peekPlacement`) on top of the rig's eased framing, so the

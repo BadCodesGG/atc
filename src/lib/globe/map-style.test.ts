@@ -1,7 +1,7 @@
-import { validateStyleMin } from "@maplibre/maplibre-gl-style-spec";
+import { type LayerSpecification, validateStyleMin } from "@maplibre/maplibre-gl-style-spec";
 import { describe, expect, it } from "vitest";
 import { THEMES, type ThemeKey } from "../scene/theme";
-import { arcOpacities, buildingHeight, enRouteSky, flatSky, HILLSHADE, HILLSHADE_UNDER, hillshadeLayer, journeyIconSize, mapStyle, PALETTES, radarLayer, radarSource, ripple, SELECTED_SCALE, SELECTION_DIM, TERRAIN, TERRAIN_SOURCE, terrainSource } from "./map-style";
+import { arcOpacities, buildingHeight, enRouteSky, flatSky, HILLSHADE, HILLSHADE_UNDER, hillshadeLayer, journeyIconSize, mapBackground, mapStyle, PALETTES, radarLayer, radarSource, ripple, SELECTED_SCALE, SELECTION_DIM, TERRAIN, TERRAIN_SOURCE, terrainSource } from "./map-style";
 
 const KEYS = Object.keys(THEMES) as ThemeKey[];
 const paint = (key: ThemeKey, id: string, prop: string) => {
@@ -266,8 +266,9 @@ describe("the en-route view's terrain", () => {
     expect(shaded[0]).toMatchObject({ id: HILLSHADE, source: TERRAIN_SOURCE });
     // Right under the layer the controller adds it under, so the style and a 3D camera turned on agree.
     expect(style.layers.findIndex((l) => l.id === HILLSHADE)).toBe(style.layers.findIndex((l) => l.id === HILLSHADE_UNDER) - 1);
-    // Nothing else changes: the same layers as the flat map, the hillshade aside.
-    expect(style.layers.filter((l) => l.id !== HILLSHADE)).toEqual(mapStyle(key).layers);
+    // Nothing else changes: the same layers as the flat map, the hillshade and the background's colour aside.
+    const flatBackground = (l: LayerSpecification) => (l.id === "background" ? { ...l, paint: { "background-color": mapBackground(key) } } : l);
+    expect(style.layers.filter((l) => l.id !== HILLSHADE).map(flatBackground)).toEqual(mapStyle(key).layers);
     expect(validateStyleMin(style)).toEqual([]);
   });
 
@@ -282,6 +283,15 @@ describe("the en-route view's terrain", () => {
     const ground = paint(key, "background", "background-color");
     expect(sky["sky-color"]).not.toBe(ground);
     expect(sky["sky-color"]).not.toBe(sky["horizon-color"]);
+  });
+
+  it.each(KEYS)("in %s, a 3D camera's background is the sky's haze, so the ground past the farthest tile drawn reads as the horizon's haze, not bare land", (key) => {
+    const background = (style: ReturnType<typeof mapStyle>) => (style.layers.find((l) => l.id === "background") as { paint: Record<string, unknown> }).paint["background-color"];
+    expect(mapBackground(key, true)).toBe(enRouteSky(key)["fog-color"]);
+    expect(background(mapStyle(key, { terrain: true }))).toBe(mapBackground(key, true));
+    // The flat map keeps its own: the land's colour, or under the imagery the page's.
+    expect(background(mapStyle(key))).toBe(mapBackground(key));
+    expect(mapBackground(key)).toBe(key === "satellite" ? THEMES[key].background : THEMES[key].surfaces.ground);
   });
 
   it("shades the relief subtly by day and more strongly by night, in colours named for each theme", () => {

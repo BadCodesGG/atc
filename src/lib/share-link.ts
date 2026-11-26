@@ -52,6 +52,16 @@ export function parseMapHash(hash: string): MapHash | null {
   return { zoom, lat, lng, bearing, pitch };
 }
 
+/**
+ * A map camera as the hash would carry it, rounded as MapLibre's own hash is (zoom to 2 places, the centre to 5,
+ * bearing and pitch to whole degrees): the journey's flat shot, shared from an En-route 3D camera, whose own
+ * hash looks past level and down its line of sight.
+ */
+export function mapHashOf(cam: MapHash): MapHash {
+  const round = (v: number, places: number) => Math.round(v * 10 ** places) / 10 ** places;
+  return { zoom: round(cam.zoom, 2), lat: round(cam.lat, 5), lng: round(cam.lng, 5), bearing: Math.round(cam.bearing), pitch: Math.round(cam.pitch) };
+}
+
 /** The hash the map reads for a view: bearing and pitch only when they are not nothing. */
 export function formatMapHash(h: MapHash): string {
   const tail = h.pitch !== 0 ? `/${h.bearing}/${h.pitch}` : h.bearing !== 0 ? `/${h.bearing}` : "";

@@ -33,8 +33,21 @@ export function enRouteKey(e: Pick<KeyboardEvent, "key" | "code" | "ctrlKey" | "
 /** Whether a camera tilts the map into 3D, with terrain and the aircraft's model. */
 export const is3D = (camera: EnRouteCamera): camera is Exclude<EnRouteCamera, "map"> => camera !== "map";
 
-/** The map's tilt limit, this app's own `maxPitch` map option (globe-map.ts): no shot asks for more. */
+/**
+ * The map's tilt limit on Map and under the Diorama, this app's own `maxPitch` map option (globe-map.ts): the
+ * Diorama's cameras tilt no further, and the map follows them there.
+ */
 export const MAX_PITCH = 78;
+
+/** The steepest climb or descent attitude drawn: past it the read is wrong, not the aircraft. */
+const MAX_ATTITUDE_DEG = 20;
+
+/**
+ * The map's tilt limit while an En-route 3D camera is on (en-route-controller.ts raises the map's `maxPitch` to it
+ * then, and puts MAX_PITCH back on Map): past level, so Side looks level at wing height and Cockpit looks along the
+ * track pitched with the climb, up to the steepest attitude drawn. MapLibre allows up to 180.
+ */
+export const EN_ROUTE_MAX_PITCH = 90 + MAX_ATTITUDE_DEG;
 
 /** Chase: behind the aircraft along its track and above it, looking down at it this many degrees, from this many of its lengths back. */
 export const CHASE = { downDeg: 15, lengths: 6, minDistanceM: 120 } as const;
@@ -66,8 +79,6 @@ export interface EnRouteShot extends EnRoutePlacement {
 const RAD = Math.PI / 180;
 /** Metres a second in a foot a minute. */
 const FPM = FEET / 60;
-/** The steepest climb or descent attitude drawn: past it the read is wrong, not the aircraft. */
-const MAX_ATTITUDE_DEG = 20;
 
 /** What the pose is read from: a fix from the shared tracker (Journey.fix). */
 export interface PoseFix {
@@ -115,10 +126,10 @@ export interface Peek {
 export const NO_PEEK: Peek = { bearingDeg: 0, pitchDeg: 0 };
 
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
-const clampPitch = (deg: number) => clamp(deg, 0, MAX_PITCH);
+const clampPitch = (deg: number) => clamp(deg, 0, EN_ROUTE_MAX_PITCH);
 
 /** Where a placement's eye is: back from the centre against the bearing, and up, by its distance and tilt. */
-function eyeOf(p: EnRoutePlacement): EnRouteShot["eye"] {
+export function eyeOf(p: EnRoutePlacement): EnRouteShot["eye"] {
   const back = p.distanceM * Math.sin(p.pitchDeg * RAD);
   const up = p.distanceM * Math.cos(p.pitchDeg * RAD);
   const b = p.bearingDeg * RAD;
@@ -138,7 +149,7 @@ function fromEye(eye: EnRouteShot["eye"], distanceM: number, bearingDeg: number,
 /**
  * A placement looked round by a drag's `peek`: Chase, Side and Top orbit the point they look at (the
  * aircraft), so the aircraft stays in the middle of the frame; Cockpit keeps its eye at the nose and turns
- * the look. The tilt stays between straight down and the map's limit.
+ * the look. The tilt stays between straight down and the En-route limit (EN_ROUTE_MAX_PITCH), past level.
  */
 export function peekPlacement(placement: EnRoutePlacement, camera: Exclude<EnRouteCamera, "map">, peek: Peek): EnRoutePlacement {
   if (peek.bearingDeg === 0 && peek.pitchDeg === 0) return placement;
@@ -150,10 +161,9 @@ export function peekPlacement(placement: EnRoutePlacement, camera: Exclude<EnRou
 
 /**
  * The camera's placement for `pose`, for an aircraft drawn `lengthM` long, looked round by a drag's
- * `peek`. The map tilts no further than MAX_PITCH, this app's own `maxPitch` map option (globe-map.ts; the
- * Diorama's limit too), not a limit of MapLibre's: the last 12 degrees to a level look are out of reach, so
- * Side's level look and Cockpit's climb are held there. Side looks down at the aircraft 12 degrees, and
- * Cockpit's pitch follows the attitude only in a descent steeper than 12 degrees.
+ * `peek`. Cockpit looks along the track pitched with the attitude (`90 + attitude`: level flight at the
+ * horizon, a climb above it, a descent below it), and Side stands at wing height looking level: both past the
+ * flat map's MAX_PITCH, within EN_ROUTE_MAX_PITCH, which the map takes while a 3D camera is on.
  */
 export function enRouteShot(pose: AircraftPose, camera: Exclude<EnRouteCamera, "map">, lengthM: number, peek: Peek = NO_PEEK): EnRouteShot {
   const at = { latitude: pose.latitude, longitude: pose.longitude };
@@ -166,14 +176,47 @@ export function enRouteShot(pose: AircraftPose, camera: Exclude<EnRouteCamera, "
     const eye = { latitude, longitude, altitudeM: pose.altitudeM + COCKPIT.upLengths * lengthM };
     placement = fromEye(eye, COCKPIT.lookM, track, clampPitch(90 + pose.pitchDeg));
   } else if (camera === "side") {
-    placement = { center: at, elevationM: pose.altitudeM, distanceM: Math.max(SIDE.minDistanceM, SIDE.lengths * lengthM), bearingDeg: wrap360(track + 90), pitchDeg: MAX_PITCH };
+    placement = { center: at, elevationM: pose.altitudeM, distanceM: Math.max(SIDE.minDistanceM, SIDE.lengths * lengthM), bearingDeg: wrap360(track + 90), pitchDeg: 90 };
   } else if (camera === "top") {
     placement = { center: at, elevationM: pose.altitudeM, distanceM: Math.max(TOP.minDistanceM, TOP.lengths * lengthM), bearingDeg: track, pitchDeg: 0 };
   } else {
-    placement = { center: at, elevationM: pose.altitudeM, distanceM: Math.max(CHASE.minDistanceM, CHASE.lengths * lengthM), bearingDeg: track, pitchDeg: Math.min(MAX_PITCH, 90 - CHASE.downDeg) };
+    placement = { center: at, elevationM: pose.altitudeM, distanceM: Math.max(CHASE.minDistanceM, CHASE.lengths * lengthM), bearingDeg: track, pitchDeg: 90 - CHASE.downDeg };
   }
   const placed = peekPlacement(placement, camera, peek);
   return { ...placed, eye: eyeOf(placed) };
+}
+
+/** MapLibre's near clipping plane for a map centre `distanceM` from the eye through a lens `fovDeg` tall: its height / 50 pixels, against the centre's height / 2 / tan(fov / 2). */
+export const mapNearPlane = (distanceM: number, fovDeg: number): number => (distanceM * Math.tan((fovDeg * RAD) / 2)) / 25;
+
+/** The least distance sightPlacement takes the map's centre out to, metres, where the look does not meet the ground first: nearer, the terrain's skirts are too short to close the gaps between its tiles. */
+export const SIGHT_MIN_M = 2_000;
+
+/**
+ * The same camera with the map's centre moved out along its line of sight (the eye and the look kept, so the
+ * picture is the same): as far as the eye is over the ground (`groundM`), at least SIGHT_MIN_M, or to the ground
+ * if the look meets it first; never so far that MapLibre's near plane (mapNearPlane) passes half the distance to
+ * the nearest thing drawn (`nearestM`: the aircraft's model, or the ground under the eye), and never nearer than
+ * the camera's own centre.
+ *
+ * MapLibre sizes its tiles' detail and its terrain's skirts from where the centre is. With the centre at an
+ * aircraft kilometres up, Top asked for a field of zoom 18 tiles (20 to 30 frames a second where the other cameras
+ * drew 160) and the skirts between terrain tiles were metres long, so gaps opened along far ridges and the page
+ * showed through them (from 300 to 600 m out, gaps; from 2 km, none). Taken farther than the eye's height, as to
+ * where a slanting look meets the ground (Chase's 13 km at 11,000 ft) or the near plane's farthest (Cockpit's
+ * 200 km), the map drew 55 to 85 frames a second; at the eye's height, 110 to 160.
+ */
+export function sightPlacement(shot: EnRouteShot, { groundM, nearestM, fovDeg }: { groundM: number; nearestM: number; fovDeg: number }): EnRouteShot {
+  const above = shot.eye.altitudeM - groundM;
+  if (!(above > 0)) return shot;
+  const nearPlane = (nearestM / 2) * (25 / Math.tan((fovDeg * RAD) / 2));
+  const farthest = Math.max(shot.distanceM, Math.min(Math.max(above, SIGHT_MIN_M), nearPlane));
+  const down = Math.cos(shot.pitchDeg * RAD);
+  // Below the horizon the look meets the ground this far from the eye; at or above it, never.
+  const toGround = down > 1e-9 ? above / down : Infinity;
+  const distanceM = Math.max(shot.distanceM, Math.min(toGround, farthest));
+  if (distanceM === shot.distanceM) return shot;
+  return { ...fromEye(shot.eye, distanceM, shot.bearingDeg, shot.pitchDeg), eye: shot.eye };
 }
 
 /**
@@ -279,13 +322,13 @@ export class EnRouteRig {
     this.state = null;
   }
 
-  /** The camera for this frame at `now` (ms), eased toward `target`, never tilted past the map's limit. */
+  /** The camera for this frame at `now` (ms), eased toward `target`, never tilted past the En-route limit. */
   step(target: EnRoutePlacement, now: number): EnRoutePlacement {
     const s = this.state;
     if (!s) {
       this.state = { east: 0, north: 0, up: 0, distanceM: target.distanceM, bearingDeg: target.bearingDeg, pitchDeg: target.pitchDeg, at: now };
       const { center, elevationM, distanceM, bearingDeg, pitchDeg } = target;
-      return { center, elevationM, distanceM, bearingDeg, pitchDeg: Math.min(MAX_PITCH, pitchDeg) };
+      return { center, elevationM, distanceM, bearingDeg, pitchDeg: Math.min(EN_ROUTE_MAX_PITCH, pitchDeg) };
     }
     const dt = Math.max(0, Math.min(MAX_STEP_S, (now - s.at) / 1000));
     s.at = now;
@@ -297,7 +340,7 @@ export class EnRouteRig {
     s.bearingDeg = wrap360(s.bearingDeg + turn(s.bearingDeg, target.bearingDeg) * (1 - keep));
     s.pitchDeg += (target.pitchDeg - s.pitchDeg) * (1 - keep);
     const [latitude, longitude] = toGeo(target.center, s.east, s.north);
-    return { center: { latitude, longitude }, elevationM: target.elevationM + s.up, distanceM: s.distanceM, bearingDeg: s.bearingDeg, pitchDeg: Math.min(MAX_PITCH, s.pitchDeg) };
+    return { center: { latitude, longitude }, elevationM: target.elevationM + s.up, distanceM: s.distanceM, bearingDeg: s.bearingDeg, pitchDeg: Math.min(EN_ROUTE_MAX_PITCH, s.pitchDeg) };
   }
 }
 

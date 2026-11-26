@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { MAX_PITCH as MAX_PITCH_IN_APP } from "../../src/lib/globe/en-route";
+import { EN_ROUTE_MAX_PITCH as LIMIT_IN_APP } from "../../src/lib/globe/en-route";
 import { SHARE_EASE_S as EASE_IN_APP, shareBlend } from "../../src/lib/globe/en-route-journey";
-import { blend, judgeFrames, MAX_PITCH, SHARE_EASE_S, TILT_STEP_DEG, tiltStep } from "./tilt-step.mjs";
+import { blend, EN_ROUTE_MAX_PITCH, judgeFrames, SHARE_EASE_S, TILT_STEP_DEG, tiltStep } from "./tilt-step.mjs";
 
 // Chase stands at 75 degrees; the journey's flat shot at 47.5 (as in the software GL run).
 const frame = (ms: number, share: number, pitch: number) => ({ at: ms, share, pitch, flatPitch: 47.5 });
@@ -10,7 +10,7 @@ const pitch = (share: number) => 47.5 + (75 - 47.5) * shareBlend(share);
 describe("tiltStep", () => {
   it("reads the app's own ease, blend and tilt limit", () => {
     expect(SHARE_EASE_S).toBe(EASE_IN_APP);
-    expect(MAX_PITCH).toBe(MAX_PITCH_IN_APP);
+    expect(EN_ROUTE_MAX_PITCH).toBe(LIMIT_IN_APP);
     for (const s of [0, 0.1, 0.25, 0.5, 0.8, 1]) expect(blend(s)).toBe(shareBlend(s));
   });
 
@@ -67,10 +67,20 @@ describe("tiltStep", () => {
     expect(judged.ok).toBe(false);
   });
 
-  it("falls back to the map's whole tilt range while the view is flat", () => {
+  it("falls back to the En-route cameras' whole tilt range while the view is flat", () => {
     const judged = tiltStep({ at: 1, share: 0, pitch: 40, flatPitch: null }, { at: 101, share: 0, pitch: 41, flatPitch: null });
     expect(judged.ok).toBe(true);
-    expect(judged.shortGapMs).toBeCloseTo((12 / (1.5 * 78)) * 1200, 6);
+    expect(judged.shortGapMs).toBeCloseTo((12 / (1.5 * 110)) * 1200, 6);
+  });
+
+  it("judges an ease out of Side's level look (90 degrees, past the flat map's 78) as strictly", () => {
+    // Side at 90 over a flat shot at 10: 80 degrees apart, more than the flat map's whole range.
+    const side = (ms: number, share: number) => ({ at: ms, share, pitch: 10 + 80 * shareBlend(share), flatPitch: 10 });
+    const share = 0.5 - 16.7 / 1200;
+    expect(tiltStep(side(1000, 0.5), side(1016.7, share)).ok).toBe(true);
+    const jumped = tiltStep(side(1000, 1), { ...side(1016.7, 1), pitch: 75 });
+    expect(jumped.bound).toBe(TILT_STEP_DEG);
+    expect(jumped.ok).toBe(false);
   });
 });
 

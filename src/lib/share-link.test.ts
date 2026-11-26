@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { type Filters, NO_FILTERS } from "./filters";
-import { formatMapHash, parseMapHash, readShareView, shareLink, type ShareView } from "./share-link";
+import { formatMapHash, mapHashOf, parseMapHash, readShareView, shareLink, type ShareView } from "./share-link";
 
 const BASE = "http://atc.test/";
 
@@ -33,6 +33,14 @@ describe("formatMapHash", () => {
 
   it("round trips through parseMapHash", () => {
     const h = { zoom: 5.5, lat: -12.25, lng: 130.125, bearing: -20, pitch: 30 };
+    expect(parseMapHash(formatMapHash(h))).toEqual(h);
+  });
+});
+
+describe("mapHashOf", () => {
+  it("rounds a map camera as MapLibre's own hash does, and reads back through parseMapHash", () => {
+    const h = mapHashOf({ zoom: 9.123456, lat: 33.6123456, lng: -84.4123456, bearing: -90.4, pitch: 52.6 });
+    expect(h).toEqual({ zoom: 9.12, lat: 33.61235, lng: -84.41235, bearing: -90, pitch: 53 });
     expect(parseMapHash(formatMapHash(h))).toEqual(h);
   });
 });

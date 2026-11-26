@@ -5,11 +5,11 @@ import type { JourneyFix } from "../journey-follow";
 import type { OrbitView } from "../scene/orbit";
 import type { ThemeKey } from "../scene/theme";
 import { groundView, type Lens, mapToOrbit, orbitToMap } from "./camera";
-import { bandPadding, blendPadding, type EnRouteCamera, EnRoutePeek, type EnRoutePlacement, enRoutePose, EnRouteRig, enRouteShot, fitDistance, type Insets, is3D, peekPlacement } from "./en-route";
+import { bandPadding, blendPadding, EN_ROUTE_MAX_PITCH, type EnRouteCamera, EnRoutePeek, type EnRoutePlacement, enRoutePose, EnRouteRig, enRouteShot, eyeOf, fitDistance, type Insets, is3D, MAX_PITCH, peekPlacement, sightPlacement } from "./en-route";
 import { blendPlacement, FALLBACK_NOTICE, type FallbackCause, FrameWatch, RETURN_TO_MAP_S, shareBlend, ShareEase } from "./en-route-journey";
 import type { EnRouteLayer } from "./en-route-layer";
 import type { Rect } from "./journey-frame";
-import { enRouteSky, flatSky, HILLSHADE, HILLSHADE_UNDER, hillshadeLayer, PALETTES, TERRAIN, TERRAIN_SOURCE, terrainSource } from "./map-style";
+import { enRouteSky, flatSky, mapBackground, HILLSHADE, HILLSHADE_UNDER, hillshadeLayer, PALETTES, TERRAIN, TERRAIN_SOURCE, terrainSource } from "./map-style";
 
 /** What the En-route view needs of the World map that holds it (globe-map.ts). */
 export interface EnRouteHost {
@@ -67,6 +67,12 @@ export class EnRouteController {
   private returnTimer: number | undefined;
   /** In the 3D view: the map camera of the journey's own flat shot this frame, where a return to Map lands. */
   private flatShot: FlatShot | null = null;
+  /**
+   * In the 3D view: the camera placed last frame, centred where the camera looks at (the aircraft), before its
+   * centre went out along the line of sight (sightPlacement). Another 3D camera eases in from it, not from the
+   * map's own centre, which can be kilometres down the line of sight.
+   */
+  private lastPlaced: EnRoutePlacement | null = null;
 
   constructor(
     private readonly host: EnRouteHost,
@@ -107,6 +113,15 @@ export class EnRouteController {
   /** In the 3D view, the journey's own Map shot (where the flat map would stand) in the airport's metres; null otherwise. */
   get journeyShot(): OrbitView | null {
     return this.shot;
+  }
+
+  /**
+   * In the 3D view, the map camera of the journey's own flat shot this frame (where the flat map would stand);
+   * null otherwise. The map's own centre then lies down the 3D camera's line of sight, far from the flight.
+   */
+  get journeyCamera(): { lng: number; lat: number; zoom: number; bearing: number; pitch: number } | null {
+    const s = this.flatShot;
+    return s && { lng: s.center[0], lat: s.center[1], zoom: s.zoom, bearing: s.bearing, pitch: s.pitch };
   }
 
   /** Told when the 3D view gives way to Map by itself (a WebGL failure, a frame rate that stays low), with the notice to show; null stops it. */
@@ -190,11 +205,11 @@ export class EnRouteController {
     const ideal = enRouteShot(pose, camera, aircraftClass.lengthM);
     const shot = band ? { ...ideal, distanceM: fitDistance(ideal.distanceM, camera, aircraftClass.lengthM, lens, band) } : ideal;
     if (!this.rigStarted) {
-      // Eased in from the camera the map has now.
+      // Eased in from the camera the map has now: the last one placed in the 3D view (another 3D camera picked), else the map's own.
       this.rigStarted = true;
       const c = map.getCenter();
       const from = mapToOrbit({ lng: c.lng, lat: c.lat, zoom: map.getZoom(), bearing: map.getBearing(), pitch: map.getPitch() }, { latitude: c.lat, longitude: c.lng }, lens);
-      this.rig.start({ center: { latitude: c.lat, longitude: c.lng }, elevationM: map.getCenterElevation(), distanceM: from.distance, bearingDeg: map.getBearing(), pitchDeg: map.getPitch() }, shot, now);
+      this.rig.start(this.lastPlaced ?? { center: { latitude: c.lat, longitude: c.lng }, elevationM: map.getCenterElevation(), distanceM: from.distance, bearingDeg: map.getBearing(), pitchDeg: map.getPitch() }, shot, now);
     }
     // The rig eases the framing; a drag's peek goes on top, so the camera answers the pointer at once.
     const framed = peekPlacement(this.rig.step(shot, now), camera, this.peek.at(now));
@@ -203,12 +218,22 @@ export class EnRouteController {
     const flatCam = orbitToMap({ azimuthDeg: flat.bearingDeg, elevationDeg: mapShot.elevationDeg, target: [0, 0], height: 0, distance: flat.distanceM }, flat.center, lens);
     this.flatShot = { center: [flatCam.lng, flatCam.lat], zoom: flatCam.zoom, bearing: flatCam.bearing, pitch: flatCam.pitch };
     const eased = blendPlacement(flat, framed, shareBlend(share));
-    const orbit: OrbitView = { azimuthDeg: eased.bearingDeg, elevationDeg: 90 - eased.pitchDeg, target: [0, 0], height: 0, distance: eased.distanceM };
-    const cam = orbitToMap(orbit, eased.center, lens);
+    this.lastPlaced = eased;
+    // The same eye and look with the map's centre out along the line of sight, about as far as the eye is over the
+    // ground (sightPlacement), so MapLibre sizes its tiles and skirts for the ground it draws, not for a point
+    // kilometres above it. The nearest thing drawn: the aircraft's model (Cockpit draws none) or the ground under the eye.
+    const eye = eyeOf(eased);
+    const overGround = eye.altitudeM - ground;
+    const [east, north] = toLocal(eye, fix.latitude, fix.longitude);
+    const toModel = Math.hypot(east, north, pose.altitudeM - eye.altitudeM);
+    const nearestM = camera === "cockpit" ? overGround : Math.min(toModel, overGround);
+    const placed = sightPlacement({ ...eased, eye }, { groundM: ground, nearestM, fovDeg: lens.fovDeg });
+    const orbit: OrbitView = { azimuthDeg: placed.bearingDeg, elevationDeg: 90 - placed.pitchDeg, target: [0, 0], height: 0, distance: placed.distanceM };
+    const cam = orbitToMap(orbit, placed.center, lens);
     // The band's padding eases in with the 3D camera, so at none of it the map has its own and the flat shot never steps.
     const own = this.host.padding();
     const padding = band ? blendPadding(own, bandPadding({ width: container.clientWidth, height: container.clientHeight }, band), shareBlend(share)) : own;
-    this.host.place({ center: [cam.lng, cam.lat], zoom: cam.zoom, bearing: cam.bearing, pitch: cam.pitch, elevation: eased.elevationM, padding });
+    this.host.place({ center: [cam.lng, cam.lat], zoom: cam.zoom, bearing: cam.bearing, pitch: cam.pitch, elevation: placed.elevationM, padding });
     // From the Cockpit the aircraft is the one the eye sits in: its model is not drawn, so a peek back never fills the view with it.
     this.layer?.setAircraft(camera === "cockpit" ? null : pose, aircraftClass.model, aircraftClass.lengthM);
     return true;
@@ -226,6 +251,14 @@ export class EnRouteController {
       else handler.enable();
     }
     map.getCanvasContainer().style.touchAction = on ? "none" : "";
+    // The tilt past level the 3D cameras look at (EN_ROUTE_MAX_PITCH), raised before the first 3D frame is placed;
+    // the flat map's and the Diorama's MAX_PITCH back once the view is flat again. The camera is put within it
+    // first, so MapLibre never clamps it itself (the view is flat by then: the journey's shot, or drop's).
+    if (on) map.setMaxPitch(EN_ROUTE_MAX_PITCH);
+    else if (map.getMaxPitch() !== MAX_PITCH) {
+      if (map.getPitch() > MAX_PITCH) this.host.place({ pitch: MAX_PITCH });
+      map.setMaxPitch(MAX_PITCH);
+    }
     if (!map.getLayer("aircraft")) return;
     map.setCenterClampedToGround(!on);
     if (on) {
@@ -235,6 +268,8 @@ export class EnRouteController {
         // The relief shaded from the same tiles, under everything else drawn, and a sky with a horizon.
         if (!map.getLayer(HILLSHADE)) map.addLayer(hillshadeLayer(this.host.theme()), HILLSHADE_UNDER);
         map.setSky(enRouteSky(this.host.theme()));
+        // The ground past the farthest tile drawn, which a look near level sees, in the sky's haze (mapBackground).
+        map.setPaintProperty("background", "background-color", mapBackground(this.host.theme(), true));
         // The layer's own WebGL (its shaders) is made as it is added, and throws if the context cannot.
         if (this.layer && !map.getLayer(this.layer.id)) map.addLayer(this.layer);
       } catch (error) {
@@ -263,6 +298,7 @@ export class EnRouteController {
       if (map.getTerrain()) map.setTerrain(null);
       if (map.getSource(TERRAIN_SOURCE)) map.removeSource(TERRAIN_SOURCE);
       map.setSky(flatSky(this.host.theme()));
+      map.setPaintProperty("background", "background-color", mapBackground(this.host.theme()));
     }
     // The model stands in for the flat marker and its ring.
     for (const id of ["journey-aircraft", "journey-beacon"]) map.setLayoutProperty(id, "visibility", on ? "none" : "visible");
@@ -313,10 +349,9 @@ export class EnRouteController {
     // A fresh ease starts at its first target.
     this.shareEase = new ShareEase();
     this.share = 0;
-    const was = this.on3D;
+    // Brought down before the 3D view goes, so the flat map's tilt limit then finds it within.
+    if (this.on3D) this.host.place({ elevation: 0, pitch: Math.min(this.host.map.getPitch(), 60) });
     this.leave3D();
-    if (!was) return;
-    this.host.place({ elevation: 0, pitch: Math.min(this.host.map.getPitch(), 60) });
   }
 
   /** The rig and the peek start afresh: the next 3D frame eases in from the camera the map has then. */
@@ -334,6 +369,7 @@ export class EnRouteController {
     this.restartRig();
     this.shot = null;
     this.flatShot = null;
+    this.lastPlaced = null;
     if (!this.on3D) return;
     this.on3D = false;
     this.apply();

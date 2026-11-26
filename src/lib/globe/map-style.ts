@@ -326,6 +326,17 @@ export function enRouteSky(key: ThemeKey): SkySpecification {
   return { "sky-color": air.zenith, "horizon-color": air.horizon, "fog-color": air.ground ?? air.horizon, "sky-horizon-blend": 0.2, "horizon-fog-blend": 0.3, "fog-ground-blend": 0.25, "atmosphere-blend": 0 };
 }
 
+/**
+ * The map's background colour: flat, the land's (under the imagery, the page's); in a 3D camera the sky's
+ * haze (enRouteSky's fog colour), since a look near level sees past the farthest tile MapLibre draws, and the
+ * ground there should read as the haze at the horizon, not as bare land.
+ */
+export function mapBackground(key: ThemeKey, terrain = false): string {
+  if (terrain) return enRouteSky(key)["fog-color"] as string;
+  const theme = THEMES[key];
+  return key === "satellite" ? theme.background : theme.surfaces.ground;
+}
+
 /** The En-route view's hillshade layer id, and the layer it goes under (the first drawn over the land), in the style and when added to the map. */
 export const HILLSHADE = "hillshade";
 export const HILLSHADE_UNDER = "water";
@@ -369,7 +380,7 @@ export function mapStyle(key: ThemeKey, { globe = false, radar = null, terrain =
   }
   const arc = arcOpacities(key);
   const layers: LayerSpecification[] = [
-    { id: "background", type: "background", paint: { "background-color": satellite ? theme.background : theme.surfaces.ground } },
+    { id: "background", type: "background", paint: { "background-color": mapBackground(key, terrain) } },
     ...(satellite ? [{ id: "imagery", type: "raster", source: "imagery", paint: { "raster-saturation": -0.1 } } satisfies LayerSpecification] : []),
     ...(terrain ? [hillshadeLayer(key)] : []),
     // The shore is the fill's own outline, not a line layer over the same polygons: a lake's outline is one ring of thousands of points (Lake Lanier is 6,500 at zoom 10), and a
