@@ -1,3 +1,4 @@
+import { turn, wrap360 } from "../geo";
 import type { JourneyStage } from "../journey-follow";
 import type { CameraMode } from "../scene/cameras";
 import type { EnRouteCamera, EnRoutePlacement } from "./en-route";
@@ -13,20 +14,26 @@ import type { Band } from "./handover";
 export const SHARE_FROM = 2.5;
 
 /**
- * How much of the chosen 3D camera the view takes (0 to 1), by the distance of the Journey's own Map shot
- * (the camera the Handover reads): none of it inside the Handover `band`, where the flat map and the
- * Diorama crossfade on one camera; all of it from SHARE_FROM times the band's outer edge out; eased between
- * in log distance, as the band itself is. So leaving the origin the 3D camera takes over once the flight is
+ * How much of the chosen 3D camera the view is to take (0 to 1), by the distance of the Journey's own Map
+ * shot (the camera the Handover reads): none of it inside the Handover `band`, where the flat map and the
+ * Diorama crossfade on one camera; all of it from SHARE_FROM times the band's outer edge out; even in log
+ * distance between, as the band itself is. So leaving the origin the 3D camera takes over once the flight is
  * out of the Diorama, and arriving it eases into the Journey's own shot before the Handover begins. With no
- * band (no Diorama at this end) it is all 3D.
+ * band (no Diorama at this end) it is all 3D. It is the target ShareEase moves the share toward; the view
+ * then takes shareBlend of that share, so the one smoothing eases it in log distance and in time alike.
  */
 export function enRouteShare(distanceM: number, band: Band | null): number {
   if (!band) return 1;
-  return smoothstep(Math.min(1, Math.max(0, Math.log(distanceM / band.far) / Math.log(SHARE_FROM))));
+  return Math.min(1, Math.max(0, Math.log(distanceM / band.far) / Math.log(SHARE_FROM)));
 }
 
-/** An even share (0 to 1) smoothed at both ends: how the view eases between flat and 3D. */
-export const smoothstep = (t: number): number => t * t * (3 - 2 * t);
+/**
+ * How far the view is into the 3D camera for a share (0 to 1): the share smoothed at both ends. The share is
+ * even in log distance (enRouteShare) and moved at an even pace in time (ShareEase), and this is the one
+ * smoothing on top, in both places the view reads it (the camera's blendPlacement and the Handover's
+ * crossfade, both through EnRouteController.blend).
+ */
+export const shareBlend = (share: number): number => share * share * (3 - 2 * share);
 
 /** The stretch round an airport where its Handover band reaches the 3D camera: out to SHARE_FROM times the band's outer edge. */
 export const shareReach = (band: Band): Band => ({ near: band.near, far: band.far * SHARE_FROM });
@@ -44,7 +51,7 @@ export const arrivalCamera = (available: readonly CameraMode[]): CameraMode => (
 /** Whether the Journey card offers the cameras: from the origin's Diorama (a pick there waits for the map) until the destination's has the flight. */
 export const enRouteOffered = (stage: JourneyStage): boolean => stage === "origin" || stage === "map";
 
-/** How long the share takes to go all the way between flat and 3D, seconds: at an even pace, then smoothed (blendPlacement's caller). */
+/** How long the share takes to go all the way between flat and 3D, seconds: at an even pace, then smoothed by shareBlend. */
 export const SHARE_EASE_S = 1.2;
 /**
  * A return to Map the frames have not finished by this long after it began, seconds, is finished at once by a
@@ -141,23 +148,20 @@ export const FALLBACK_NOTICE: Record<FallbackCause, string> = {
   slow: "The 3D cameras could not keep up on this device, so you are back on Map.",
 };
 
-const wrap360 = (deg: number) => ((deg % 360) + 360) % 360;
-
 /**
- * The camera `share` of the way from the flat Map shot `flat` to the 3D camera `rode`: the point looked at
- * and its height moved between the two, the distance closed evenly in scale, the bearing turned the short
- * way round, the tilt between the two.
+ * The camera `share` of the way from the flat Map shot `flat` to the 3D camera's placement `threeD`: the
+ * point looked at and its height moved between the two, the distance closed evenly in scale, the bearing
+ * turned the short way round, the tilt between the two.
  */
-export function blendPlacement(flat: EnRoutePlacement, rode: EnRoutePlacement, share: number): EnRoutePlacement {
+export function blendPlacement(flat: EnRoutePlacement, threeD: EnRoutePlacement, share: number): EnRoutePlacement {
   if (share <= 0) return flat;
-  if (share >= 1) return rode;
+  if (share >= 1) return threeD;
   const mix = (a: number, b: number) => a + (b - a) * share;
-  const turn = ((((rode.bearingDeg - flat.bearingDeg) % 360) + 540) % 360) - 180;
   return {
-    center: { latitude: mix(flat.center.latitude, rode.center.latitude), longitude: mix(flat.center.longitude, rode.center.longitude) },
-    elevationM: mix(flat.elevationM, rode.elevationM),
-    distanceM: flat.distanceM * (rode.distanceM / flat.distanceM) ** share,
-    bearingDeg: wrap360(flat.bearingDeg + turn * share),
-    pitchDeg: mix(flat.pitchDeg, rode.pitchDeg),
+    center: { latitude: mix(flat.center.latitude, threeD.center.latitude), longitude: mix(flat.center.longitude, threeD.center.longitude) },
+    elevationM: mix(flat.elevationM, threeD.elevationM),
+    distanceM: flat.distanceM * (threeD.distanceM / flat.distanceM) ** share,
+    bearingDeg: wrap360(flat.bearingDeg + turn(flat.bearingDeg, threeD.bearingDeg) * share),
+    pitchDeg: mix(flat.pitchDeg, threeD.pitchDeg),
   };
 }

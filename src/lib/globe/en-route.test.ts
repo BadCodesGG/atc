@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { toLocal } from "../geo";
+import { FEET, KNOTS, toLocal } from "../geo";
 import { aircraftMatrix, type AircraftPose, CHASE, COCKPIT, EASE_S, EN_ROUTE_OFFERED, enRouteKey, EnRoutePeek, enRouteShortcut, enRoutePose, enRouteShot, EnRouteRig, is3D, MAX_PITCH, NO_PEEK, PEEK_DEG_PER_PX, peekPlacement, SIDE, TOP } from "./en-route";
 
 const cruise: AircraftPose = { latitude: 35, longitude: -100, altitudeM: 10_000, trackDeg: 90, pitchDeg: 0 };
@@ -270,7 +270,7 @@ describe("enRoutePose", () => {
 
   it("pitches the nose with the climb or descent, from vertical rate over ground speed", () => {
     // 2000 fpm at 300 kt: about 3.8 degrees.
-    expect(enRoutePose(fix, 0).pitchDeg).toBeCloseTo((Math.atan2(2000 * 0.00508, 300 * 0.514444) * 180) / Math.PI, 6);
+    expect(enRoutePose(fix, 0).pitchDeg).toBeCloseTo((Math.atan2((2000 * FEET) / 60, 300 * KNOTS) * 180) / Math.PI, 6);
     expect(enRoutePose({ ...fix, verticalRateFpm: -1500 }, 0).pitchDeg).toBeLessThan(0);
     expect(enRoutePose({ ...fix, verticalRateFpm: null }, 0).pitchDeg).toBe(0);
     expect(enRoutePose({ ...fix, onGround: true }, 0).pitchDeg).toBe(0);

@@ -1,4 +1,4 @@
-import { toGeo, toLocal } from "../geo";
+import { FEET, KNOTS, toGeo, toLocal, turn, wrap360 } from "../geo";
 
 /**
  * The En-route view's cameras (CONTEXT.md): how the World map frames a followed flight in 3D. Pure: a pose
@@ -31,7 +31,7 @@ export function enRouteKey(e: Pick<KeyboardEvent, "key" | "code" | "ctrlKey" | "
 /** Whether a camera tilts the map into 3D, with terrain and the aircraft's model. */
 export const is3D = (camera: EnRouteCamera): camera is Exclude<EnRouteCamera, "map"> => camera !== "map";
 
-/** The map's tilt limit (globe-map.ts, `maxPitch`): no shot asks for more. */
+/** The map's tilt limit, this app's own `maxPitch` map option (globe-map.ts): no shot asks for more. */
 export const MAX_PITCH = 78;
 
 /** Chase: behind the aircraft along its track and above it, looking down at it this many degrees, from this many of its lengths back. */
@@ -62,15 +62,10 @@ export interface EnRouteShot extends EnRoutePlacement {
 }
 
 const RAD = Math.PI / 180;
-const FEET = 0.3048;
-const FPM = 0.00508;
-const KT = 0.514444;
+/** Metres a second in a foot a minute. */
+const FPM = FEET / 60;
 /** The steepest climb or descent attitude drawn: past it the read is wrong, not the aircraft. */
 const MAX_ATTITUDE_DEG = 20;
-
-const wrap360 = (deg: number) => ((deg % 360) + 360) % 360;
-/** The signed turn from `from` to `to`, the short way round, -180 to 180. */
-const turn = (from: number, to: number) => ((((to - from) % 360) + 540) % 360) - 180;
 
 /** What the pose is read from: a fix from the shared tracker (Journey.fix). */
 export interface PoseFix {
@@ -92,7 +87,7 @@ export function enRoutePose(fix: PoseFix, groundM: number): AircraftPose {
   const altitudeM = fix.onGround ? groundM : Math.max(groundM, fix.altitudeFt * FEET);
   let pitchDeg = 0;
   if (!fix.onGround && fix.verticalRateFpm !== null) {
-    pitchDeg = Math.atan2(fix.verticalRateFpm * FPM, Math.max(0, fix.groundSpeedKt ?? 0) * KT) / RAD;
+    pitchDeg = Math.atan2(fix.verticalRateFpm * FPM, Math.max(0, fix.groundSpeedKt ?? 0) * KNOTS) / RAD;
     pitchDeg = Math.max(-MAX_ATTITUDE_DEG, Math.min(MAX_ATTITUDE_DEG, pitchDeg));
   }
   return { latitude: fix.latitude, longitude: fix.longitude, altitudeM, trackDeg: wrap360(fix.headingDeg), pitchDeg };
@@ -153,8 +148,9 @@ export function peekPlacement(placement: EnRoutePlacement, camera: Exclude<EnRou
 
 /**
  * The camera's placement for `pose`, for an aircraft drawn `lengthM` long, looked round by a drag's
- * `peek`. MapLibre tilts no further than MAX_PITCH (12 degrees above straight ahead is out of reach), so
- * Side's level look and Cockpit's climb are held there: Side looks down at the aircraft 12 degrees, and
+ * `peek`. The map tilts no further than MAX_PITCH, this app's own `maxPitch` map option (globe-map.ts; the
+ * Diorama's limit too), not a limit of MapLibre's: the last 12 degrees to a level look are out of reach, so
+ * Side's level look and Cockpit's climb are held there. Side looks down at the aircraft 12 degrees, and
  * Cockpit's pitch follows the attitude only in a descent steeper than 12 degrees.
  */
 export function enRouteShot(pose: AircraftPose, camera: Exclude<EnRouteCamera, "map">, lengthM: number, peek: Peek = NO_PEEK): EnRouteShot {

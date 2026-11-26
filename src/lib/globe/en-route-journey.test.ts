@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { arrivalCamera, blendPlacement, enRouteOffered, enRouteShare, FALLBACK_NOTICE, FrameWatch, mapCamera, RETURN_TO_MAP_S, SHARE_EASE_S, SHARE_FROM, ShareEase, shareReach, SLOW_FOR_S } from "./en-route-journey";
+import { arrivalCamera, blendPlacement, enRouteOffered, enRouteShare, FALLBACK_NOTICE, FrameWatch, mapCamera, RETURN_TO_MAP_S, SHARE_EASE_S, SHARE_FROM, shareBlend, ShareEase, shareReach, SLOW_FOR_S } from "./en-route-journey";
 import type { EnRoutePlacement } from "./en-route";
 
 /** Feeds `watch` frames at `fps` for `seconds` from `from` ms; returns whether it called for Map, and the time it ended. */
@@ -223,6 +223,15 @@ describe("enRouteShare: how much of the 3D camera the view takes, by the Journey
       expect(s - last).toBeLessThan(0.02);
       last = s;
     }
+  });
+
+  it("is even in log distance: the one smoothing is shareBlend's, after the ease in time", () => {
+    expect(enRouteShare(band.far * SHARE_FROM ** 0.25, band)).toBeCloseTo(0.25, 9);
+    expect(enRouteShare(band.far * SHARE_FROM ** 0.5, band)).toBeCloseTo(0.5, 9);
+    // Held steady, the share is the distance's, and the view takes smoothstep of it: smoothed once.
+    expect(shareBlend(0.25)).toBeCloseTo(0.15625, 9);
+    expect(shareBlend(0)).toBe(0);
+    expect(shareBlend(1)).toBe(1);
   });
 
   it("is all 3D with no band to hand into (no Diorama at this end)", () => {

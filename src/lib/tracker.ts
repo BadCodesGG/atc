@@ -1,5 +1,5 @@
 import { OFFLINE_AFTER_S } from "./feed-health";
-import { KNOTS, type Origin, toGeo, toLocal } from "./geo";
+import { KNOTS, type Origin, toGeo, toLocal, turn, wrap360 } from "./geo";
 import type { Aircraft, TrafficSnapshot } from "./traffic";
 
 /**
@@ -212,9 +212,6 @@ interface Track {
 }
 
 const RAD = Math.PI / 180;
-const wrap360 = (degrees: number) => ((degrees % 360) + 360) % 360;
-/** Signed turn from one heading to another, the short way round, in [-180, 180). */
-const turn = (from: number, to: number) => ((((to - from) % 360) + 540) % 360) - 180;
 const lerp = (a: number, b: number, u: number) => a + (b - a) * u;
 
 /**

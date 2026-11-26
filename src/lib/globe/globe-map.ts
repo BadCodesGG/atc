@@ -14,7 +14,7 @@ import { toGeo, toLocal, type Origin } from "../geo";
 import type { JourneyFeatures, JourneyFix } from "../journey-follow";
 import { classify } from "../aircraft-class";
 import { type EnRouteCamera, EnRoutePeek, type EnRoutePlacement, enRoutePose, EnRouteRig, enRouteShot, is3D, peekPlacement } from "./en-route";
-import { blendPlacement, FALLBACK_NOTICE, type FallbackCause, FrameWatch, RETURN_TO_MAP_S, ShareEase, smoothstep } from "./en-route-journey";
+import { blendPlacement, FALLBACK_NOTICE, type FallbackCause, FrameWatch, RETURN_TO_MAP_S, shareBlend, ShareEase } from "./en-route-journey";
 import type { EnRouteLayer } from "./en-route-layer";
 import { AIRCRAFT_GLYPH, GLYPH_BOX } from "./aircraft-glyph";
 import { finiteCamera, groundView, type Lens, type MapCamera, mapToOrbit, orbitToMap, paddingFor, worldFloor } from "./camera";
@@ -560,7 +560,7 @@ export class GlobeMap {
 
   /** How far the view is into the 3D camera this frame (0 flat, 1 all 3D), smoothed as the camera is: the Handover's crossfade gives way by as much. */
   get enRouteBlend(): number {
-    return smoothstep(this.share);
+    return shareBlend(this.share);
   }
 
   /**
@@ -782,7 +782,7 @@ export class GlobeMap {
     const flat: EnRoutePlacement = { center: { latitude: slat, longitude: slon }, elevationM: mapShot.height, distanceM: mapShot.distance, bearingDeg: mapShot.azimuthDeg, pitchDeg: 90 - mapShot.elevationDeg };
     const flatCam = orbitToMap({ azimuthDeg: flat.bearingDeg, elevationDeg: mapShot.elevationDeg, target: [0, 0], height: 0, distance: flat.distanceM }, flat.center, lens);
     this.flatShot = { center: [flatCam.lng, flatCam.lat], zoom: flatCam.zoom, bearing: flatCam.bearing, pitch: flatCam.pitch };
-    const eased = blendPlacement(flat, rode, smoothstep(share));
+    const eased = blendPlacement(flat, rode, shareBlend(share));
     const orbit: OrbitView = { azimuthDeg: eased.bearingDeg, elevationDeg: 90 - eased.pitchDeg, target: [0, 0], height: 0, distance: eased.distanceM };
     const cam = orbitToMap(orbit, eased.center, lens);
     this.following = true;
