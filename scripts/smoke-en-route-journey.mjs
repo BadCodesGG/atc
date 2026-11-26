@@ -136,8 +136,13 @@ async function gateToGate({ browser, base, check }) {
     check("en-route journey: arriving, Chase eases into the journey's own flat shot, terrain off, before the Handover into Charlotte", last3D >= 0 && eased, `last 3D sample ${last3D} of ${onMap.length}; then ${before.length} flat samples; ${JSON.stringify(onMap[last3D])}`);
     // The ease is continuous: no frame-to-frame step in the tilt like the old snap back to Map (75 to 60 degrees at once).
     let jump = 0;
-    for (let i = Math.max(1, takeover); i < onMap.length; i++) if (onMap[i].t - onMap[i - 1].t < 1500) jump = Math.max(jump, Math.abs(onMap[i].pitch - onMap[i - 1].pitch));
-    check("en-route journey: the camera's tilt never steps on the way (largest change between samples under 12 degrees)", jump < 12, `${jump.toFixed(1)} degrees`);
+    let where = null;
+    for (let i = Math.max(1, takeover); i < onMap.length; i++) {
+      const step = Math.abs(onMap[i].pitch - onMap[i - 1].pitch);
+      if (onMap[i].t - onMap[i - 1].t < 1500 && step > jump) [jump, where] = [step, i];
+    }
+    const pose = (s) => s && { t: s.t, pitch: s.pitch, zoom: s.zoom, share: s.share, camera: s.camera, terrain: s.terrain };
+    check("en-route journey: the camera's tilt never steps on the way (largest change between samples under 12 degrees)", jump < 12, `${jump.toFixed(1)} degrees${where ? `, sample ${where} of ${onMap.length}: ${JSON.stringify([pose(onMap[where - 1]), pose(onMap[where])])}` : ""}`);
 
     // Charlotte's Diorama opens in its Approach camera when it has one for the flight, else Orbit.
     const mode = await waitForTruthy(page, `(() => { const r = ${RIG}; return r && r.mode; })()`, 10_000).then(() => page.evaluate(`${RIG}.mode`), () => null);
@@ -307,8 +312,10 @@ async function smallScreens({ browser, base, check }) {
       const band = { top: Math.round(card.y + card.height + 8), bottom: Math.round((await footTop(page, viewport.height)) - 8) };
       await group.getByRole("button", { name: "Map", exact: true }).click();
       const details = [];
+      // Over 4 s, and at least four shots: under software GL the last 3D frame (Top's, with the relief) can hold the first shot for seconds.
       const end = Date.now() + 4_000;
-      while (Date.now() < end) details.push(await mapDetail(page, await page.screenshot(), band));
+      const cap = Date.now() + 20_000;
+      while ((Date.now() < end || details.length < 4) && Date.now() < cap) details.push(await mapDetail(page, await page.screenshot(), band));
       const flat = await waitForTruthy(page, `(() => { const s = ${STATE}; return s && s.camera === "map" && s.pressed === "Map" && s.terrain === null && s.layer === null; })()`, 15_000).then(() => true, () => false);
       check(`en-route ${name}: Map takes the terrain and the model off again`, flat, JSON.stringify({ ...(await page.evaluate(STATE)), credit: undefined }));
       const backAir = await page.evaluate(AIR);
