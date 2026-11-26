@@ -18,6 +18,7 @@ import { mapSelectChecks } from "./smoke-map-select.mjs";
 import { procedureChecks } from "./smoke-procedures.mjs";
 import { remoteFlightChecks } from "./smoke-remote-flight.mjs";
 import { titleRowChecks, titleRowPointerChecks } from "./smoke-title-row.mjs";
+import { trackerMotionChecks } from "./smoke-tracker-motion.mjs";
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
 const PORT = Number(process.env.SMOKE_PORT ?? 3119);
@@ -1119,6 +1120,9 @@ try {
 
   // The journey under what the live feed brings that the recording does not: a hand into the airport already on show, a quiet transponder, a feed that loses the aircraft (scripts/smoke-journey-live.mjs).
   await journeyLiveChecks({ browser, base: BASE, check });
+
+  // The Tracker's motion rules in the page's own frames: no aircraft steps back along its track or jumps as reads arrive (scripts/smoke-tracker-motion.mjs).
+  await trackerMotionChecks({ browser, base: BASE, check });
 } catch (error) {
   check("smoke run completed", false, String(error));
 } finally {

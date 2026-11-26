@@ -3,7 +3,8 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 import type { AirportMap } from "./airport-map";
 import { DEFAULT_AIRPORT } from "./airports";
-import { Tracker } from "./tracker";
+import { KNOTS } from "./geo";
+import { GROUND_DEAD_RECKON_MAX, Tracker } from "./tracker";
 import { parseTraffic } from "./traffic";
 import { fixtureTime, TrafficView } from "./traffic-view";
 
@@ -78,8 +79,9 @@ describe("TrafficView on the ATL fixture", () => {
     const { frame, snapshot } = fixtureFrame();
     for (const e of frame.entries.filter((x) => x.aircraft.onGround)) {
       const fix = snapshot.aircraft.find((a) => a.id === e.aircraft.id)!;
-      // EDV5051's fix was 42 s old at 18.5 kt: carried on for all of it, it sat 417 m away.
-      expect(Math.hypot(e.scene.x - fix.x, e.scene.y - fix.y)).toBeLessThan(80);
+      // EDV5051's fix was 42 s old at 18.5 kt: carried on for all of it, it sat 417 m away. It is carried
+      // on for no more than the ground dead reckoning limit (enough to cross a missed read): 114 m.
+      expect(Math.hypot(e.scene.x - fix.x, e.scene.y - fix.y)).toBeLessThanOrEqual((fix.groundSpeedKt ?? 0) * KNOTS * GROUND_DEAD_RECKON_MAX + 1e-6);
     }
   });
 

@@ -7,8 +7,16 @@ import type { TrafficSnapshot } from "./traffic";
  * frame. Playback runs a fixed delay behind the live clock, so there is almost always a sample on
  * each side of the moment being drawn and an aircraft glides between real fixes instead of
  * snapping to each new one. Only when the feed stalls does it fall back on dead reckoning, and when
- * the report that ends a stall disagrees with where dead reckoning had got to, the difference is
- * blended away over a second or two rather than shown as a jump.
+ * the report that ends a stall disagrees with where dead reckoning had got to, the drawn aircraft
+ * chases its new path over a second or two rather than jumping to it.
+ *
+ * The motion rules, frame to frame, for each drawn aircraft:
+ * - it never moves backward along its track: not against the way its path is going, not back on its
+ *   move in the frame before and, in the air, not against the track it is drawn on; unless it was at
+ *   rest (a pushback ends and the aircraft sets off forward). A correction that would pull it back
+ *   holds it instead, and its path catches up with it;
+ * - it never steps more than about a second of its own speed in one frame;
+ * - an error over CORRECTION_SNAP is not the same track carrying on, and it jumps there.
  */
 
 /** Seconds the picture runs behind the live clock. Covers the 4 s cache plus a poll interval of jitter. */
@@ -16,21 +24,35 @@ export const PLAYBACK_DELAY = 8;
 /** Longest an aircraft is extrapolated past its last sighting before it starts to fade out. */
 export const DEAD_RECKON_MAX = 15;
 /**
- * Longest a ground aircraft is carried on past its fix. Taxiways turn and aircraft stop: a ground fix
- * is often 30 s old or more, and carried on for all of it a taxiing aircraft ends up hundreds of
- * metres off the pavement. When the next fix arrives the difference is blended away.
+ * Longest a ground aircraft is carried on past its fix: long enough to cross the playback delay with a
+ * read or two missed (reads come every 5 s), so a taxiing aircraft keeps rolling instead of stalling and
+ * then catching up. Not for the whole age of an old fix: taxiways turn and aircraft stop, and an old
+ * ground fix carried on for 30 s or more would put a taxiing aircraft far off the pavement.
  */
-export const GROUND_DEAD_RECKON_MAX = 5;
+export const GROUND_DEAD_RECKON_MAX = 12;
 /**
- * Time constant, seconds, of the decay that blends a correction away (95% gone in three of these):
- * the shortest for a small correction, longer for a large one so it is never caught up faster than
- * CORRECTION_SPEED, up to the longest.
+ * Time constant, seconds, of the chase that takes a drawn aircraft onto a corrected path (95% there in
+ * three of these): the shortest for a small correction, longer for a large one so it is never caught
+ * up faster than CORRECTION_SPEED, up to the longest.
  */
 export const CORRECTION_DECAY = 0.6;
 const CORRECTION_DECAY_MAX = 2;
 const CORRECTION_SPEED = 100;
 /** A correction farther than this, metres, is not the same track carrying on: the aircraft jumps to it. */
 export const CORRECTION_SNAP = 1_500;
+/** The longest a drawn aircraft steps in one frame, as seconds of its own speed. */
+export const STEP_SECONDS = 1;
+/** The longest step allowed whatever the speed, metres: a correction to an aircraft at rest still settles. */
+export const STEP_FLOOR = 5;
+/** A move shorter than this, metres, says nothing about which way an aircraft is going. */
+const MIN_MOVE = 1e-3;
+/**
+ * Frames further apart than this, seconds, are not one motion (a hidden tab, a seek, a coarse replay):
+ * the aircraft is drawn on its path, with nothing carried over from the frame before.
+ */
+const MAX_FRAME_GAP = 1;
+/** A ground course over fixes closer than this, metres, is noise, not a direction. */
+const MIN_COURSE = 3;
 export const FADE_IN = 2;
 /** Slower than this on the ground is standing still. */
 const STOPPED_KT = 1;
@@ -78,23 +100,20 @@ interface Sample {
   verticalRateFpm: number | null;
 }
 
-/**
- * The displacement between where an aircraft was drawn and where the samples now put it, at the
- * moment a new report changed its path. It decays to nothing from then on.
- */
-interface Correction {
-  at: number;
-  /** Decay time constant, seconds. */
-  decay: number;
-  x: number;
-  y: number;
-  altitudeFt: number;
-  headingDeg: number;
+/** Where an aircraft was last drawn, and which way it was going: what the next frame's move is held to. */
+interface Drawn {
+  /** The playback moment it was drawn at. */
+  t: number;
+  pose: Pose;
+  /** Unit [east, north] of the way its path was last going (kept while the path stands still); null when unknown or at rest. */
+  travel: [number, number] | null;
+  /** Unit [east, north] of its move in the frame before; null when it did not move. */
+  last: [number, number] | null;
 }
 
 interface Track {
   samples: Sample[];
-  correction: Correction | null;
+  drawn: Drawn | null;
   /** Render time at which the aircraft becomes visible and starts fading in. */
   start: number;
   /** Time of the newest snapshot that listed it. */
@@ -128,9 +147,18 @@ function velocity(s: Sample): [number, number] {
   return [v * Math.sin(h), v * Math.cos(h)];
 }
 
-/** Where a sample has got to `elapsed` seconds later, flying straight on at the same speed and climb rate. */
-function project(s: Sample, elapsed: number): Pick<Pose, "x" | "y" | "altitudeFt"> {
-  const [vx, vy] = velocity(s);
+/**
+ * Where a sample has got to `elapsed` seconds later, flying straight on at the same speed and climb rate.
+ * On the ground the reported direction can be the nose's, not the way the aircraft is going: one that
+ * came to this fix tail first (`previous` lies ahead of its nose, as in a pushback) carries on tail first.
+ */
+function project(s: Sample, elapsed: number, previous?: Sample): Pick<Pose, "x" | "y" | "altitudeFt"> {
+  let [vx, vy] = velocity(s);
+  if (s.onGround && previous) {
+    const cx = s.x - previous.x;
+    const cy = s.y - previous.y;
+    if (Math.hypot(cx, cy) > MIN_COURSE && cx * vx + cy * vy < 0) [vx, vy] = [-vx, -vy];
+  }
   const climb = s.onGround ? 0 : ((s.verticalRateFpm ?? 0) / 60) * elapsed;
   return { x: s.x + vx * elapsed, y: s.y + vy * elapsed, altitudeFt: Math.max(0, s.altitudeFt + climb) };
 }
@@ -181,8 +209,6 @@ export class Tracker {
   private readonly reckon: number;
   private readonly tracks = new Map<string, Track>();
   private newest = -Infinity;
-  /** The playback moment last drawn, so a new report can be blended from what is on screen. */
-  private drawn: number | null = null;
 
   /**
    * `deadReckonMax`: how long an aircraft is flown on past its last sighting before it fades (default
@@ -212,12 +238,9 @@ export class Tracker {
     for (const a of snapshot.aircraft) {
       let track = this.tracks.get(a.id);
       if (!track) {
-        track = { samples: [], correction: null, start: 0, lastSeen: snapshot.time, callsign: null, registration: null, typeCode: null, military: false, category: null };
+        track = { samples: [], drawn: null, start: 0, lastSeen: snapshot.time, callsign: null, registration: null, typeCode: null, military: false, category: null };
         this.tracks.set(a.id, track);
       }
-      // Where it is on screen now, before this report changes its path (a new fix, or a longer listing).
-      const drawn = this.drawn;
-      const before = drawn !== null && track.samples.length > 0 && drawn >= Math.max(track.start, track.samples[0].t) ? this.pose(track, drawn) : null;
       track.lastSeen = snapshot.time;
       track.callsign = a.callsign ?? track.callsign;
       track.registration = a.registration ?? track.registration;
@@ -243,7 +266,6 @@ export class Tracker {
         });
         if (!last) track.start = Math.max(t, snapshot.time - this.delay);
       }
-      if (before) this.correct(track, before, drawn!);
     }
     this.prune();
   }
@@ -255,52 +277,87 @@ export class Tracker {
    */
   at(time: number): TrackedAircraft[] {
     const t = time - this.delay;
-    this.drawn = t;
     const out: TrackedAircraft[] = [];
     for (const [id, track] of this.tracks) {
       const fade = Math.min(1, (t - track.start) / FADE_IN, 1 - (t - (track.lastSeen + this.reckonFor(track))) / FADE_OUT);
-      if (!(fade > 0)) continue;
-      out.push({ id, callsign: track.callsign, registration: track.registration, typeCode: track.typeCode, military: track.military, category: track.category, fade, ...this.pose(track, t) });
+      if (!(fade > 0)) {
+        track.drawn = null;
+        continue;
+      }
+      out.push({ id, callsign: track.callsign, registration: track.registration, typeCode: track.typeCode, military: track.military, category: track.category, fade, ...this.draw(track, t) });
     }
     return out;
   }
 
-  /** Where the track is drawn at playback moment t: its path through the samples, plus what is left of any correction. */
-  private pose(track: Track, t: number): Pose {
-    const p = this.state(track, t);
-    const c = track.correction;
-    if (!c) return p;
-    const k = Math.exp(-Math.max(0, t - c.at) / c.decay);
-    if (k < 1e-3) {
-      track.correction = null;
-      return p;
-    }
-    return {
-      ...p,
-      x: p.x + c.x * k,
-      y: p.y + c.y * k,
-      altitudeFt: Math.max(0, p.altitudeFt + c.altitudeFt * k),
-      headingDeg: wrap360(p.headingDeg + c.headingDeg * k),
-    };
-  }
-
   /**
-   * A new fix has just changed the track's path. Keep the aircraft where it was drawn by carrying the
-   * difference as a correction that then decays; a difference too big to be the same track is dropped
-   * and the aircraft jumps.
+   * Where the track is drawn at playback moment t: on from where it was drawn the frame before by as far
+   * as its path moved, plus a share of whatever separates it from its path (a new report having moved
+   * the path since), held to the motion rules.
    */
-  private correct(track: Track, before: Pose, t: number): void {
-    track.correction = null;
-    const after = this.state(track, t);
-    const dx = before.x - after.x;
-    const dy = before.y - after.y;
-    const error = Math.hypot(dx, dy);
-    const dAlt = before.altitudeFt - after.altitudeFt;
-    const dHeading = turn(after.headingDeg, before.headingDeg);
-    // Nothing moved; or too far to be the same track carrying on.
-    if ((error < 1e-6 && Math.abs(dAlt) < 1e-6 && Math.abs(dHeading) < 1e-6) || error > CORRECTION_SNAP) return;
-    const decay = Math.min(CORRECTION_DECAY_MAX, Math.max(CORRECTION_DECAY, error / CORRECTION_SPEED));
-    track.correction = { at: t, decay, x: dx, y: dy, altitudeFt: dAlt, headingDeg: dHeading };
+  private draw(track: Track, t: number): Pose {
+    const target = this.state(track, t);
+    const before = track.drawn;
+    if (!before || t - before.t > MAX_FRAME_GAP || t < before.t) {
+      track.drawn = { t, pose: target, travel: null, last: null };
+      return target;
+    }
+    if (t === before.t) return before.pose;
+    const dt = t - before.t;
+    const from = before.pose;
+    // How the path itself moved over the frame, as it stands now.
+    const was = this.state(track, before.t);
+    const pathX = target.x - was.x;
+    const pathY = target.y - was.y;
+    const pathAlt = target.altitudeFt - was.altitudeFt;
+    const pathTurn = turn(was.headingDeg, target.headingDeg);
+    // What still separates the drawn aircraft from its path once carried on with it.
+    const errX = target.x - (from.x + pathX);
+    const errY = target.y - (from.y + pathY);
+    const error = Math.hypot(errX, errY);
+    if (error > CORRECTION_SNAP) {
+      track.drawn = { t, pose: target, travel: null, last: null };
+      return target;
+    }
+    const k = 1 - Math.exp(-dt / Math.min(CORRECTION_DECAY_MAX, Math.max(CORRECTION_DECAY, error / CORRECTION_SPEED)));
+    let x = pathX + errX * k;
+    let y = pathY + errY * k;
+
+    // Never against the way its path is going, nor back on its last move, nor (in the air, where the
+    // reported track is the way over the ground) against the track it is drawn on; unless it was at rest.
+    // A correction that would pull it back holds it instead, while its path catches up.
+    const pathMoved = Math.hypot(pathX, pathY);
+    const atRest = from.groundSpeedKt !== null && from.groundSpeedKt < STOPPED_KT;
+    const travel: [number, number] | null = pathMoved > MIN_MOVE ? [pathX / pathMoved, pathY / pathMoved] : atRest ? null : before.travel;
+    if (!atRest) {
+      const flown: [number, number] | null = !from.onGround && from.headingKnown ? [Math.sin(from.headingDeg * RAD), Math.cos(from.headingDeg * RAD)] : null;
+      const ways = [travel, before.last, flown].filter((u) => u !== null);
+      for (const u of ways) {
+        const along = x * u[0] + y * u[1];
+        if (along < 0) {
+          x -= along * u[0];
+          y -= along * u[1];
+        }
+      }
+      // Two directions more than a right angle apart leave no way forward: it stands still for the frame.
+      if (ways.some((u) => x * u[0] + y * u[1] < -1e-12)) [x, y] = [0, 0];
+    }
+    // Never more than about a second of its own speed in a frame: the reported one, else its path's.
+    const speed = from.groundSpeedKt !== null ? from.groundSpeedKt * KNOTS : Math.hypot(pathX, pathY) / dt;
+    const bound = Math.max(speed * STEP_SECONDS, STEP_FLOOR);
+    const step = Math.hypot(x, y);
+    if (step > bound) {
+      x *= bound / step;
+      y *= bound / step;
+    }
+
+    const altitudeFt = Math.max(0, from.altitudeFt + pathAlt + (target.altitudeFt - from.altitudeFt - pathAlt) * k);
+    const heading = from.headingDeg + pathTurn;
+    const pose: Pose = { ...target, x: from.x + x, y: from.y + y, altitudeFt, headingDeg: wrap360(heading + turn(heading, target.headingDeg) * k) };
+    const moved = Math.hypot(x, y);
+    // A frame it stood still in leaves it free to set off any way its path goes next (a hairpin turn
+    // between two ground fixes): what it may not do is turn straight back on a move it just made.
+    track.drawn = { t, pose, travel, last: moved > MIN_MOVE ? [x / moved, y / moved] : null };
+    return pose;
   }
 
   private state(track: Track, t: number): Pose {
@@ -310,7 +367,7 @@ export class Tracker {
       // Past the newest fix: carry on from it. An aircraft still being listed with an old fix is
       // extrapolated from that fix to its last listing, and 15 s beyond.
       const elapsed = Math.min(t - last.t, track.lastSeen - last.t + this.reckon, last.onGround ? GROUND_DEAD_RECKON_MAX : Infinity);
-      return { ...pose(last), ...project(last, elapsed) };
+      return { ...pose(last), ...project(last, elapsed, samples.at(-2)) };
     }
     // Before the oldest fix still held: pruning can leave one fix ahead of a moment drawn a little
     // behind the feed. Hold at that fix.

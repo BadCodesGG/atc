@@ -1,6 +1,10 @@
-import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { beforeAll, describe, expect, it } from "vitest";
+import { DEFAULT_AIRPORT } from "./airports";
 import { KNOTS } from "./geo";
-import { FADE_OUT, GROUND_DEAD_RECKON_MAX, Tracker } from "./tracker";
+import { readSequence } from "./sequence";
+import { CORRECTION_SNAP, FADE_OUT, GROUND_DEAD_RECKON_MAX, PLAYBACK_DELAY, type TrackedAircraft, Tracker } from "./tracker";
 import type { Aircraft, TrafficSnapshot } from "./traffic";
 
 /** Knots that make one metre per second, so positions in these tests read as plain arithmetic. */
@@ -231,13 +235,15 @@ describe("Tracker dead reckoning", () => {
     expect(only(tracker, 113).headingKnown).toBe(true);
   });
 
-  it("stops dead-reckoning a ground aircraft a few seconds past its fix, however old the fix", () => {
+  it("stops dead-reckoning a ground aircraft some seconds past its fix, however old the fix", () => {
     // A taxiing aircraft's old fix, carried on for its whole 40 s age, would put it hundreds of metres off the taxiway.
     const tracker = new Tracker();
     tracker.add(snapshot(100, aircraft("a", 0, 0, { onGround: true, altitudeFt: 0, groundSpeedKt: 10 * MPS, trackDeg: 90, positionAge: 40 })));
     const s = only(tracker, 100 + 8 + 2);
     expect(s.x).toBeCloseTo(10 * GROUND_DEAD_RECKON_MAX);
-    expect(GROUND_DEAD_RECKON_MAX).toBeLessThanOrEqual(6);
+    // Long enough to carry a taxiing aircraft across the playback delay with a read or two missed, far short of the fix's age.
+    expect(GROUND_DEAD_RECKON_MAX).toBeGreaterThanOrEqual(PLAYBACK_DELAY + 2 * 2);
+    expect(GROUND_DEAD_RECKON_MAX).toBeLessThanOrEqual(15);
   });
 
 
@@ -399,6 +405,140 @@ describe("Tracker before its oldest fix", () => {
     const s = only(tracker, 130);
     expect(s.fade).toBeGreaterThan(0);
     expect(s.x).toBeCloseTo(35);
+  });
+});
+
+/** Slower than this, knots, an aircraft is at rest, and may set off in any direction. */
+const AT_REST_KT = 1;
+/** The least per-frame step bound, metres: a correction of an aircraft at rest still settles. */
+const STEP_FLOOR_M = 5;
+
+interface Frame {
+  clock: number;
+  /** A snapshot was added just before this frame was drawn. */
+  read: boolean;
+  aircraft: Map<string, TrackedAircraft>;
+}
+
+/** Plays `arrivals` through `tracker` as a page would, each added once the clock reaches its time, sampling every aircraft at `fps`. */
+function play(tracker: Tracker, arrivals: TrafficSnapshot[], from: number, to: number, fps = 60): Frame[] {
+  const frames: Frame[] = [];
+  let next = 0;
+  for (let i = 0; from + i / fps <= to; i++) {
+    const clock = from + i / fps;
+    let read = false;
+    while (next < arrivals.length && arrivals[next].time <= clock) {
+      tracker.add(arrivals[next++]);
+      read = true;
+    }
+    frames.push({ clock, read, aircraft: new Map(tracker.at(clock).map((a) => [a.id, a])) });
+  }
+  return frames;
+}
+
+/**
+ * Every frame-to-frame move that breaks the motion rules: a move back against the aircraft's move in the
+ * frame before (unless it was at rest, where it may set off any way, as after a pushback), or a move
+ * longer than about one second of its own speed, unless it is a snap over CORRECTION_SNAP as a read arrives.
+ */
+function violations(frames: Frame[]) {
+  const out: string[] = [];
+  const heading = new Map<string, [number, number]>();
+  let moves = 0;
+  for (let i = 1; i < frames.length; i++) {
+    for (const [id, a] of frames[i].aircraft) {
+      const before = frames[i - 1].aircraft.get(id);
+      if (!before) {
+        heading.delete(id);
+        continue;
+      }
+      const dx = a.x - before.x;
+      const dy = a.y - before.y;
+      const step = Math.hypot(dx, dy);
+      moves++;
+      const speed = (before.groundSpeedKt ?? 0) * KNOTS;
+      const atRest = before.groundSpeedKt !== null && before.groundSpeedKt < AT_REST_KT;
+      const bound = Math.max(speed, STEP_FLOOR_M) * 1 + 1e-6;
+      const snapped = frames[i].read && step > CORRECTION_SNAP;
+      if (step > bound && !snapped) out.push(`${id} stepped ${step.toFixed(1)} m at ${frames[i].clock.toFixed(2)} (bound ${bound.toFixed(1)} m)`);
+      // In the air the reported track is the way it is going over the ground: it never moves against it.
+      if (!before.onGround && before.headingKnown && !snapped) {
+        const along = dx * Math.sin((before.headingDeg * Math.PI) / 180) + dy * Math.cos((before.headingDeg * Math.PI) / 180);
+        if (along < -1e-6) out.push(`${id} flew ${(-along).toFixed(3)} m back along its track at ${frames[i].clock.toFixed(2)}`);
+      }
+      const travel = heading.get(id);
+      if (travel && !atRest && !snapped && dx * travel[0] + dy * travel[1] < -1e-6) out.push(`${id} moved ${(-(dx * travel[0] + dy * travel[1])).toFixed(3)} m backward at ${frames[i].clock.toFixed(2)}`);
+      // A frame it stood still in, or a snap, leaves it free to set off any way.
+      if (snapped || step <= 1e-3) heading.delete(id);
+      else heading.set(id, [dx / step, dy / step]);
+    }
+  }
+  return { out, moves };
+}
+
+describe("Tracker motion over the recorded ATL sequence", () => {
+  let snapshots: TrafficSnapshot[];
+  beforeAll(async () => {
+    // About six minutes of live ATL traffic, read every 15 s: well past the playback delay, so every
+    // aircraft is dead reckoned and then corrected as each read arrives.
+    const bytes = readFileSync(path.join(import.meta.dirname, "../../public/fixtures/atl-sequence.json.gz"));
+    snapshots = await readSequence(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength), DEFAULT_AIRPORT);
+  });
+
+  it("never moves a drawn aircraft backward along its travel, nor more than a second of its own speed in a frame", () => {
+    const frames = play(new Tracker(), snapshots, snapshots[0].time, snapshots.at(-1)!.time + PLAYBACK_DELAY);
+    const { out, moves } = violations(frames);
+    expect(moves).toBeGreaterThan(100_000);
+    expect(out.slice(0, 20), `${out.length} violations`).toEqual([]);
+  });
+});
+
+describe("Tracker motion rules", () => {
+  const east = (x: number, age = 0, speed = 100) => aircraft("a", x, 0, { groundSpeedKt: speed * MPS, trackDeg: 90, positionAge: age });
+  const xs = (frames: Frame[]) => frames.flatMap((f) => (f.aircraft.has("a") ? [f.aircraft.get("a")!.x] : []));
+
+  it("holds back an aircraft drawn ahead of a late report instead of running it backward", () => {
+    // Dead reckoning carries it to 700 m; the late report says it slowed, so its path is now behind.
+    const frames = play(new Tracker(), [snapshot(100, east(0)), snapshot(115, east(900, 5, 80))], 108, 130);
+    const path = xs(frames);
+    for (let i = 1; i < path.length; i++) expect(path[i]).toBeGreaterThanOrEqual(path[i - 1] - 1e-9);
+    expect(violations(frames).out).toEqual([]);
+  });
+
+  it("blends a correction a little under the snap distance forward, and snaps one a little over it", () => {
+    // Heard at 100 heading east and dead reckoned to 700 m when the next report arrives; that report's fix
+    // (taken at 106) puts it at 1100 m and `north` metres off the line: an error of hypot(400, north).
+    const off = (north: number) => [snapshot(100, east(0)), snapshot(115, aircraft("a", 1000, north, { groundSpeedKt: 100 * MPS, trackDeg: 90, positionAge: 9 }))];
+    const blended = play(new Tracker(), off(1_400), 108, 130);
+    expect(violations(blended).out).toEqual([]);
+    const ys = blended.flatMap((f) => (f.aircraft.has("a") ? [f.aircraft.get("a")!.y] : []));
+    expect(Math.max(...ys.slice(1).map((y, i) => Math.abs(y - ys[i])))).toBeLessThan(100);
+    const snapped = play(new Tracker(), off(1_600), 108, 130);
+    const snappedYs = snapped.flatMap((f) => (f.aircraft.has("a") ? [f.aircraft.get("a")!.y] : []));
+    const jumps = snappedYs.slice(1).map((y, i) => Math.abs(y - snappedYs[i]));
+    expect(Math.max(...jumps)).toBeGreaterThan(1_500);
+    expect(jumps.filter((j) => j > 100)).toHaveLength(1);
+  });
+
+  it("keeps a taxiing aircraft moving across a gap between reads", () => {
+    // Taxiing east at 10 m/s, read every 5 s, but two reads in a row are missed: 15 s between fixes.
+    const taxi = (t: number) => aircraft("a", 10 * (t - 100), 0, { onGround: true, altitudeFt: 0, groundSpeedKt: 10 * MPS, trackDeg: 90 });
+    const reads = [100, 105, 110, 125, 130, 135].map((t) => snapshot(t, taxi(t)));
+    const frames = play(new Tracker(), reads, 108, 138);
+    const path = xs(frames);
+    // Every frame it moves on at close to its 10 m/s, never stalling at the end of its dead reckoning.
+    for (let i = 1; i < path.length; i++) expect(path[i] - path[i - 1]).toBeGreaterThan((0.5 * 10) / 60);
+    // And it is where it really was.
+    expect(path.at(-1)).toBeCloseTo(10 * (138 - PLAYBACK_DELAY - 100), 0);
+  });
+
+  it("reckons a ground aircraft that is moving tail first, in a pushback, the way it is going", () => {
+    // Nose to the west (track 270) but pushed back east at 1 m/s, as the recorded DAL3029 was.
+    const push = (t: number) => aircraft("a", t - 100, 0, { onGround: true, altitudeFt: 0, groundSpeedKt: 1 * MPS, trackDeg: 270 });
+    const frames = play(new Tracker(), [snapshot(100, push(100)), snapshot(110, push(110)), snapshot(125, push(125))], 112, 136);
+    expect(violations(frames).out).toEqual([]);
+    const path = xs(frames);
+    for (let i = 1; i < path.length; i++) expect(path[i]).toBeGreaterThanOrEqual(path[i - 1] - 1e-9);
   });
 });
 
