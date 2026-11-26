@@ -78,6 +78,12 @@ const RECORD_FRAMES = `(() => {
 const STALL_MS = 120_000;
 const CAP_MS = 30 * 60_000;
 
+/** How the drawn aircraft is judged still (settledAt): moved under SETTLE_PX between two reads at least SETTLE_MS and SETTLE_FRAMES drawn frames apart, waited for up to SETTLE_CAP_MS. */
+const SETTLE_PX = 0.5;
+const SETTLE_MS = 1_500;
+const SETTLE_FRAMES = 2;
+const SETTLE_CAP_MS = 150_000;
+
 /** Criteria 1 and 2: Chase picked in Atlanta's Diorama, ridden gate to gate into Charlotte's. */
 async function gateToGate({ browser, base, check }) {
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
@@ -287,21 +293,15 @@ async function footTop(page, height) {
   return Number.isFinite(foot) ? Math.min(foot, height) : height;
 }
 
-/** How the drawn aircraft is judged still: moved under SETTLE_PX between two reads at least SETTLE_MS and SETTLE_FRAMES drawn frames apart, waited for up to SETTLE_CAP_MS. */
-const SETTLE_PX = 0.5;
-const SETTLE_MS = 1_500;
-const SETTLE_FRAMES = 2;
-const SETTLE_CAP_MS = 150_000;
-
 /**
  * Where the aircraft is drawn once the rig holds still, and whether it did (`settled`) within SETTLE_CAP_MS. The
  * rig's ease takes at most 0.25 s of it a frame (EnRouteRig), so under software GL, a frame every 0.6 to 0.8 s,
- * it runs at a third of real time: from a cruise start its 11 km height offset takes about 30 drawn frames (some
- * 20 s, more on a loaded machine) to come within a pixel, shrinking to 0.70 of itself a frame. Two reads 1.5 s
- * apart moving under 3 px then let a residual of up to 6 px through, read as the camera's own framing (5 px at
- * tablet, FL390). Judged by stillness alone, never by where the framing point is, so a framing that is off
- * still fails its check: under SETTLE_PX across SETTLE_FRAMES frames bounds what is left of the ease to about
- * 1 px, at a frame every second or 60 a second alike. A read with no new frame drawn since the last is no evidence.
+ * it runs at a third of real time: from a cruise start its 11 km height offset shrinks to 0.70 of itself a drawn
+ * frame and takes about 30 of them (some 20 s, more on a loaded machine) to come within a pixel. Judged by
+ * stillness alone, never by where the framing point is, so a framing that is off still fails its check: under
+ * SETTLE_PX across SETTLE_FRAMES frames bounds what is left of the ease to about 1 px, at a frame a second or 60
+ * a second alike. A read with no new frame drawn since the last is no evidence; a count that went back (the
+ * layer made again) starts the judgement afresh.
  */
 async function settledAt(page) {
   const read = `(() => { const at = ${DRAWN_AT}; const s = ${STATE}; return at && s ? { ...at, frames: s.drawn } : null; })()`;
@@ -311,8 +311,8 @@ async function settledAt(page) {
     await sleep(SETTLE_MS);
     const now = await page.evaluate(read);
     if (!now) continue;
-    if (last && now.frames - last.frames < SETTLE_FRAMES) continue;
-    if (last && Math.hypot(now.x - last.x, now.y - last.y) < SETTLE_PX) return { at: { x: now.x, y: now.y }, settled: true };
+    if (last && now.frames >= last.frames && now.frames - last.frames < SETTLE_FRAMES) continue;
+    if (last && now.frames >= last.frames && Math.hypot(now.x - last.x, now.y - last.y) < SETTLE_PX) return { at: { x: now.x, y: now.y }, settled: true };
     last = now;
   }
   const at = await page.evaluate(DRAWN_AT);
@@ -400,7 +400,7 @@ async function smallScreens({ browser, base, check }) {
           check(`en-route ${name}: Chase comes on (terrain, the aircraft's model, the map tilted behind it)`, tilted, JSON.stringify({ ...(await page.evaluate(STATE)), credit: undefined }));
         }
         const { at, settled, band, model, inBand, clear } = await framedInBand(page, viewport);
-        check(`en-route ${name}: in ${camera} the aircraft stands in the free band below the Journey card, the whole model clear of the card and the foot`, on && inBand && clear, JSON.stringify({ at, settled, band, model }));
+        check(`en-route ${name}: in ${camera} the aircraft stands in the free band below the Journey card, the whole model clear of the card and the foot`, on && settled && inBand && clear, JSON.stringify({ at, settled, band, model }));
         if (camera === "Top") {
           const air = await page.evaluate(AIR);
           check(`en-route ${name}: a 3D camera shades the relief (a hillshade layer) and has a sky apart from its horizon, unlike the flat map's`, air.hillshade && air.sky !== air.horizon && !flatAir.hillshade && flatAir.sky === flatAir.horizon, JSON.stringify({ air, flatAir }));
