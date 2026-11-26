@@ -51,8 +51,8 @@ function isFlightAnswer(v: unknown): v is FlightAnswer {
   return typeof f === "object" && f !== null && typeof f.latitude === "number" && typeof f.longitude === "number" && typeof f.altitudeFt === "number";
 }
 
-/** Whether a "/" press belongs to a field the reader is typing in. */
-function typing(target: EventTarget | null): boolean {
+/** Whether a key press belongs to a field the reader is typing in (the page's own shortcuts leave it alone). */
+export function typing(target: EventTarget | null): boolean {
   const el = target instanceof HTMLElement ? target : null;
   return !!el && (el.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(el.tagName));
 }

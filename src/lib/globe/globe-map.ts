@@ -13,7 +13,7 @@ import { routeArcs } from "./arcs";
 import { toGeo, toLocal, type Origin } from "../geo";
 import type { JourneyFeatures, JourneyFix } from "../journey-follow";
 import { classify } from "../aircraft-class";
-import { type EnRouteCamera, enRoutePose, EnRouteRig, enRouteShot, is3D } from "./en-route";
+import { type EnRouteCamera, EnRoutePeek, enRoutePose, EnRouteRig, enRouteShot, is3D, peekPlacement } from "./en-route";
 import type { EnRouteLayer } from "./en-route-layer";
 import { AIRCRAFT_GLYPH, GLYPH_BOX } from "./aircraft-glyph";
 import { finiteCamera, groundView, type Lens, type MapCamera, mapToOrbit, orbitToMap, paddingFor, worldFloor } from "./camera";
@@ -238,6 +238,9 @@ export class GlobeMap {
   private layer: EnRouteLayer | null = null;
   private layerLoading = false;
   private readonly rig = new EnRouteRig();
+  /** A drag's look round the 3D camera's framing, and the pointer dragging it (its id and where it last was). */
+  private readonly peek = new EnRoutePeek();
+  private peekPointer: { id: number; x: number; y: number } | null = null;
   /** Whether the rig has been started from the camera the map had when the 3D camera was picked. */
   private rigStarted = false;
   /** In a 3D camera: the journey's own (Map) shot, in the airport's metres, which the Handover still reads; null in Map. */
@@ -284,6 +287,12 @@ export class GlobeMap {
     this.map.on("mousemove", (e) => this.hover(e.point));
     this.map.on("mouseout", () => this.hover(null));
     document.addEventListener("keydown", this.onKey);
+    // In a 3D camera a drag (mouse or touch) peeks round the aircraft, rather than moving the map.
+    const canvas = this.map.getCanvasContainer();
+    canvas.addEventListener("pointerdown", this.onPeekDown);
+    canvas.addEventListener("pointermove", this.onPeekMove);
+    canvas.addEventListener("pointerup", this.onPeekUp);
+    canvas.addEventListener("pointercancel", this.onPeekUp);
     // A drag, wheel or pinch carries an original event; the page's own moves do not.
     this.map.on("movestart", (e) => {
       if ((e as { originalEvent?: unknown }).originalEvent) {
@@ -542,6 +551,8 @@ export class GlobeMap {
     const left = is3D(this.enRoute) ? this.enRouteView : null;
     this.enRoute = camera;
     this.rig.reset();
+    this.peek.reset();
+    this.peekPointer = null;
     this.rigStarted = false;
     this.journeyShot = null;
     this.enRouteView = null;
@@ -560,6 +571,13 @@ export class GlobeMap {
     if (!map.getLayer("aircraft")) return;
     const on = is3D(this.enRoute);
     map.setCenterClampedToGround(!on);
+    // In a 3D camera the map's own drags are off: a drag peeks round the aircraft (onPeekDown) and never
+    // moves the map, so it does not end the journey as a drag on the flat map does. The wheel still does.
+    for (const handler of [map.dragPan, map.dragRotate, map.touchZoomRotate, map.touchPitch, map.doubleClickZoom]) {
+      if (on) handler.disable();
+      else handler.enable();
+    }
+    map.getCanvasContainer().style.touchAction = on ? "none" : "";
     if (on) {
       if (!map.getSource(TERRAIN_SOURCE)) map.addSource(TERRAIN_SOURCE, terrainSource());
       if (!map.getTerrain()) map.setTerrain(TERRAIN);
@@ -613,14 +631,16 @@ export class GlobeMap {
       const from = mapToOrbit(this.camera, { latitude: c.lat, longitude: c.lng }, lens);
       this.rig.start({ center: { latitude: c.lat, longitude: c.lng }, elevationM: this.map.getCenterElevation(), distanceM: from.distance, bearingDeg: this.map.getBearing(), pitchDeg: this.map.getPitch() }, shot, now);
     }
-    const eased = this.rig.step(shot, now);
+    // The rig eases the framing; a drag's peek goes on top, so the camera answers the pointer at once.
+    const eased = peekPlacement(this.rig.step(shot, now), camera, this.peek.at(now));
     const orbit: OrbitView = { azimuthDeg: eased.bearingDeg, elevationDeg: 90 - eased.pitchDeg, target: [0, 0], height: 0, distance: eased.distanceM };
     const cam = orbitToMap(orbit, eased.center, lens);
     this.following = true;
     this.map.jumpTo({ center: [cam.lng, cam.lat], zoom: cam.zoom, bearing: cam.bearing, pitch: cam.pitch, elevation: eased.elevationM });
     this.following = false;
     this.enRouteView = { ...orbit, target: toLocal(this.airport, eased.center.latitude, eased.center.longitude), height: eased.elevationM };
-    this.layer?.setAircraft(pose, cls.model, cls.lengthM);
+    // From the Cockpit the aircraft is the one the eye sits in: its model is not drawn, so a peek back never fills the view with it.
+    this.layer?.setAircraft(camera === "cockpit" ? null : pose, cls.model, cls.lengthM);
   }
 
   /** The followed flight, drawn over the traffic and left out of it; null clears it. */
@@ -843,9 +863,40 @@ export class GlobeMap {
     void this.loadCounts();
   };
 
+  /** A press on the map in a 3D camera starts a peek: one pointer at a time, the primary button or a touch. */
+  private readonly onPeekDown = (e: PointerEvent) => {
+    if (!is3D(this.enRoute) || this.peekPointer || !e.isPrimary || e.button !== 0) return;
+    this.peekPointer = { id: e.pointerId, x: e.clientX, y: e.clientY };
+    (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
+  };
+
+  private readonly onPeekMove = (e: PointerEvent) => {
+    const p = this.peekPointer;
+    if (!p || e.pointerId !== p.id) return;
+    const dx = e.clientX - p.x;
+    const dy = e.clientY - p.y;
+    if (!dx && !dy) return;
+    p.x = e.clientX;
+    p.y = e.clientY;
+    this.peek.drag(dx, dy);
+    this.map.triggerRepaint();
+  };
+
+  /** Let go: the camera eases back to its framing. */
+  private readonly onPeekUp = (e: PointerEvent) => {
+    if (!this.peekPointer || e.pointerId !== this.peekPointer.id) return;
+    this.peekPointer = null;
+    if (this.peek.dragging) this.peek.release(performance.now());
+  };
+
   dispose(): void {
     document.removeEventListener("visibilitychange", this.onShown);
     document.removeEventListener("keydown", this.onKey);
+    const canvas = this.map.getCanvasContainer();
+    canvas.removeEventListener("pointerdown", this.onPeekDown);
+    canvas.removeEventListener("pointermove", this.onPeekMove);
+    canvas.removeEventListener("pointerup", this.onPeekUp);
+    canvas.removeEventListener("pointercancel", this.onPeekUp);
     cancelAnimationFrame(this.frame);
     for (const t of this.timers) window.clearInterval(t);
     this.map.remove();

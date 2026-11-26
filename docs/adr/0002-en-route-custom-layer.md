@@ -2,12 +2,12 @@
 
 ## Status
 
-Accepted, 2026-11-25 (ticket #21, spec #16).
+Accepted, 2026-11-25 (ticket #21, spec #16); the other cameras, the drag and the keys added by ticket #22.
 
 ## Context
 
 The En-route view shows a followed flight in 3D on the World map, anywhere between its two Dioramas: the
-map tilted behind the aircraft (the Chase camera now; Cockpit, Side and Top later), 3D terrain under it,
+map tilted behind the aircraft (the Chase, Cockpit, Side and Top cameras), 3D terrain under it,
 and the aircraft's own model at its true position, altitude, heading and climb attitude. The models are
 the procedural per-class ones the Diorama already draws (`src/lib/scene/aircraft-model.ts`).
 
@@ -45,7 +45,23 @@ it, with no second canvas.
   first 3D pick; the terrain source and the terrain are added then and removed on Map, so the flat map
   loads neither. A theme switch carries the terrain in the new style and adds the layer back after it.
 - **The camera is pure** (`src/lib/globe/en-route.ts`): pose and camera in, the map's placement out
-  (centre and its elevation, distance, bearing, pitch, eye). Later cameras are more cases of it.
+  (centre and its elevation, distance, bearing, pitch, eye). Chase stands behind and above along the
+  track; Cockpit has its eye just ahead of the nose looking along the track; Side stands abeam on the
+  left looking across at the aircraft; Top looks straight down, track up (ticket #22).
+- **The map's 78 degree tilt bounds the cameras.** MapLibre's `maxPitch` is 78 here (the Diorama's
+  limit too), so no camera can look level or up. Side's level look is held at 78: its eye is 12 degrees
+  above wing height. Cockpit's pitch is `90 + attitude` held at 78, so it follows the attitude only in a
+  descent steeper than 12 degrees, and a climb or level flight looks 12 degrees below the horizon. The
+  Cockpit does not draw the aircraft's model at all (its eye is inside it), so no look round ever fills
+  the view with it.
+- **A drag peeks, and eases back.** In a 3D camera MapLibre's own drag, rotate, pinch and double-click
+  handlers are off and the map's canvas takes pointer drags (mouse and touch alike) itself: a drag adds
+  a bearing and tilt offset (`EnRoutePeek`, `peekPlacement`) on top of the rig's eased framing, so the
+  camera answers the pointer at once. Chase, Side and Top orbit the aircraft; Cockpit turns its look
+  round its eye. On release the offset eases back to nothing. A drag never moves the map, so it does not
+  end the journey as a drag on the flat map does; the wheel still does.
+- **Keys 1 to 5** pick Map, Chase, Cockpit, Side and Top while the Journey card offers them, ignored in a
+  field being typed in and with Ctrl, Alt or Meta held. The camera picked holds across feed reads.
 
 The Diorama stays as it is: a separate overlay canvas on the same camera, crossfading during the Handover.
 
@@ -60,8 +76,9 @@ The Diorama stays as it is: a separate overlay canvas on the same camera, crossf
   light) is its own, and the Diorama's lights, liveries and night lighting are not in it.
 - A 3D camera hands the camera back to Map as the flight comes into an airport's Handover band, so the
   usual Handover runs from the flat map; a Handover straight from a 3D camera is left to a later ticket.
-- Tests: `src/lib/globe/en-route.test.ts` (the camera's placement, the pose, the model's matrix, the rig),
-  `src/lib/globe/map-style.test.ts` (terrain only when asked); smoke: `scripts/smoke-en-route-chase.mjs`.
+- Tests: `src/lib/globe/en-route.test.ts` (each camera's placement, the peek and its ease back, the keys,
+  the pose, the model's matrix, the rig), `src/lib/globe/map-style.test.ts` (terrain only when asked);
+  smoke: `scripts/smoke-en-route-chase.mjs` and `scripts/smoke-en-route-cameras.mjs`.
 
 ## Alternatives considered
 
