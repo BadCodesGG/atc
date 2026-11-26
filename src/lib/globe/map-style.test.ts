@@ -331,17 +331,15 @@ describe("hazeShells", () => {
   const FL370 = 37_000 * 0.3048;
   const horizon = (aboveM: number) => Math.sqrt(2 * 6_371_000 * aboveM + aboveM * aboveM);
   const opacity = (shells: { opacity: number }[]) => shells.at(-1)!.opacity;
-  /** Light's haze, which Dark shares. */
-  const light = (aboveM: number, farM = Infinity) => hazeShells(aboveM, farM, PALETTES.light.haze);
 
   it("draws nothing for an eye at or under the ground", () => {
-    expect(light(0)).toEqual([]);
-    expect(light(-50)).toEqual([]);
-    expect(light(Number.NaN)).toEqual([]);
+    expect(hazeShells(0)).toEqual([]);
+    expect(hazeShells(-50)).toEqual([]);
+    expect(hazeShells(Number.NaN)).toEqual([]);
   });
 
   it("builds the haze in HAZE_SHELLS shells, ever farther out, to full haze at the horizon", () => {
-    const shells = light(FL110);
+    const shells = hazeShells(FL110);
     expect(shells).toHaveLength(HAZE_SHELLS);
     for (let i = 1; i < shells.length; i++) expect(shells[i].distanceM).toBeGreaterThan(shells[i - 1].distanceM);
     for (const s of shells) {
@@ -353,55 +351,26 @@ describe("hazeShells", () => {
   });
 
   it("thickens in equal steps, so no shell's edge on the ground stands out from the others", () => {
-    const shells = light(FL110);
+    const shells = hazeShells(FL110);
     shells.forEach((s, i) => expect(s.opacity).toBeCloseTo((i + 1) / shells.length, 9));
     expect(1 / HAZE_SHELLS).toBeLessThanOrEqual(0.05);
   });
 
   it("leaves the near ground clear: at 11,000 ft it starts past Chase's 13 km and the Cockpit's nearer relief", () => {
-    expect(light(FL110)[0].distanceM).toBeGreaterThan(13_000);
+    expect(hazeShells(FL110)[0].distanceM).toBeGreaterThan(13_000);
     // Quickly at first, as air does: half the haze well inside half the way to the horizon.
-    const shells = light(FL110);
+    const shells = hazeShells(FL110);
     expect(shells[shells.length / 2 - 1].distanceM).toBeLessThan(horizon(FL110) / 2);
   });
 
   it("reaches farther from higher up, with the horizon", () => {
-    expect(light(FL370).at(-1)!.distanceM).toBeGreaterThan(light(FL110).at(-1)!.distanceM * 1.5);
-    expect(light(FL370)[0].distanceM).toBeGreaterThan(light(FL110)[0].distanceM);
-  });
-
-  it("is the same in Light and Dark", () => {
-    expect(PALETTES.light.haze).toEqual(PALETTES.dark.haze);
-    expect(hazeShells(FL370, 60_000, PALETTES.dark.haze)).toEqual(light(FL370, 60_000));
-  });
-
-  describe("in Satellite, where the imagery changes colour between tile levels some 40 km out", () => {
-    const at = (shells: { distanceM: number; opacity: number }[], m: number) => shells.filter((s) => s.distanceM <= m).at(-1)?.opacity ?? 0;
-    const air = light(FL110);
-    const satellite = hazeShells(FL110, Infinity, PALETTES.satellite.haze);
-
-    it("is well in by 40 km at 11,000 ft, so the line there reads as distance", () => {
-      expect(at(satellite, 40_000)).toBeGreaterThanOrEqual(0.4);
-      expect(at(satellite, 40_000)).toBeGreaterThan(at(air, 40_000) * 2);
-    });
-
-    it("begins nearer and builds faster than Light and Dark's, and is still full at the horizon", () => {
-      expect(satellite[0].distanceM).toBeLessThan(air[0].distanceM);
-      satellite.forEach((s, i) => expect(s.distanceM).toBeLessThanOrEqual(air[i].distanceM));
-      expect(satellite).toHaveLength(HAZE_SHELLS);
-      expect(satellite.at(-1)!.distanceM).toBeCloseTo(horizon(FL110), -2);
-      expect(satellite.at(-1)!.opacity).toBe(1);
-    });
-
-    it("leaves the ground under the aircraft and just ahead clear: at 11,000 ft none nearer than three times its height", () => {
-      expect(satellite[0].distanceM).toBeGreaterThan(3 * FL110);
-      expect(hazeShells(FL370, Infinity, PALETTES.satellite.haze)[0].distanceM).toBeGreaterThan(satellite[0].distanceM);
-    });
+    expect(hazeShells(FL370).at(-1)!.distanceM).toBeGreaterThan(hazeShells(FL110).at(-1)!.distanceM * 1.5);
+    expect(hazeShells(FL370)[0].distanceM).toBeGreaterThan(hazeShells(FL110)[0].distanceM);
   });
 
   it("ends inside the map's far plane, where the ground drawn ends, when that comes before the horizon", () => {
     const far = 40_000;
-    const shells = light(FL110, far);
+    const shells = hazeShells(FL110, far);
     expect(shells.at(-1)!.distanceM).toBeLessThan(far);
     expect(shells.at(-1)!.distanceM).toBeGreaterThan(far * 0.9);
     expect(opacity(shells)).toBe(1);

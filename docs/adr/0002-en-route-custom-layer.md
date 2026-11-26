@@ -91,9 +91,7 @@ it, with no second canvas.
   showed it). So the En-route layer draws the haze itself, before the aircraft (`hazeShells`): 24 spheres
   round the eye, from 8% of the way to the horizon (past Chase's ground) out to full haze at the horizon's
   distance over a round Earth (`sqrt(2Rh)`), or just inside the map's far plane when that comes first.
-  Where it starts and how fast it builds is the theme's (its palette's `haze`): Satellite's starts at 6%
-  and builds faster, since its imagery changes colour between tile levels some 40 km out and haze there
-  softens the line into distance; Light and Dark keep 8%. The shells are first only counted, in the stencil, against the map's depth buffer (never written to
+  The shells are first only counted, in the stencil, against the map's depth buffer (never written to
   it): a pixel's count is how many shells are nearer than the ground there. Then each count's haze is
   drawn where the stencil holds it, an equal 1/24 share a shell (too small a step to show as an edge), so
   every pixel is blended once: blended shell by shell, 24 faint layers each rounded to 8 bits tinted and

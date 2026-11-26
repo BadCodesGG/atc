@@ -2,18 +2,17 @@ import { type CustomLayerInterface, type CustomRenderMethodInput, type Map as Ma
 import { type AircraftModel, MODEL_LENGTH } from "../aircraft-class";
 import { modelGeometry } from "../scene/aircraft-model";
 import { aircraftMatrix, type AircraftPose, type EnRouteShot } from "./en-route";
-import { hazeShells, type HazeCurve } from "./map-style";
+import { hazeShells } from "./map-style";
 
 /**
  * The far ground's haze one frame: the eye (where the camera is) and how far it is over the ground under it,
- * in `colour` (enRouteHaze), at `strength` (hazeStrength, 0 to 1), along `curve` (the theme's palette's haze).
+ * in `colour` (enRouteHaze), at `strength` (hazeStrength, 0 to 1).
  */
 export interface HazeFrame {
   eye: EnRouteShot["eye"];
   aboveM: number;
   colour: string;
   strength: number;
-  curve: HazeCurve;
 }
 
 /**
@@ -323,7 +322,7 @@ export class EnRouteLayer implements CustomLayerInterface {
     const metre = eye.meterInMercatorCoordinateUnits();
     // The far plane, from MapLibre's pixels (512 to a tile at zoom 0) to metres.
     const farM = args.farZ / (512 * 2 ** map.getZoom()) / metre;
-    const shells = hazeShells(haze.aboveM, farM, haze.curve);
+    const shells = hazeShells(haze.aboveM, farM);
     if (!shells.length) return;
     // Metres round the eye to the map's clip space, composed in doubles: the eye's frame, then the map's projection.
     const local = [metre, 0, 0, 0, 0, metre, 0, 0, 0, 0, metre, 0, eye.x, eye.y, eye.z, 1];
