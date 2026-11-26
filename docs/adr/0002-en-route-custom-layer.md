@@ -2,7 +2,8 @@
 
 ## Status
 
-Accepted, 2026-11-25 (ticket #21, spec #16); the other cameras, the drag and the keys added by ticket #22.
+Accepted, 2026-11-25 (ticket #21, spec #16); the other cameras, the drag and the keys added by ticket #22; the
+Handover at both ends, the fallback to Map and the small screens by ticket #23.
 
 ## Context
 
@@ -62,6 +63,23 @@ it, with no second canvas.
   end the journey as a drag on the flat map does; the wheel still does.
 - **Keys 1 to 5** pick Map, Chase, Cockpit, Side and Top while the Journey card offers them, ignored in a
   field being typed in and with Ctrl, Alt or Meta held. The camera picked holds across feed reads.
+- **The 3D camera eases into the journey's own shot at both ends** (`src/lib/globe/en-route-journey.ts`,
+  ticket #23). The Diorama is drawn on the flat map's camera, so the Handover's crossfade needs the map flat
+  and on the journey's own Map shot. The view is therefore the 3D camera's framing blended into that shot
+  (`blendPlacement`) by a share (`enRouteShare`): none of the 3D camera inside the Handover band of the
+  Diorama at that end of the journey, all of it from 2.5 times the band's outer edge out, eased in log
+  distance between, and eased in time (`ShareEase`) so a band that changes with the airport never steps the
+  camera. Leaving the origin, a 3D camera chosen in its Diorama (offered on the flight card there) is held
+  until the map has the flight and takes over once the flight is out of the band; arriving, it eases into the
+  journey's shot, the terrain and the layer come off at a share of nothing, and the usual Handover follows.
+  The Diorama then opens in its Approach camera when it has one for the flight, else Orbit. Map eases out the
+  same way, and takes the terrain off only once the camera is the flat shot, so the map never shows a frame
+  of tiles it has not loaded (the half second of blank map a cut to Map showed).
+- **It falls back to Map** with a short notice on the Journey card when its WebGL fails (the layer's module
+  not loading, the layer or the terrain throwing as they are added or drawn, a lost context) or the frame rate
+  stays under 20 a second for 3 seconds (`FrameWatch`, which forgives a shorter stutter and a hidden tab's
+  pause). `?fps=hold` keeps a 3D camera whatever its frame rate: the smokes' software GL draws it at a few
+  frames a second.
 
 The Diorama stays as it is: a separate overlay canvas on the same camera, crossfading during the Handover.
 
@@ -74,11 +92,16 @@ The Diorama stays as it is: a separate overlay canvas on the same camera, crossf
 - The layer is a second way of drawing the class models, beside the Diorama's three.js materials. It
   reads the same geometry, so a model change shows in both, but its look (a flat body with paint, one
   light) is its own, and the Diorama's lights, liveries and night lighting are not in it.
-- A 3D camera hands the camera back to Map as the flight comes into an airport's Handover band, so the
-  usual Handover runs from the flat map; a Handover straight from a 3D camera is left to a later ticket.
+- The chosen 3D camera holds until the Handover: it eases continuously into the journey's own shot as the
+  flight nears the destination's Handover band, and the Handover crossfade runs from there, on the camera the
+  Diorama is drawn on. The Journey card keeps the chosen camera pressed through it. For the last stretch
+  before the band the map is flat while a 3D camera is chosen.
 - Tests: `src/lib/globe/en-route.test.ts` (each camera's placement, the peek and its ease back, the keys,
-  the pose, the model's matrix, the rig), `src/lib/globe/map-style.test.ts` (terrain only when asked);
-  smoke: `scripts/smoke-en-route-chase.mjs` and `scripts/smoke-en-route-cameras.mjs`.
+  the pose, the model's matrix, the rig), `src/lib/globe/en-route-journey.test.ts` (the share at both ends,
+  its ease, the blend, the camera held in the origin's Diorama, Approach else Orbit, the fallback rule and
+  its notice), `src/lib/globe/map-style.test.ts` (terrain only when asked); smoke:
+  `scripts/smoke-en-route-chase.mjs`, `scripts/smoke-en-route-cameras.mjs` and
+  `scripts/smoke-en-route-journey.mjs` (gate to gate in Chase, phone and tablet, the fallback).
 
 ## Alternatives considered
 

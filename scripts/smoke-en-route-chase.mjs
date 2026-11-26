@@ -111,7 +111,8 @@ export async function enRouteChaseChecks({ browser, base, check, shots = null })
     return r.fulfill({ json: { hex: HEX, time: now, aircraft } });
   });
   await page.route(`**/api/flight/${CALLSIGN}`, (r) => r.fulfill({ json: { callsign: CALLSIGN, route: null } }));
-  await page.goto(`${base}/?fixture=1#map=7/33.6/-84.4`);
+  // `fps=hold`: the smokes' software GL draws 3D at a few frames a second, which would otherwise send the view back to Map.
+  await page.goto(`${base}/?fixture=1&fps=hold#map=7/33.6/-84.4`);
   await page.locator("main[data-on-map]").waitFor({ timeout: 60_000 });
   let at = null;
   for (let i = 0; i < 120 && !at; i++) {

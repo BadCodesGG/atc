@@ -84,6 +84,10 @@ export class EnRouteLayer implements CustomLayerInterface {
   private colours = { body: hexToRgb("#eeeeea"), paint: hexToRgb("#6d28d9") };
   /** How many frames the layer has drawn the aircraft in: read by the smoke check. */
   drawnFrames = 0;
+  private failed = false;
+
+  /** `onFail` is told, once, if drawing fails (the context cannot build the mesh); the layer then draws nothing. */
+  constructor(private readonly onFail: () => void = () => {}) {}
 
   /** The aircraft this frame: where and how it flies, its class's model and its length; null draws nothing. */
   setAircraft(pose: AircraftPose | null, model: AircraftModel, lengthM: number): void {
@@ -166,8 +170,17 @@ export class EnRouteLayer implements CustomLayerInterface {
   render(gl: WebGL2RenderingContext | WebGLRenderingContext, args: CustomRenderMethodInput): void {
     const pose = this.pose;
     const program = this.program;
-    if (!pose || !program || !("createVertexArray" in gl)) return;
-    const mesh = this.meshFor(gl, program);
+    if (!pose || !program || this.failed || !("createVertexArray" in gl)) return;
+    let mesh: Mesh;
+    try {
+      mesh = this.meshFor(gl, program);
+    } catch (error) {
+      // Inside MapLibre's frame: a throw here would stop the whole map drawing, so the view gives way to Map instead.
+      this.failed = true;
+      console.warn("atc: the en-route aircraft failed to draw", error);
+      this.onFail();
+      return;
+    }
     const at = MercatorCoordinate.fromLngLat([pose.longitude, pose.latitude], pose.altitudeM);
     const model = aircraftMatrix(at, at.meterInMercatorCoordinateUnits(), pose, this.lengthM / MODEL_LENGTH[this.model]);
     // The map's projection (doubles) times the model's, multiplied here in doubles, then handed to the GPU.
