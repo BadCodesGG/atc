@@ -14,7 +14,7 @@ import { toGeo, toLocal, type Origin } from "../geo";
 import type { JourneyFeatures, JourneyFix } from "../journey-follow";
 import { classify } from "../aircraft-class";
 import { type EnRouteCamera, EnRoutePeek, type EnRoutePlacement, enRoutePose, EnRouteRig, enRouteShot, is3D, peekPlacement } from "./en-route";
-import { blendPlacement, FALLBACK_NOTICE, type FallbackCause, FLAT_BY_S, FrameWatch, ShareEase, smoothstep } from "./en-route-journey";
+import { blendPlacement, FALLBACK_NOTICE, type FallbackCause, FrameWatch, RETURN_TO_MAP_S, ShareEase, smoothstep } from "./en-route-journey";
 import type { EnRouteLayer } from "./en-route-layer";
 import { AIRCRAFT_GLYPH, GLYPH_BOX } from "./aircraft-glyph";
 import { finiteCamera, groundView, type Lens, type MapCamera, mapToOrbit, orbitToMap, paddingFor, worldFloor } from "./camera";
@@ -261,8 +261,10 @@ export class GlobeMap {
   private readonly holdFrameRate: boolean;
   /** Told when the 3D view gives way to Map by itself, with the notice to show. */
   private onFallback: ((notice: string) => void) | null = null;
-  /** Finishes a return to Map the frames have not finished in FLAT_BY_S (armFlatTimer). */
-  private flatTimer: number | undefined;
+  /** Finishes a return to Map the frames have not finished in RETURN_TO_MAP_S (armReturnTimer). */
+  private returnTimer: number | undefined;
+  /** In the 3D view: the map camera of the journey's own flat shot this frame, where a return to Map lands. */
+  private flatShot: { center: [number, number]; zoom: number; bearing: number; pitch: number } | null = null;
 
   constructor(container: HTMLElement, options: GlobeOptions) {
     this.container = container;
@@ -603,41 +605,47 @@ export class GlobeMap {
       this.enRoute = camera;
       this.frameWatch.reset();
       if (is3D(camera)) {
-        this.clearFlatTimer();
+        this.clearReturnTimer();
         if (camera !== this.rode) {
           // Another 3D camera: the rig eases over to it from the camera the map has now.
           this.rode = camera;
           this.restartRig();
         }
-      } else this.armFlatTimer();
+      } else if (!atOnce) this.armReturnTimer();
     }
     if (atOnce && !is3D(camera)) this.dropEnRoute();
   }
 
   /**
    * A return to Map (picked, or a fallback) eases out by real time as the frames come; a device drawing a
-   * frame every few seconds would still leave it partway, so FLAT_BY_S after it began a timer finishes it.
+   * frame every few seconds would still leave it partway, so RETURN_TO_MAP_S after it began a timer finishes
+   * it: the 3D view off, and the camera on the journey's own flat shot, where the ease would have landed.
    */
-  private armFlatTimer(): void {
-    this.clearFlatTimer();
+  private armReturnTimer(): void {
+    this.clearReturnTimer();
     if (!this.on3D) return;
-    this.flatTimer = window.setTimeout(() => {
-      this.flatTimer = undefined;
+    this.returnTimer = window.setTimeout(() => {
+      this.returnTimer = undefined;
       if (is3D(this.enRoute) || !this.on3D) return;
+      const shot = this.flatShot;
       this.dropEnRoute();
-      // The journey's driver puts the camera on its own shot before the map is drawn again.
+      if (shot) {
+        this.following = true;
+        this.map.jumpTo(shot);
+        this.following = false;
+      }
       this.map.triggerRepaint();
-    }, FLAT_BY_S * 1000);
+    }, RETURN_TO_MAP_S * 1000);
   }
 
-  private clearFlatTimer(): void {
-    window.clearTimeout(this.flatTimer);
-    this.flatTimer = undefined;
+  /** The return timer off: the frames finished the return, a 3D camera was picked again, or the view went. */
+  private clearReturnTimer(): void {
+    window.clearTimeout(this.returnTimer);
+    this.returnTimer = undefined;
   }
 
   /** The 3D view off at once, the camera brought down flat where it is. */
   private dropEnRoute(): void {
-    this.clearFlatTimer();
     // A fresh ease starts at its first target.
     this.shareEase = new ShareEase();
     this.share = 0;
@@ -659,10 +667,11 @@ export class GlobeMap {
 
   /** The 3D view is off: terrain and the layer go, and the next 3D camera starts afresh. */
   private leave3D(): void {
-    this.clearFlatTimer();
+    this.clearReturnTimer();
     this.rode = is3D(this.enRoute) ? this.enRoute : null;
     this.restartRig();
     this.journeyShot = null;
+    this.flatShot = null;
     if (!this.on3D) return;
     this.on3D = false;
     this.applyEnRoute();
@@ -673,7 +682,7 @@ export class GlobeMap {
     if (!is3D(this.enRoute)) return;
     this.enRoute = "map";
     this.frameWatch.reset();
-    this.armFlatTimer();
+    this.armReturnTimer();
     this.onFallback?.(FALLBACK_NOTICE[cause]);
   }
 
@@ -771,6 +780,8 @@ export class GlobeMap {
     const rode = peekPlacement(this.rig.step(shot, now), camera, this.peek.at(now));
     // The journey's own shot, where the flat map would stand: the 3D camera eases into it by the share.
     const flat: EnRoutePlacement = { center: { latitude: slat, longitude: slon }, elevationM: mapShot.height, distanceM: mapShot.distance, bearingDeg: mapShot.azimuthDeg, pitchDeg: 90 - mapShot.elevationDeg };
+    const flatCam = orbitToMap({ azimuthDeg: flat.bearingDeg, elevationDeg: mapShot.elevationDeg, target: [0, 0], height: 0, distance: flat.distanceM }, flat.center, lens);
+    this.flatShot = { center: [flatCam.lng, flatCam.lat], zoom: flatCam.zoom, bearing: flatCam.bearing, pitch: flatCam.pitch };
     const eased = blendPlacement(flat, rode, smoothstep(share));
     const orbit: OrbitView = { azimuthDeg: eased.bearingDeg, elevationDeg: 90 - eased.pitchDeg, target: [0, 0], height: 0, distance: eased.distanceM };
     const cam = orbitToMap(orbit, eased.center, lens);
@@ -997,10 +1008,10 @@ export class GlobeMap {
   }
 
   private readonly onShown = () => {
-    // Hidden, the page draws nothing: that time is a pause, not slow frames, and the 3D view's ease does not jump over it.
-    this.shareEase.pause();
-    this.frameWatch.reset();
     if (document.visibilityState !== "visible") return;
+    // Hidden, the page drew nothing: that time is a pause, not slow frames, and the 3D view's ease does not jump over it.
+    this.shareEase.resume();
+    this.frameWatch.reset();
     void this.loadRegion();
     void this.loadCounts();
   };
@@ -1037,7 +1048,7 @@ export class GlobeMap {
   };
 
   dispose(): void {
-    this.clearFlatTimer();
+    this.clearReturnTimer();
     document.removeEventListener("visibilitychange", this.onShown);
     document.removeEventListener("keydown", this.onKey);
     const canvas = this.map.getCanvasContainer();

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { arrivalCamera, blendPlacement, enRouteOffered, enRouteShare, FALLBACK_NOTICE, FLAT_BY_S, FrameWatch, mapCamera, SHARE_EASE_S, SHARE_FROM, ShareEase, shareReach, SLOW_FOR_S } from "./en-route-journey";
+import { arrivalCamera, blendPlacement, enRouteOffered, enRouteShare, FALLBACK_NOTICE, FrameWatch, mapCamera, RETURN_TO_MAP_S, SHARE_EASE_S, SHARE_FROM, ShareEase, shareReach, SLOW_FOR_S } from "./en-route-journey";
 import type { EnRoutePlacement } from "./en-route";
 
 /** Feeds `watch` frames at `fps` for `seconds` from `from` ms; returns whether it called for Map, and the time it ended. */
@@ -155,8 +155,8 @@ describe("ShareEase: the share the view takes, eased over time", () => {
   });
 
   it("leaves the frames time to finish a return to Map before the timer does, and lands on Map within 2 s", () => {
-    expect(FLAT_BY_S).toBeGreaterThan(SHARE_EASE_S);
-    expect(FLAT_BY_S).toBeLessThanOrEqual(2);
+    expect(RETURN_TO_MAP_S).toBeGreaterThan(SHARE_EASE_S);
+    expect(RETURN_TO_MAP_S).toBeLessThanOrEqual(2);
   });
 
   it("does not move on the first frame after the page was hidden, then eases on from there", () => {
@@ -164,9 +164,16 @@ describe("ShareEase: the share the view takes, eased over time", () => {
     ease.step(0, 0);
     const before = ease.step(1, 120);
     expect(before).toBeCloseTo(0.1, 6);
-    ease.pause();
+    ease.resume();
     expect(ease.step(1, 60_000)).toBeCloseTo(before, 6);
     expect(ease.step(1, 60_120)).toBeCloseTo(0.2, 6);
+  });
+
+  it("forgets a page shown again before its first step: that step starts at the target, the next counts in full", () => {
+    const ease = new ShareEase();
+    ease.resume();
+    expect(ease.step(0, 0)).toBe(0);
+    expect(ease.step(1, 600)).toBeCloseTo(0.5, 6);
   });
 
   it("still arrives in its time on a device that draws a frame or two a second", () => {

@@ -50,37 +50,38 @@ export const SHARE_EASE_S = 1.2;
  * A return to Map the frames have not finished by this long after it began, seconds, is finished at once by a
  * timer (globe-map.ts): a device drawing a frame every few seconds still lands on Map in about this time.
  */
-export const FLAT_BY_S = 1.6;
+export const RETURN_TO_MAP_S = 1.6;
 
 /**
  * The share of the 3D camera the view takes, moved toward its target at an even pace (all the way in
  * SHARE_EASE_S of real time, however far apart the frames), so a target that steps (a camera picked, the
  * Handover band changing with the airport, a fallback) never steps the camera on a device that keeps up, and
- * arrives exactly. Only a page that was hidden (pause) is not counted: its first frame back does not move.
+ * arrives exactly. Only the time a page was hidden (resume) is not counted: its first frame back does not move.
  */
 export class ShareEase {
   private value: number | null = null;
   private at = 0;
-  private paused = false;
+  private resumed = false;
 
   /** The share at `now` (ms), moved toward `target`; the first step starts at the target. */
   step(target: number, now: number): number {
+    const skip = this.resumed;
+    this.resumed = false;
     if (this.value === null) {
       this.value = target;
       this.at = now;
       return target;
     }
-    const dt = this.paused ? 0 : Math.max(0, (now - this.at) / 1000);
-    this.paused = false;
+    const dt = skip ? 0 : Math.max(0, (now - this.at) / 1000);
     this.at = now;
     const room = dt / SHARE_EASE_S;
     this.value = target > this.value ? Math.min(target, this.value + room) : Math.max(target, this.value - room);
     return this.value;
   }
 
-  /** The page was hidden (or shown again): the time it drew nothing is not counted, so the next step eases from where it was. */
-  pause(): void {
-    this.paused = true;
+  /** The page is shown again after being hidden: the time it drew nothing is not counted, so the next step eases from where it was. */
+  resume(): void {
+    this.resumed = true;
   }
 }
 
@@ -95,8 +96,8 @@ const RATE_WINDOW_MS = 1000;
  * Watches the frame rate while a 3D camera is on: it calls for Map once the frames drawn over the last
  * second have stayed under SLOW_FPS for SLOW_FOR_S, so a short stutter (the terrain loading, one long stall)
  * is forgiven, while a device drawing a frame every few seconds still gives way. A gap between frames is
- * never taken as a pause by its length alone: the page resets the watch when it is hidden or shown again, so
- * a hidden tab's pause counts as nothing.
+ * never taken as a pause by its length alone: the page resets the watch when it is shown again after being
+ * hidden, so a hidden tab's pause counts as nothing.
  */
 export class FrameWatch {
   private frames: number[] = [];
@@ -120,7 +121,7 @@ export class FrameWatch {
     return now - this.lowSince >= SLOW_FOR_S * 1000;
   }
 
-  /** Starts over (a camera or theme switch, the page hidden or shown again). */
+  /** Starts over (a camera or theme switch, the page shown again after being hidden). */
   reset(): void {
     this.frames = [];
     this.lowSince = null;
