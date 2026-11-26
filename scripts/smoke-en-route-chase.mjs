@@ -15,7 +15,7 @@
 
 import { launchChrome } from "./lib/chrome.mjs";
 import { CALLSIGN, flatTerrain, HEX, STATE } from "./lib/en-route.mjs";
-import { GLOBE, sleep, waitForTruthy } from "./lib/page.mjs";
+import { GLOBE, selectOnMap, sleep, waitForTruthy } from "./lib/page.mjs";
 
 export async function enRouteChaseChecks({ browser, base, check, shots = null }) {
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
@@ -37,13 +37,7 @@ export async function enRouteChaseChecks({ browser, base, check, shots = null })
   // `fps=hold`: the smokes' software GL draws 3D at a few frames a second, which would otherwise send the view back to Map.
   await page.goto(`${base}/?fixture=1&fps=hold#map=7/33.6/-84.4`);
   await page.locator("main[data-on-map]").waitFor({ timeout: 60_000 });
-  let at = null;
-  for (let i = 0; i < 120 && !at; i++) {
-    at = await page.evaluate(`(() => { const g = ${GLOBE}; const f = g && g.drawn.find((x) => x.properties.id === "${HEX}"); if (!f) return null; const p = g.map.project(f.geometry.coordinates); return { x: p.x, y: p.y }; })()`);
-    if (!at) await sleep(500);
-  }
-  await page.evaluate(`(() => { const g = ${GLOBE}; g.routes.delete("${CALLSIGN}"); })()`);
-  if (at) await page.mouse.click(at.x, at.y);
+  await selectOnMap(page, HEX, { beforeClick: () => page.evaluate(`(() => { const g = ${GLOBE}; g.routes.delete("${CALLSIGN}"); })()`) });
   await page.locator("section[aria-label^='Selected flight']").locator("visible=true").waitFor({ timeout: 15_000 });
   await page.getByRole("button", { name: "Follow this flight" }).locator("visible=true").first().click();
 
