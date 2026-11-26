@@ -1,5 +1,5 @@
 import { OFFLINE_AFTER_S } from "./feed-health";
-import { KNOTS, type Origin, toGeo, toLocal } from "./geo";
+import { KNOTS, type Origin, toGeo, toLocal, turn, wrap360 } from "./geo";
 import type { Aircraft, TrafficSnapshot } from "./traffic";
 
 /**
@@ -88,7 +88,7 @@ const ONE_FEED = "feed";
 
 /** Which poll a snapshot came from, and how long an aircraft it lists is flown on once it stops listing it. */
 export interface Listing {
-  /** Each poll's snapshots are a feed of their own: `airport:atl`, `region`, `hex`. */
+  /** Each poll's snapshots are a feed of their own (shared-sky.ts): `airport:<code>`, `region`, `hex:<hex>`. */
   feed?: string;
   /** Seconds an aircraft is flown on past this feed's last listing (the tracker's deadReckonMax by default). */
   reckon?: number;
@@ -212,9 +212,6 @@ interface Track {
 }
 
 const RAD = Math.PI / 180;
-const wrap360 = (degrees: number) => ((degrees % 360) + 360) % 360;
-/** Signed turn from one heading to another, the short way round, in [-180, 180). */
-const turn = (from: number, to: number) => ((((to - from) % 360) + 540) % 360) - 180;
 const lerp = (a: number, b: number, u: number) => a + (b - a) * u;
 
 /**

@@ -13,7 +13,7 @@
  */
 
 import { launchChrome } from "./lib/chrome.mjs";
-import { waitForTruthy } from "./smoke-journey-procedures.mjs";
+import { fiber, GLOBE, waitForTruthy } from "./lib/page.mjs";
 
 const ATL = { latitude: 33.6367, longitude: -84.4281 };
 const HEX = "a4c2e7";
@@ -48,21 +48,9 @@ const trafficAircraft = (t, age) => {
   return { ...regionAircraft(t, age), registration: "N123DN", category: "A3", x: p.x, y: p.y, positionAge: age, source: "adsb_icao", squawk: "1200" };
 };
 
-/** Finds a value held in React state or a ref below `from`. */
-const FIBER = (test, from = "main") => `(() => {
-  const el = document.querySelector(${JSON.stringify(from)});
-  const key = el && Object.keys(el).find((k) => k.startsWith("__reactFiber$"));
-  if (!key) return null;
-  for (let f = el[key]; f; f = f.return) {
-    for (let h = f.memoizedState; h; h = h.next) {
-      for (const c of [h.memoizedState, h.memoizedState && h.memoizedState.current]) if (c && typeof c === "object" && ${test}) return c;
-    }
-  }
-  return null;
-})()`;
-const GLOBE = FIBER(`c.map && typeof c.map.project === "function" && c.drawn`);
-const JOURNEY = FIBER(`typeof c.stage === "string" && typeof c.hex === "string" && c.origin`);
-const TRAFFIC = FIBER(`c.tracker && typeof c.tracker.at === "function" && c.view && typeof c.clock === "function"`, "[role='application']");
+/** Each found in React state or a ref below `main` (or the model's own element). */
+const JOURNEY = fiber(`typeof c.stage === "string" && typeof c.hex === "string" && c.origin`, { state: true });
+const TRAFFIC = fiber(`c.tracker && typeof c.tracker.at === "function" && c.view && typeof c.clock === "function"`, { from: "[role='application']", state: true });
 
 /** Inside one animation frame: where each view has the flight, and the moment each read. */
 const ONE_FRAME = `new Promise((resolve) => requestAnimationFrame(() => {
@@ -72,17 +60,19 @@ const ONE_FRAME = `new Promise((resolve) => requestAnimationFrame(() => {
   if (!g || !j || !traffic) return resolve({ missing: [!g && "map", !j && "journey", !traffic && "traffic"].filter(Boolean) });
   const dioramaAt = traffic.clock();
   const d = traffic.tracker.at(dioramaAt).find((a) => a.id === "${HEX}");
-  const mapAt = g.skyTime();
-  const m = g.sky.one("${HEX}", mapAt, { frame: { latitude: 39, longitude: -96 } });
+  // The map's shared sky and the journey's, and the one tracker inside it (private to SharedSky, reached here only to look).
+  const tracker = g.sharedSky && g.sharedSky.tracker;
+  const mapAt = g.trafficTime();
+  const m = tracker ? tracker.one("${HEX}", mapAt, { frame: { latitude: 39, longitude: -96 } }) : null;
   const f = j.fix();
   resolve({
-    sameTracker: g.sky === j.sky.tracker,
+    sameTracker: !!tracker && g.sharedSky === j.sky,
     dioramaAt, mapAt, journeyAt: j.sky.time(),
     diorama: d ? [d.latitude, d.longitude, d.altitudeFt, d.headingDeg] : null,
     map: m ? [m.latitude, m.longitude, m.altitudeFt, m.headingDeg] : null,
     journey: f ? [f.latitude, f.longitude, f.altitudeFt, f.headingDeg] : null,
-    samples: g.sky.tracks.get("${HEX}")?.samples.length ?? 0,
-    feeds: [...(g.sky.tracks.get("${HEX}")?.listed.keys() ?? [])].sort(),
+    samples: tracker?.tracks.get("${HEX}")?.samples.length ?? 0,
+    feeds: [...(tracker?.tracks.get("${HEX}")?.listed.keys() ?? [])].sort(),
   });
 }))`;
 

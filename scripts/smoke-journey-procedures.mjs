@@ -18,26 +18,11 @@
  */
 
 import { launchChrome } from "./lib/chrome.mjs";
-
-/**
- * Waits until `expression` is truthy in the page. Not page.waitForFunction: given a string, Playwright
- * evaluates it inside the page with eval, which the app's Content-Security-Policy forbids (no
- * 'unsafe-eval'), so the wait would fail on the policy rather than on the page. page.evaluate goes
- * through the debugger protocol, which the policy does not govern.
- */
-export async function waitForTruthy(page, expression, timeout) {
-  const end = Date.now() + timeout;
-  for (;;) {
-    if (await page.evaluate(expression).catch(() => false)) return true;
-    if (Date.now() >= end) throw new Error(`timed out after ${timeout} ms waiting for ${expression.slice(0, 80)}`);
-    await new Promise((r) => setTimeout(r, 200));
-  }
-}
+import { sleep, waitForTruthy } from "./lib/page.mjs";
 
 const CLT = [-80.9431, 35.2144];
 const GSP = [-82.2189, 34.8957];
 const AUS = [-97.6699, 30.1945];
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const km = ([ax, ay], [bx, by]) => Math.hypot((ax - bx) * 111.32 * Math.cos((ay * Math.PI) / 180), (ay - by) * 110.57);
 
 const APPROACH = /^Likely approach: .*, from FAA CIFP cycle \d{4}$/;

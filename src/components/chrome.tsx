@@ -65,6 +65,9 @@ export const STACKED = "(width < 80rem) and (not ((width >= 48rem) and (height <
 /** A phone, upright: narrower than a tablet's 48rem. */
 export const PHONE = "(width < 48rem)";
 
+/** The selected flight's card, as the layout finds it to keep clear of it: by its own mark, not by its label's wording. */
+export const FLIGHT_CARD = "[data-flight-card]";
+
 /** Whether a media query matches now, as React state; `server` (false unless said) on the server, which has no window to ask. */
 export function useMedia(query: string, server = false): boolean {
   const subscribe = useCallback(
@@ -271,6 +274,7 @@ export function FlightCard({ card, procedure = null, here, status, following, on
   return (
     <section
       ref={sectionRef}
+      data-flight-card
       aria-label={`Selected flight ${card.callsign}`}
       className="pointer-events-auto relative flex shrink-0 flex-col gap-2 rounded-2xl bg-surface px-4 py-3.5 shadow-[0_8px_24px_rgba(20,20,20,0.08),0_0_0_1px_var(--color-hairline)] max-xl:order-last max-xl:mt-auto cramped:group-has-[[data-open=true]]/side:hidden max-xl:group-has-[[data-open=true]_[data-expanded]]/side:hidden xl:p-4 roomy:gap-3 roomy:p-5"
     >

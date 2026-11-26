@@ -1,4 +1,4 @@
-import { type Origin, toGeo, toLocal } from "../geo";
+import { type Origin, toGeo, toLocal, wrap360 } from "../geo";
 import type { OrbitView } from "../scene/orbit";
 
 /**
@@ -27,7 +27,6 @@ const TILE = 512;
 const CIRCUMFERENCE = 2 * Math.PI * 6_378_137;
 const RAD = Math.PI / 180;
 
-const wrap360 = (deg: number) => ((deg % 360) + 360) % 360;
 const wrap180 = (deg: number) => wrap360(deg + 180) - 180;
 
 /** How far the camera stands from the point it looks at, in screen pixels. Both renderers place it here. */

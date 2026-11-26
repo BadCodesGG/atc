@@ -12,6 +12,7 @@
  */
 
 import { launchChrome } from "./lib/chrome.mjs";
+import { sleep } from "./lib/page.mjs";
 
 /** AAL972 (hex adacfd), the one aircraft in the fixture's sky with a recorded route that is in the air: DFW to AUS, climbing out of Dallas-Fort Worth. */
 const HEX = "adacfd";
@@ -28,7 +29,6 @@ const PIC = "https://t.plnspttrs.net/00000/stub_280.svg";
 const LINK = "https://www.planespotters.net/photo/1/stub-aircraft?utm_source=api";
 const SVG = '<svg xmlns="http://www.w3.org/2000/svg" width="420" height="280"><rect width="420" height="280" fill="#789"/></svg>';
 
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const overlaps = (a, b) => a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
 
 /** The map's instance, found through the React fiber of <main>. */
@@ -124,7 +124,7 @@ export async function mapSelectChecks({ browser, base, check }) {
     await page.mouse.click(again.x, again.y);
     await card.waitFor({ timeout: 15_000 }).catch(() => {});
     const speed = await card.locator("dl").innerText().catch(() => "");
-    await page.evaluate(`(() => { const g = ${GLOBE}; g.sky.tracks.delete("${HEX}"); })()`);
+    await page.evaluate(`(() => { const g = ${GLOBE}; g.ownTracker.tracks.delete("${HEX}"); })()`);
     await sleep(1500);
     const lost = (await card.locator("[data-note]").innerText().catch(() => "")) || "";
     check("map select: a flight that leaves the feed is said to be lost, with when it was last seen", /^Not in the feed now\. Last seen \d\d:\d\d\.$/.test(lost), lost);

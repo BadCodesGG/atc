@@ -15,23 +15,13 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { launchChrome } from "./lib/chrome.mjs";
+import { fiber } from "./lib/page.mjs";
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
 const load = (code) => JSON.parse(readFileSync(path.join(ROOT, "src/data/airports", `${code}.json`), "utf8"));
 
-/** The Diorama's scene: the ref that holds it, found from the model's own element. */
-const SCENE = `(() => {
-  const el = document.querySelector("[role='application']");
-  const key = el && Object.keys(el).find((k) => k.startsWith("__reactFiber$"));
-  if (!key) return null;
-  for (let f = el[key]; f; f = f.return) {
-    for (let h = f.memoizedState; h; h = h.next) {
-      const c = h.memoizedState && h.memoizedState.current;
-      if (c && typeof c.project === "function" && c.canvas instanceof HTMLCanvasElement) return c;
-    }
-  }
-  return null;
-})()`;
+/** The Diorama's scene: held in a ref, found from the model's own element. */
+const SCENE = fiber(`typeof c.project === "function" && c.canvas instanceof HTMLCanvasElement`, { from: "[role='application']" });
 
 /** WCAG contrast of two relative luminances. */
 const contrast = (a, b) => (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);

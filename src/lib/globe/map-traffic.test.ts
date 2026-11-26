@@ -3,7 +3,7 @@ import { airportByCode } from "../airports";
 import { toGeo } from "../geo";
 import type { RegionAircraft, RegionSnapshot } from "../region";
 import type { TrackedAircraft } from "../tracker";
-import { classify, countInView, MAP_ORIGIN, mergeRegions, skyFeatures, militaryInView, skySubject, subjectsInView } from "./sky";
+import { classify, countInView, MAP_ORIGIN, mergeRegions, skyFeatures, militaryInView, skySubject, subjectsInView } from "./map-traffic";
 
 const ATL = airportByCode("atl")!;
 const DFW = airportByCode("dfw")!;

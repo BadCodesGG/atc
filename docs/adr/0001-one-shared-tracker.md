@@ -38,8 +38,9 @@ kept across airport switches.
   (it drops the server's last answer served again). The same fix heard by two polls on two clocks (within
   1 s and 1 m) is one fix.
 - **Every view reads it.** The Diorama reads the aircraft its airport's feed lists, in the airport's
-  metres; the World map reads them all, in the map's metres; the Journey reads its one hex. Each aircraft
-  carries a latitude and longitude, so a pose is the same pose in any view.
+  metres; the World map reads them all, in the map's metres; the Journey reads its one hex. Each view fills
+  and reads it through a feed `SharedSky` gives it (`airport`, `worldMap`, `flight`), never through the
+  tracker itself. Each aircraft carries a latitude and longitude, so a pose is the same pose in any view.
 - **Placed by latitude and longitude.** Each track measures its metres from a point near the aircraft
   (moved along with it every 50 km), with headings turned to match, so dead reckoning and the motion rules
   run where north is north, wherever the aircraft is. The Diorama is no less exact near its field, and an

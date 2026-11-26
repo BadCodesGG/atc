@@ -3,7 +3,7 @@ import path from "node:path";
 import { beforeAll, describe, expect, it } from "vitest";
 import { DEFAULT_AIRPORT } from "./airports";
 import { KNOTS, toGeo, toLocal } from "./geo";
-import { MAP_ORIGIN } from "./globe/sky";
+import { MAP_ORIGIN } from "./globe/map-traffic";
 import { readSequence } from "./sequence";
 import { CORRECTION_SNAP, FADE_OUT, GROUND_DEAD_RECKON_MAX, type Listing, PLAYBACK_DELAY, type TrackedAircraft, Tracker } from "./tracker";
 import type { Aircraft, TrafficSnapshot } from "./traffic";

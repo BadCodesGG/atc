@@ -5,10 +5,11 @@ import type { AirportMap } from "./airport-map";
 import { airportByCode } from "./airports";
 import { type FeedSource, fixtureSource } from "./feed-source";
 import { toGeo } from "./geo";
-import { MAP_ORIGIN } from "./globe/sky";
+import { MAP_ORIGIN } from "./globe/map-traffic";
 import type { OrbitView } from "./scene/orbit";
 import { boundTrail, Journey, type JourneyFix, TRAIL_MAX } from "./journey-follow";
 import type { FlightRoute } from "./routes";
+import { SharedSky } from "./shared-sky";
 
 const ATL = airportByCode("atl")!;
 const CLIMB_OUT = /^Likely climb-out: \S+ departure, from FAA CIFP cycle \d{4}$/;
@@ -20,8 +21,10 @@ const source = () => fixtureSource(() => null, () => 0);
 const fix: JourneyFix = { latitude: 34.2, longitude: -83, altitudeFt: 30_000, onGround: false, groundSpeedKt: 440, headingDeg: 63, verticalRateFpm: 0, callsign: "DAL1947", typeCode: "A321" };
 
 const journeys: Journey[] = [];
+/** A journey on `feed`, reading into a page's shared sky on the same feed, as the page's journeys do. */
+const journeyOn = (feed: FeedSource, options: ConstructorParameters<typeof Journey>[1]) => new Journey(feed, options, new SharedSky(feed));
 const follow = (options: Partial<ConstructorParameters<typeof Journey>[1]>) => {
-  const j = new Journey(source(), { hex: "a4c2e7", callsign: "DAL1947", origin: ATL, route: null, ...options });
+  const j = journeyOn(source(), { hex: "a4c2e7", callsign: "DAL1947", origin: ATL, route: null, ...options });
   journeys.push(j);
   return j;
 };
@@ -30,7 +33,7 @@ afterEach(() => journeys.splice(0).forEach((j) => j.dispose()));
 describe("the addresses a journey asks for", () => {
   it("asks for the hex lower-cased and the callsign normalised, the one address each has, so neither meets a redirect", async () => {
     const paths: string[] = [];
-    const j = new Journey(fixtureSource((path) => (paths.push(path), null), () => 0), { hex: "a4c2e7", callsign: "dl1947", origin: ATL, route: null });
+    const j = journeyOn(fixtureSource((path) => (paths.push(path), null), () => 0), { hex: "a4c2e7", callsign: "dl1947", origin: ATL, route: null });
     journeys.push(j);
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(paths.sort()).toEqual(["/api/flight/DAL1947", "/api/hex/a4c2e7"]);
@@ -69,7 +72,7 @@ describe("the way flown", () => {
     const settle = async () => {
       for (let i = 0; i < 10; i++) await Promise.resolve();
     };
-    const j = new Journey(feed, { hex: "a4c2e7", callsign: "DAL1947", origin: ATL, route: null });
+    const j = journeyOn(feed, { hex: "a4c2e7", callsign: "DAL1947", origin: ATL, route: null });
     journeys.push(j);
     const reads = TRAIL_MAX * 3;
     for (let i = 0; i < reads; i++) {
@@ -128,7 +131,7 @@ describe("how far it has come, for a flight followed from the map", () => {
     return { feed, answer };
   };
   const fromMap = (feed: FeedSource, route: FlightRoute | null = null) => {
-    const j = new Journey(feed, { hex: "a4c2e7", callsign: "DAL1947", origin: CLT, route, originKnown: false });
+    const j = journeyOn(feed, { hex: "a4c2e7", callsign: "DAL1947", origin: CLT, route, originKnown: false });
     journeys.push(j);
     return j;
   };
@@ -219,7 +222,7 @@ describe("a flight that has gone from the feeds", () => {
 
   it("is lost for as long as the feed's clock says since it was last read or drawn, so a recording played fast loses it as a live feed does", () => {
     const { feed, advance } = clocked(() => ({ aircraft: null }));
-    const j = new Journey(feed, { hex: "a4c2e7", callsign: "DAL1947", origin: ATL, route: null });
+    const j = journeyOn(feed, { hex: "a4c2e7", callsign: "DAL1947", origin: ATL, route: null });
     journeys.push(j);
     expect(j.lostFor()).toBe(0);
     j.sight(parked, performance.now());
@@ -231,7 +234,7 @@ describe("a flight that has gone from the feeds", () => {
 
   it("remembers where it was on the ground over its last few seconds, newest last, and forgets it in the air", () => {
     const { feed, advance } = clocked(() => ({ aircraft: null }));
-    const j = new Journey(feed, { hex: "a4c2e7", callsign: "DAL1947", origin: ATL, route: null });
+    const j = journeyOn(feed, { hex: "a4c2e7", callsign: "DAL1947", origin: ATL, route: null });
     journeys.push(j);
     for (let i = 0; i < 10; i++) {
       j.sight({ ...parked, latitude: parked.latitude + i * 0.0001 }, performance.now());
@@ -250,7 +253,7 @@ describe("a flight that has gone from the feeds", () => {
     const listed = (age: number) => ({ id: "a4c2e7", callsign: "DAL1947", typeCode: "A321", military: false, latitude: 35.2, longitude: -80.9, altitudeFt: 0, onGround: true, groundSpeedKt: 4, trackDeg: 180, verticalRateFpm: 0, positionAgeS: age });
     const start = async (answer: Parameters<typeof clocked>[0]) => {
       const c = clocked(answer);
-      const j = new Journey(c.feed, { hex: "a4c2e7", callsign: "DAL1947", origin: ATL, route: null });
+      const j = journeyOn(c.feed, { hex: "a4c2e7", callsign: "DAL1947", origin: ATL, route: null });
       journeys.push(j);
       await vi.waitFor(() => expect(j.silentFor()).not.toBeNull());
       return { ...c, j };

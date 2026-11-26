@@ -15,6 +15,15 @@ Flight
   (US government work, public domain) and OpenStreetMap (ODbL), kept for
   tests and the ?fixture= demo modes. Each remains under its source's terms.
 
+Data the app reads but does not ship is not covered by it either:
+
+- The en-route view's 3D terrain is AWS Terrain Tiles (Terrarium tiles from
+  the elevation-tiles-prod bucket, https://registry.opendata.aws/terrain-tiles/),
+  built by Mapzen from USGS, NOAA and other elevation sources. The browser
+  fetches them only while a 3D camera is on; they are credited on the map and
+  remain under their sources' terms, listed at
+  https://github.com/tilezen/joerd/blob/master/docs/attribution.md.
+
 The BadCodes name, logo and wordmark are not licensed under the MIT
 licence. A fork keeps the copyright notice in LICENSE but should not
 present itself as BadCodes or use the logo as its own brand.

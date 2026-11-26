@@ -49,8 +49,9 @@ it, with no second canvas.
   (centre and its elevation, distance, bearing, pitch, eye). Chase stands behind and above along the
   track; Cockpit has its eye just ahead of the nose looking along the track; Side stands abeam on the
   left looking across at the aircraft; Top looks straight down, track up (ticket #22).
-- **The map's 78 degree tilt bounds the cameras.** MapLibre's `maxPitch` is 78 here (the Diorama's
-  limit too), so no camera can look level or up. Side's level look is held at 78: its eye is 12 degrees
+- **The map's 78 degree tilt bounds the cameras.** This app sets the map's `maxPitch` option to 78
+  (`MAX_PITCH`, the Diorama's limit too); it is the app's own bound, not a limit of MapLibre's, and with
+  it no camera can look level or up. Side's level look is held at 78: its eye is 12 degrees
   above wing height. Cockpit's pitch is `90 + attitude` held at 78, so it follows the attitude only in a
   descent steeper than 12 degrees, and a climb or level flight looks 12 degrees below the horizon. The
   Cockpit does not draw the aircraft's model at all (its eye is inside it), so no look round ever fills
@@ -66,10 +67,13 @@ it, with no second canvas.
 - **The 3D camera eases into the journey's own shot at both ends** (`src/lib/globe/en-route-journey.ts`,
   ticket #23). The Diorama is drawn on the flat map's camera, so the Handover's crossfade needs the map flat
   and on the journey's own Map shot. The view is therefore the 3D camera's framing blended into that shot
-  (`blendPlacement`) by a share (`enRouteShare`): none of the 3D camera inside the Handover band of the
-  Diorama at that end of the journey, all of it from 2.5 times the band's outer edge out, eased in log
-  distance between, and eased in time (`ShareEase`, all the way in 1.2 s) so a band that changes with the
-  airport never steps the camera. The ease runs on real elapsed time however far apart the frames are; a gap
+  (`blendPlacement`) by a share: none of the 3D camera inside the Handover band of the Diorama at that end
+  of the journey, all of it from 2.5 times the band's outer edge out, even in log distance between
+  (`enRouteShare`, the share's target). The share is moved toward that target at an even pace in time
+  (`ShareEase`, all the way in 1.2 s), so a band that changes with the airport never steps the camera, and
+  smoothed once at both ends where it is used (`shareBlend`, in `EnRouteController`: the camera's blend and
+  the Handover's crossfade both read it), which eases it in log distance and in time alike. The ease runs
+  on real elapsed time however far apart the frames are; a gap
   between frames is never taken as a pause by its length alone, only the page being hidden (its
   `visibilitychange`) is, and the first frame after it is shown again does not move it. Leaving the origin,
   a 3D camera chosen in its Diorama (offered on the flight card there) is held until the map has the flight

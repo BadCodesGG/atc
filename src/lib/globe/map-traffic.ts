@@ -7,7 +7,7 @@ import type { TrackedAircraft } from "../tracker";
 import type { Aircraft, TrafficSnapshot } from "../traffic";
 
 /**
- * The live sky on the world map: the region cells read together become one snapshot for the Tracker
+ * The World map's traffic: the region cells read together become one snapshot for the Tracker
  * (which moves each aircraft smoothly between reads, as it does on the diorama), and the tracker's
  * aircraft become what the map draws, each told by what it is doing: arriving at or departing from one
  * of the built airports, on the ground, or cruising past.
