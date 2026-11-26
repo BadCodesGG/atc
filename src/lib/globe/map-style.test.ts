@@ -1,7 +1,7 @@
 import { validateStyleMin } from "@maplibre/maplibre-gl-style-spec";
 import { describe, expect, it } from "vitest";
 import { THEMES, type ThemeKey } from "../scene/theme";
-import { arcOpacities, buildingHeight, enRouteSky, flatSky, HILLSHADE, hillshadeLayer, journeyIconSize, mapStyle, PALETTES, radarLayer, radarSource, ripple, SELECTED_SCALE, SELECTION_DIM, TERRAIN, TERRAIN_SOURCE, terrainSource } from "./map-style";
+import { arcOpacities, buildingHeight, enRouteSky, flatSky, HILLSHADE, HILLSHADE_UNDER, hillshadeLayer, journeyIconSize, mapStyle, PALETTES, radarLayer, radarSource, ripple, SELECTED_SCALE, SELECTION_DIM, TERRAIN, TERRAIN_SOURCE, terrainSource } from "./map-style";
 
 const KEYS = Object.keys(THEMES) as ThemeKey[];
 const paint = (key: ThemeKey, id: string, prop: string) => {
@@ -264,7 +264,8 @@ describe("the en-route view's terrain", () => {
     const shaded = style.layers.filter((l) => l.type === "hillshade");
     expect(shaded).toEqual([hillshadeLayer(key)]);
     expect(shaded[0]).toMatchObject({ id: HILLSHADE, source: TERRAIN_SOURCE });
-    expect(style.layers.findIndex((l) => l.id === HILLSHADE)).toBe(style.layers.findIndex((l) => l.id === "water") - 1);
+    // Right under the layer the controller adds it under, so the style and a 3D camera turned on agree.
+    expect(style.layers.findIndex((l) => l.id === HILLSHADE)).toBe(style.layers.findIndex((l) => l.id === HILLSHADE_UNDER) - 1);
     // Nothing else changes: the same layers as the flat map, the hillshade aside.
     expect(style.layers.filter((l) => l.id !== HILLSHADE)).toEqual(mapStyle(key).layers);
     expect(validateStyleMin(style)).toEqual([]);

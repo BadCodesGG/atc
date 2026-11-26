@@ -60,7 +60,7 @@ it, with no second canvas.
   (`bandPadding`, from `freeBand`, the band the flat shot keeps the aircraft in), eased in from the map's
   own padding by the same share the camera eases by (`blendPadding`), and Chase, Side and Top stand back
   as far as the whole model needs to fit 80% of the band each way (`fitDistance`). At 320x700 that band
-  is too shallow, so in a 3D camera on a short phone (the `cramped` screens) the Journey card folds to its
+  is too shallow, so in a 3D camera on a short phone (a `cramped` screen under 640 px wide) the Journey card folds to its
   head, the switch and the progress: the facts and the notes come back on Map. Wide screens are unchanged.
 - **The camera is pure** (`src/lib/globe/en-route.ts`): pose and camera in, the map's placement out
   (centre and its elevation, distance, bearing, pitch, eye). Chase stands behind and above along the

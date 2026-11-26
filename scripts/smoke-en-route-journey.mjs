@@ -5,7 +5,7 @@
  *   flight card while the flight is still in Atlanta's Diorama is held there, and takes over once the map
  *   has the flight; it holds across the way, eases into the journey's own shot before the Handover, and the
  *   Handover into Charlotte's Diorama opens in its Approach camera (or Orbit when it has none for the flight).
- * - At phone (375x812) and tablet (768x1024) sizes the Journey card's switch shows, uncovered, on one row (as
+ * - At phone (375x812 and 320x700) and tablet (768x1024) sizes the Journey card's switch shows, uncovered, on one row (as
  *   on the wide screen's card); Chase, Side and Top each frame the aircraft in the free band below the card,
  *   the whole model clear of it; a 3D camera has the hillshade and a sky, Map neither; back on Map the map
  *   never goes blank.
@@ -247,12 +247,19 @@ async function modelBox(page, shot) {
   }, shot.toString("base64"));
 }
 
+/** The top of the controls at the foot of the screen (the map's foot, the attribution), else the screen's bottom. */
+async function footTop(page, height) {
+  const foot = await page.evaluate(() => Math.min(...[...document.querySelectorAll("[data-map-foot], .maplibregl-ctrl-attrib")].map((e) => e.getBoundingClientRect()).filter((r) => r.height > 0 && r.top > 200).map((r) => r.top)));
+  return Number.isFinite(foot) ? Math.min(foot, height) : height;
+}
+
 /**
- * Criterion 4: the switch at phone and tablet sizes, one row, into Chase, Side and Top with the aircraft in
- * the free band below the card, the hillshade and sky on in 3D only, and the map never blank on the way back.
+ * Criterion 4: the switch at phone (375 and 320 wide) and tablet sizes, one row, into Chase, Side and Top with
+ * the aircraft in the free band below the card, the hillshade and sky on in 3D only, and the map never blank on
+ * the way back.
  */
 async function smallScreens({ browser, base, check }) {
-  for (const [name, viewport] of [["phone", { width: 375, height: 812 }], ["tablet", { width: 768, height: 1024 }]]) {
+  for (const [name, viewport] of [["phone", { width: 375, height: 812 }], ["small phone", { width: 320, height: 700 }], ["tablet", { width: 768, height: 1024 }]]) {
     const { page, group, problems } = await followOnMap(browser, base, viewport);
     try {
       // Every button of the switch on screen and not covered by anything (the foot's controls, the search).
@@ -284,8 +291,7 @@ async function smallScreens({ browser, base, check }) {
           last = at;
         }
         const card = await page.locator("section[aria-label^='Followed flight']").boundingBox();
-        const foot = await page.evaluate(() => Math.min(...[...document.querySelectorAll("[data-map-foot], .maplibregl-ctrl-attrib")].map((e) => e.getBoundingClientRect()).filter((r) => r.height > 0 && r.top > 200).map((r) => r.top)));
-        const band = { top: card.y + card.height, bottom: Math.min(foot, viewport.height) };
+        const band = { top: card.y + card.height, bottom: await footTop(page, viewport.height) };
         const model = await modelBox(page, await page.screenshot());
         const inBand = !!at && at.y > band.top && at.y < band.bottom && at.x > 0 && at.x < viewport.width;
         const clear = !!model && model.top > band.top && model.bottom < band.bottom;
@@ -298,8 +304,7 @@ async function smallScreens({ browser, base, check }) {
 
       // Back to Map: the map eases back out, and shows the map all the way (no blank frame as it lands on Map).
       const card = await page.locator("section[aria-label^='Followed flight']").boundingBox();
-      const foot = await page.evaluate(() => Math.min(...[...document.querySelectorAll("[data-map-foot], .maplibregl-ctrl-attrib")].map((e) => e.getBoundingClientRect()).filter((r) => r.height > 0 && r.top > 200).map((r) => r.top)));
-      const band = { top: Math.round(card.y + card.height + 8), bottom: Math.round(Math.min(foot, viewport.height) - 8) };
+      const band = { top: Math.round(card.y + card.height + 8), bottom: Math.round((await footTop(page, viewport.height)) - 8) };
       await group.getByRole("button", { name: "Map", exact: true }).click();
       const details = [];
       const end = Date.now() + 4_000;

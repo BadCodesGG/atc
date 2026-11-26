@@ -50,9 +50,11 @@ export interface MapPalette {
   chipCount: string;
   /** The En-route view's aircraft model: its metal, painted in `selected`. */
   modelBody: string;
-  /** The En-route view's relief (its hillshade over the terrain): the slopes facing away from the light and toward it, and how strongly it shades. */
+  /** The En-route view's relief (its hillshade over the terrain): the slopes facing away from the light. */
   reliefShadow: string;
+  /** The slopes facing the light. */
   reliefLight: string;
+  /** How strongly it shades (MapLibre's hillshade exaggeration, 0 to 1). */
   reliefStrength: number;
 }
 
@@ -324,8 +326,9 @@ export function enRouteSky(key: ThemeKey): SkySpecification {
   return { "sky-color": air.zenith, "horizon-color": air.horizon, "fog-color": air.ground ?? air.horizon, "sky-horizon-blend": 0.2, "horizon-fog-blend": 0.3, "fog-ground-blend": 0.25, "atmosphere-blend": 0 };
 }
 
-/** The En-route view's hillshade layer id. */
+/** The En-route view's hillshade layer id, and the layer it goes under (the first drawn over the land), in the style and when added to the map. */
 export const HILLSHADE = "hillshade";
+export const HILLSHADE_UNDER = "water";
 
 /** The relief of the En-route view's terrain, shaded from the same Terrarium source in the theme's colours: subtle by day, plainer by night. Under everything else drawn. */
 export function hillshadeLayer(key: ThemeKey): LayerSpecification {

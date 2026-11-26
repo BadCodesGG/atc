@@ -488,9 +488,9 @@ export function JourneyCard({
     ...(journey.arrival ? [["ETA", journey.arrival] as [string, string]] : []),
   ];
   const toggle = "bg-selected text-ink shadow-[0_0_0_1px_var(--color-selected-ring)]";
-  // In a 3D camera on a short phone (320x700) the card folds to its head, the switch and the progress, so
-  // the band below it still holds the whole aircraft: the facts and the notes come back on Map.
-  const fold = camera !== "map" ? "cramped:hidden" : "";
+  // In a 3D camera on a short phone (320x700: under 640 px wide and 800 tall) the card folds to its head, the
+  // switch and the progress, so the band below it still holds the whole aircraft: the facts and the notes come back on Map.
+  const fold = camera !== "map" ? "max-sm:cramped:hidden" : "";
   return (
     <section
       aria-label={`Followed flight ${journey.callsign}`}

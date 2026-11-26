@@ -9,7 +9,7 @@ import { bandPadding, blendPadding, type EnRouteCamera, EnRoutePeek, type EnRout
 import { blendPlacement, FALLBACK_NOTICE, type FallbackCause, FrameWatch, RETURN_TO_MAP_S, shareBlend, ShareEase } from "./en-route-journey";
 import type { EnRouteLayer } from "./en-route-layer";
 import type { Rect } from "./journey-frame";
-import { enRouteSky, flatSky, HILLSHADE, hillshadeLayer, PALETTES, TERRAIN, TERRAIN_SOURCE, terrainSource } from "./map-style";
+import { enRouteSky, flatSky, HILLSHADE, HILLSHADE_UNDER, hillshadeLayer, PALETTES, TERRAIN, TERRAIN_SOURCE, terrainSource } from "./map-style";
 
 /** What the En-route view needs of the World map that holds it (globe-map.ts). */
 export interface EnRouteHost {
@@ -233,7 +233,7 @@ export class EnRouteController {
         if (!map.getSource(TERRAIN_SOURCE)) map.addSource(TERRAIN_SOURCE, terrainSource());
         if (!map.getTerrain()) map.setTerrain(TERRAIN);
         // The relief shaded from the same tiles, under everything else drawn, and a sky with a horizon.
-        if (!map.getLayer(HILLSHADE)) map.addLayer(hillshadeLayer(this.host.theme()), "water");
+        if (!map.getLayer(HILLSHADE)) map.addLayer(hillshadeLayer(this.host.theme()), HILLSHADE_UNDER);
         map.setSky(enRouteSky(this.host.theme()));
         // The layer's own WebGL (its shaders) is made as it is added, and throws if the context cannot.
         if (this.layer && !map.getLayer(this.layer.id)) map.addLayer(this.layer);
