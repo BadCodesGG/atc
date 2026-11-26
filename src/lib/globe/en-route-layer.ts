@@ -13,6 +13,8 @@ export interface HazeFrame {
   aboveM: number;
   colour: string;
   strength: number;
+  /** The haze's start, no nearer than this many of the eye's heights over the ground (hazeStartHeights, by theme). */
+  startHeights: number;
 }
 
 /**
@@ -322,7 +324,7 @@ export class EnRouteLayer implements CustomLayerInterface {
     const metre = eye.meterInMercatorCoordinateUnits();
     // The far plane, from MapLibre's pixels (512 to a tile at zoom 0) to metres.
     const farM = args.farZ / (512 * 2 ** map.getZoom()) / metre;
-    const shells = hazeShells(haze.aboveM, farM);
+    const shells = hazeShells(haze.aboveM, farM, haze.startHeights);
     if (!shells.length) return;
     // Metres round the eye to the map's clip space, composed in doubles: the eye's frame, then the map's projection.
     const local = [metre, 0, 0, 0, 0, metre, 0, 0, 0, 0, metre, 0, eye.x, eye.y, eye.z, 1];

@@ -9,7 +9,7 @@ import { bandPadding, blendPadding, EN_ROUTE_MAX_PITCH, type EnRouteCamera, EnRo
 import { blendPlacement, FALLBACK_NOTICE, type FallbackCause, FrameWatch, RETURN_TO_MAP_S, shareBlend, ShareEase } from "./en-route-journey";
 import type { EnRouteLayer } from "./en-route-layer";
 import type { Rect } from "./journey-frame";
-import { enRouteHaze, enRouteSky, flatSky, hazeStrength, horizonM, IMAGERY, type ImageryReach, imageryTileZoom, MAPLIBRE_LOD, mapBackground, HILLSHADE, HILLSHADE_UNDER, hillshadeLayer, PALETTES, TERRAIN, TERRAIN_SOURCE, terrainSource } from "./map-style";
+import { enRouteHaze, enRouteSky, flatSky, hazeStartHeights, hazeStrength, horizonM, IMAGERY, type ImageryReach, imageryTileZoom, MAPLIBRE_LOD, mapBackground, HILLSHADE, HILLSHADE_UNDER, hillshadeLayer, PALETTES, TERRAIN, TERRAIN_SOURCE, terrainSource } from "./map-style";
 
 /**
  * One of MapLibre's Mercator units (the world is 1 across) in metres at the equator: its own Earth's
@@ -245,7 +245,8 @@ export class EnRouteController {
     // From the Cockpit the aircraft is the one the eye sits in: its model is not drawn, so a peek back never fills the view with it.
     this.layer?.setAircraft(camera === "cockpit" ? null : pose, aircraftClass.model, aircraftClass.lengthM);
     // The far ground's haze round the eye, in the theme's horizon colour (a look near level sees the ground to it).
-    this.layer?.setHaze({ eye, aboveM: overGround, colour: enRouteHaze(this.host.theme()), strength: hazeStrength(placed.pitchDeg) });
+    const theme = this.host.theme();
+    this.layer?.setHaze({ eye, aboveM: overGround, colour: enRouteHaze(theme), strength: hazeStrength(placed.pitchDeg), startHeights: hazeStartHeights(theme) });
     // Satellite's large-scale imagery reaches as far as the haze is full (imageryTileZoom reads this each tile).
     this.imageryReach.metres = horizonM(overGround);
     this.imageryReach.metresPerUnit = MERCATOR_UNIT_M * Math.cos((eye.latitude * Math.PI) / 180);
