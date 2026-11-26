@@ -12,6 +12,7 @@
  */
 
 import { launchChrome } from "./lib/chrome.mjs";
+import { sleep } from "./lib/page.mjs";
 
 /** AAL972 (hex adacfd), the one aircraft in the fixture's sky with a recorded route that is in the air: DFW to AUS, climbing out of Dallas-Fort Worth. */
 const HEX = "adacfd";
@@ -28,7 +29,6 @@ const PIC = "https://t.plnspttrs.net/00000/stub_280.svg";
 const LINK = "https://www.planespotters.net/photo/1/stub-aircraft?utm_source=api";
 const SVG = '<svg xmlns="http://www.w3.org/2000/svg" width="420" height="280"><rect width="420" height="280" fill="#789"/></svg>';
 
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const overlaps = (a, b) => a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
 
 /** The map's instance, found through the React fiber of <main>. */

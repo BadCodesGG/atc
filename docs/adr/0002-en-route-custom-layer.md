@@ -72,7 +72,8 @@ it, with no second canvas.
   (`enRouteShare`, the share's target). The share is moved toward that target at an even pace in time
   (`ShareEase`, all the way in 1.2 s), so a band that changes with the airport never steps the camera, and
   smoothed once at both ends where it is used (`shareBlend`, in `EnRouteController`: the camera's blend and
-  the Handover's crossfade both read it), which eases it in log distance and in time alike. The ease runs on real elapsed time however far apart the frames are; a gap
+  the Handover's crossfade both read it), which eases it in log distance and in time alike. The ease runs
+  on real elapsed time however far apart the frames are; a gap
   between frames is never taken as a pause by its length alone, only the page being hidden (its
   `visibilitychange`) is, and the first frame after it is shown again does not move it. Leaving the origin,
   a 3D camera chosen in its Diorama (offered on the flight card there) is held until the map has the flight

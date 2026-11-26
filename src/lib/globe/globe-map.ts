@@ -7,7 +7,7 @@ import type { RadarFrame } from "../radar";
 import type { FlightRoute } from "../routes";
 import type { OrbitView } from "../scene/orbit";
 import type { ThemeKey } from "../scene/theme";
-import { type MapFeed, REGION_RECKON, type SharedSky } from "../shared-sky";
+import { type MapFeed, REGION_RECKON, type SharedSky, trackerFeed } from "../shared-sky";
 import { PLAYBACK_DELAY, type TrackedAircraft, Tracker } from "../tracker";
 import { routeArcs } from "./arcs";
 import { toGeo, toLocal, type Origin } from "../geo";
@@ -165,7 +165,11 @@ export class GlobeMap {
    * holding the recorded regions as one moment, flown on.
    */
   private traffic: MapFeed;
-  /** The map's own tracker, behind `traffic` with the fixture (and live until setSky): the recorded regions as one moment. */
+  /**
+   * The map's own tracker, behind `traffic` with the fixture (and live until setSky): the recorded regions as
+   * one moment. Kept as a field, not only in `traffic`'s closure, so scripts/smoke-map-select.mjs can take an
+   * aircraft out of the fixture's sky.
+   */
   private readonly ownTracker: Tracker;
   /** The page's shared sky, once the page has given it (live only). */
   private sharedSky: SharedSky | null = null;
@@ -245,13 +249,7 @@ export class GlobeMap {
     // The fixture's recorded regions, and live an empty map until the page gives it its shared sky's feed.
     const own = new Tracker({ deadReckonMax: options.fixture ? Infinity : REGION_RECKON });
     this.ownTracker = own;
-    this.traffic = {
-      add: (snapshot) => own.add(snapshot),
-      at: (time) => own.at(time),
-      get size() {
-        return own.size;
-      },
-    };
+    this.traffic = trackerFeed(own);
     this.map = new MapLibreMap({
       container,
       style: mapStyle(options.theme, { globe: this.globe }),

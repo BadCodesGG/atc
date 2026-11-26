@@ -38,6 +38,17 @@ export interface MapFeed extends TrafficFeed {
   readonly size: number;
 }
 
+/** A tracker read as one MapFeed: every snapshot in under `listing`, every aircraft out (in `frame`'s metres, from a geographic tracker). */
+export function trackerFeed(tracker: Tracker, { listing, frame }: { listing?: Listing; frame?: Origin } = {}): MapFeed {
+  return {
+    add: (snapshot) => tracker.add(snapshot, listing),
+    at: (time) => tracker.at(time, { frame }),
+    get size() {
+      return tracker.size;
+    },
+  };
+}
+
 /** One followed flight's own reads: its snapshots in, that flight out (null while it is not drawn). */
 export interface FlightFeed {
   add(snapshot: Pick<TrafficSnapshot, "time" | "aircraft">): void;
@@ -107,14 +118,7 @@ export class SharedSky {
 
   /** The World map's feed as it fills and reads it: its region reads in; every aircraft the tracker holds out, whichever feed lists it, in `origin`'s metres. */
   worldMap(origin: Origin): MapFeed {
-    const { tracker } = this;
-    return {
-      add: (snapshot) => tracker.add(snapshot, REGION_LISTING),
-      at: (time) => tracker.at(time, { frame: origin }),
-      get size() {
-        return tracker.size;
-      },
-    };
+    return trackerFeed(this.tracker, { listing: REGION_LISTING, frame: origin });
   }
 
   /** A followed flight's own reads (the Journey's hex poll) as it fills and reads them: in, as a feed of their own; out, that flight wherever any feed has it. */
