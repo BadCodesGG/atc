@@ -10,7 +10,7 @@
  * - Everything the browser itself fetches is named: OpenFreeMap (vector tiles, glyphs), the USGS
  *   satellite imagery, RainViewer (the radar index and its tiles, on a host the index names, always a
  *   rainviewer.com subdomain: radar.ts checks it) and Planespotters (the photo API, and the photos on
- *   plnspttrs.net). adsb.lol, adsb.fi, adsbdb, the FAA and aviationweather.gov are read by the server.
+ *   plnspttrs.net), and AWS Terrain Tiles on S3 (the en-route view's 3D terrain). adsb.lol, adsb.fi, adsbdb, the FAA and aviationweather.gov are read by the server.
  * - MapLibre runs its tile workers from /maplibre (same origin) and may hand them blobs; its canvas
  *   textures and the aircraft icons are data: and blob: images.
  */
@@ -19,6 +19,8 @@ const OPENFREEMAP = "https://tiles.openfreemap.org";
 const USGS = "https://basemap.nationalmap.gov";
 const RAINVIEWER = ["https://api.rainviewer.com", "https://*.rainviewer.com"];
 const PLANESPOTTERS_API = "https://api.planespotters.net";
+/** AWS Terrain Tiles (elevation-tiles-prod), fetched by MapLibre's workers only while an en-route 3D camera is on. */
+const TERRAIN_TILES = "https://s3.amazonaws.com";
 const PLANESPOTTERS_IMAGES = ["https://*.plnspttrs.net", "https://*.planespotters.net"];
 
 /** Sites allowed to put the app in a frame. */
@@ -29,9 +31,9 @@ export function contentSecurityPolicy({ dev = false }: { dev?: boolean } = {}): 
     "default-src": ["'self'"],
     "script-src": ["'self'", "'unsafe-inline'", ...(dev ? ["'unsafe-eval'"] : [])],
     "style-src": ["'self'", "'unsafe-inline'"],
-    "img-src": ["'self'", "data:", "blob:", OPENFREEMAP, USGS, ...RAINVIEWER, ...PLANESPOTTERS_IMAGES],
+    "img-src": ["'self'", "data:", "blob:", OPENFREEMAP, USGS, ...RAINVIEWER, ...PLANESPOTTERS_IMAGES, TERRAIN_TILES],
     "font-src": ["'self'", "data:"],
-    "connect-src": ["'self'", OPENFREEMAP, USGS, ...RAINVIEWER, PLANESPOTTERS_API],
+    "connect-src": ["'self'", OPENFREEMAP, USGS, ...RAINVIEWER, PLANESPOTTERS_API, TERRAIN_TILES],
     "worker-src": ["'self'", "blob:"],
     "frame-ancestors": FRAME_ANCESTORS,
     "base-uri": ["'self'"],

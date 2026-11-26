@@ -1,7 +1,7 @@
 import { validateStyleMin } from "@maplibre/maplibre-gl-style-spec";
 import { describe, expect, it } from "vitest";
 import { THEMES, type ThemeKey } from "../scene/theme";
-import { arcOpacities, buildingHeight, journeyIconSize, mapStyle, PALETTES, radarLayer, radarSource, ripple, SELECTED_SCALE, SELECTION_DIM } from "./map-style";
+import { arcOpacities, buildingHeight, journeyIconSize, mapStyle, PALETTES, radarLayer, radarSource, ripple, SELECTED_SCALE, SELECTION_DIM, TERRAIN, TERRAIN_SOURCE, terrainSource } from "./map-style";
 
 const KEYS = Object.keys(THEMES) as ThemeKey[];
 const paint = (key: ThemeKey, id: string, prop: string) => {
@@ -225,5 +225,29 @@ describe("the shores of lakes and seas", () => {
   it("still draws on the aerial view, where the fill is clear rather than faded out (fill-opacity would take the outline with it)", () => {
     expect(paint("satellite", "water", "fill-opacity")).toBeUndefined();
     expect(paint("satellite", "water", "fill-color")).toBe("rgba(0,0,0,0)");
+  });
+});
+
+describe("the en-route view's terrain", () => {
+  it("is not in the style unless a 3D camera asks for it: the flat map never loads it", () => {
+    for (const key of ["light", "dark", "satellite"] as ThemeKey[]) {
+      const style = mapStyle(key);
+      expect(Object.values(style.sources).some((s) => s.type === "raster-dem")).toBe(false);
+      expect(style.terrain).toBeUndefined();
+    }
+  });
+
+  it("is AWS Terrain Tiles, Terrarium encoded, no key, 256 px tiles to zoom 15, credited with a link to the data's own attribution", () => {
+    const source = terrainSource();
+    expect(source).toMatchObject({ type: "raster-dem", tiles: ["https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png"], encoding: "terrarium", tileSize: 256, maxzoom: 15 });
+    expect(source.attribution).toContain("https://github.com/tilezen/joerd/blob/master/docs/attribution.md");
+    expect(source.attribution).toMatch(/Terrain Tiles/);
+  });
+
+  it("goes into the style with the terrain on it when asked (so a theme switch keeps it), and the style is valid", () => {
+    const style = mapStyle("dark", { terrain: true });
+    expect(style.sources[TERRAIN_SOURCE]).toEqual(terrainSource());
+    expect(style.terrain).toEqual(TERRAIN);
+    expect(validateStyleMin(style)).toEqual([]);
   });
 });

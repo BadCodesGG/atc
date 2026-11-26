@@ -4,10 +4,11 @@ Glossary for ATC. Terms are used as defined here in code, tests and UI copy.
 
 ## Terms
 
-- **Diorama**: the three.js 3D scene of one airport (ground, pavement, markings, extruded buildings, aircraft), added to the MapLibre map as a custom layer so both share one camera. Code in `src/lib/scene/`.
+- **Diorama**: the three.js 3D scene of one airport (ground, pavement, markings, extruded buildings, aircraft), drawn in a canvas of its own over the World map (not a MapLibre custom layer) and kept on the same camera, the two converted into each other's terms each frame; during a **Handover** it crossfades over the map. Code in `src/lib/scene/`.
 - **World map**: the MapLibre view showing each airport with its live aircraft count; zooming in hands over to the diorama. Code in `src/lib/globe/`.
 - **Handover**: the continuous zoom from the world map into an airport's diorama, with no page change.
 - **Journey**: following one flight gate to gate: out of its origin's diorama, across the map, into its destination's.
+- **En-route view**: the 3D view of a followed flight on the World map, between its two Dioramas: the map tilted round the aircraft over 3D terrain, with the aircraft's class model drawn at its true position, altitude, heading and climb attitude in a MapLibre custom layer that shares the map's depth buffer (docs/adr/0002-en-route-custom-layer.md). Its **Camera** is picked on the Journey card: **Map** (the flat World map, where Following starts), **Chase** (behind and above the aircraft along its track, looking down at it), **Cockpit** (at the nose, looking ahead, pitched with the climb or descent), **Side** (abeam on the left at wing height) or **Top** (straight down, track up). Terrain is on only in the 3D cameras. Code in `src/lib/globe/en-route.ts` and `en-route-layer.ts`.
 - **Flight elsewhere**: a flight the search finds on the feed when nothing on screen matches, by callsign, flight number or **tail number** (its registration: N3596W, G-ZBKJ). Picking it opens the built airport it is near, or flies the world map to it and follows it there.
 - **Feed**: a public ADS-B source (adsb.lol, with adsb.fi as fallback) read on request. **Feed health** is its online/offline status.
 - **Tracker**: turns feed snapshots into tracked aircraft with a state (parked, pushing back, taxiing, holding, climbing, on approach).

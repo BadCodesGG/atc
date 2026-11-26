@@ -22,6 +22,7 @@ import { titleRowChecks, titleRowPointerChecks } from "./smoke-title-row.mjs";
 import { wideColumnChecks } from "./smoke-wide-column.mjs";
 import { trackerMotionChecks } from "./smoke-tracker-motion.mjs";
 import { sharedTrackerChecks } from "./smoke-shared-tracker.mjs";
+import { enRouteChaseChecks } from "./smoke-en-route-chase.mjs";
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
 const PORT = Number(process.env.SMOKE_PORT ?? 3119);
@@ -1135,6 +1136,9 @@ try {
 
   // The page's one tracker: the Diorama, the World map and the Journey draw a followed flight at the same place in a frame (scripts/smoke-shared-tracker.mjs).
   await sharedTrackerChecks({ browser, base: BASE, check });
+
+  // The En-route view: a followed flight in Chase, with terrain and its model, and back to Map with the terrain gone (scripts/smoke-en-route-chase.mjs).
+  await enRouteChaseChecks({ browser, base: BASE, check });
 } catch (error) {
   check("smoke run completed", false, String(error));
 } finally {
