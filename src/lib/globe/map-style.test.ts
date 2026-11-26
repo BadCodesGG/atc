@@ -1,7 +1,7 @@
 import { type LayerSpecification, validateStyleMin } from "@maplibre/maplibre-gl-style-spec";
 import { describe, expect, it } from "vitest";
 import { THEMES, type ThemeKey } from "../scene/theme";
-import { arcOpacities, buildingHeight, enRouteSky, flatSky, HILLSHADE, HILLSHADE_UNDER, hillshadeLayer, journeyIconSize, mapBackground, mapStyle, PALETTES, radarLayer, radarSource, ripple, SELECTED_SCALE, SELECTION_DIM, TERRAIN, TERRAIN_SOURCE, terrainSource } from "./map-style";
+import { arcOpacities, buildingHeight, enRouteHaze, enRouteSky, flatSky, HAZE_SHELLS, hazeShells, hazeStrength, HILLSHADE, HILLSHADE_UNDER, hillshadeLayer, journeyIconSize, mapBackground, mapStyle, PALETTES, radarLayer, radarSource, ripple, SELECTED_SCALE, SELECTION_DIM, TERRAIN, TERRAIN_SOURCE, terrainSource } from "./map-style";
 
 const KEYS = Object.keys(THEMES) as ThemeKey[];
 const paint = (key: ThemeKey, id: string, prop: string) => {
@@ -278,16 +278,24 @@ describe("the en-route view's terrain", () => {
     expect(sky).toEqual(enRouteSky(key));
     expect(sky["sky-color"]).toBe(air.zenith);
     expect(sky["horizon-color"]).toBe(air.horizon);
-    expect(sky["fog-color"]).toBe(air.ground ?? air.horizon);
+    // The haze the far ground fades into is the horizon's own colour, so ground, haze and sky meet without a line.
+    expect(sky["fog-color"]).toBe(air.horizon);
+    expect(enRouteHaze(key)).toBe(air.horizon);
     // The sky reads apart from the ground under it (the map's background) and from the horizon.
     const ground = paint(key, "background", "background-color");
     expect(sky["sky-color"]).not.toBe(ground);
     expect(sky["sky-color"]).not.toBe(sky["horizon-color"]);
   });
 
+  it.each(KEYS)("in %s, a 3D camera's sky grades from the horizon's haze to the zenith over most of the sky, not in a thin line over a flat fill", (key) => {
+    expect(enRouteSky(key)["sky-horizon-blend"]).toBeGreaterThanOrEqual(0.8);
+    expect(enRouteSky(key)["sky-horizon-blend"]).toBeLessThanOrEqual(1);
+  });
+
   it.each(KEYS)("in %s, a 3D camera's background is the sky's haze, so the ground past the farthest tile drawn reads as the horizon's haze, not bare land", (key) => {
     const background = (style: ReturnType<typeof mapStyle>) => (style.layers.find((l) => l.id === "background") as { paint: Record<string, unknown> }).paint["background-color"];
     expect(mapBackground(key, true)).toBe(enRouteSky(key)["fog-color"]);
+    expect(mapBackground(key, true)).toBe(enRouteHaze(key));
     expect(background(mapStyle(key, { terrain: true }))).toBe(mapBackground(key, true));
     // The flat map keeps its own: the land's colour, or under the imagery the page's.
     expect(background(mapStyle(key))).toBe(mapBackground(key));
@@ -303,5 +311,68 @@ describe("the en-route view's terrain", () => {
       expect(p["hillshade-highlight-color"]).toBe(PALETTES[key].reliefLight);
       expect(p["hillshade-exaggeration"]).toBe(PALETTES[key].reliefStrength);
     }
+  });
+});
+
+describe("hazeStrength", () => {
+  it("is the haze in full on a look near level (Cockpit, Side) and none at Chase's 75 degrees or steeper (Chase and Top as they were)", () => {
+    expect(hazeStrength(90)).toBe(1);
+    expect(hazeStrength(110)).toBe(1);
+    expect(hazeStrength(85)).toBe(1);
+    expect(hazeStrength(75)).toBe(0);
+    expect(hazeStrength(0)).toBe(0);
+    expect(hazeStrength(80)).toBeGreaterThan(0);
+    expect(hazeStrength(80)).toBeLessThan(1);
+  });
+});
+
+describe("hazeShells", () => {
+  const FL110 = 11_000 * 0.3048;
+  const FL370 = 37_000 * 0.3048;
+  const horizon = (aboveM: number) => Math.sqrt(2 * 6_371_000 * aboveM + aboveM * aboveM);
+  const opacity = (shells: { opacity: number }[]) => shells.at(-1)!.opacity;
+
+  it("draws nothing for an eye at or under the ground", () => {
+    expect(hazeShells(0)).toEqual([]);
+    expect(hazeShells(-50)).toEqual([]);
+    expect(hazeShells(Number.NaN)).toEqual([]);
+  });
+
+  it("builds the haze in HAZE_SHELLS shells, ever farther out, to full haze at the horizon", () => {
+    const shells = hazeShells(FL110);
+    expect(shells).toHaveLength(HAZE_SHELLS);
+    for (let i = 1; i < shells.length; i++) expect(shells[i].distanceM).toBeGreaterThan(shells[i - 1].distanceM);
+    for (const s of shells) {
+      expect(s.opacity).toBeGreaterThan(0);
+      expect(s.opacity).toBeLessThanOrEqual(1);
+    }
+    expect(shells.at(-1)!.distanceM).toBeCloseTo(horizon(FL110), -2);
+    expect(opacity(shells)).toBe(1);
+  });
+
+  it("thickens in equal steps, so no shell's edge on the ground stands out from the others", () => {
+    const shells = hazeShells(FL110);
+    shells.forEach((s, i) => expect(s.opacity).toBeCloseTo((i + 1) / shells.length, 9));
+    expect(1 / HAZE_SHELLS).toBeLessThanOrEqual(0.05);
+  });
+
+  it("leaves the near ground clear: at 11,000 ft it starts past Chase's 13 km and the Cockpit's nearer relief", () => {
+    expect(hazeShells(FL110)[0].distanceM).toBeGreaterThan(13_000);
+    // Quickly at first, as air does: half the haze well inside half the way to the horizon.
+    const shells = hazeShells(FL110);
+    expect(shells[shells.length / 2 - 1].distanceM).toBeLessThan(horizon(FL110) / 2);
+  });
+
+  it("reaches farther from higher up, with the horizon", () => {
+    expect(hazeShells(FL370).at(-1)!.distanceM).toBeGreaterThan(hazeShells(FL110).at(-1)!.distanceM * 1.5);
+    expect(hazeShells(FL370)[0].distanceM).toBeGreaterThan(hazeShells(FL110)[0].distanceM);
+  });
+
+  it("ends inside the map's far plane, where the ground drawn ends, when that comes before the horizon", () => {
+    const far = 40_000;
+    const shells = hazeShells(FL110, far);
+    expect(shells.at(-1)!.distanceM).toBeLessThan(far);
+    expect(shells.at(-1)!.distanceM).toBeGreaterThan(far * 0.9);
+    expect(opacity(shells)).toBe(1);
   });
 });

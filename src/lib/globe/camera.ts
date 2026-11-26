@@ -1,5 +1,6 @@
 import { type Origin, toGeo, toLocal, wrap360 } from "../geo";
 import type { OrbitView } from "../scene/orbit";
+import { MAX_PITCH } from "./en-route";
 
 /**
  * The map's camera and the diorama's are one camera described two ways: MapLibre's centre, zoom,
@@ -125,7 +126,12 @@ export function finiteCamera(cam: MapCamera): boolean {
 
 const MAP_HASH = /(^#|&)map=([^&]*)/;
 
-/** The camera the address's `#map=zoom/lat/lng[/bearing/pitch]` names, or null when it names none or any part is not a finite number. */
+/**
+ * The camera the address's `#map=zoom/lat/lng[/bearing/pitch]` names, or null when it names none, any part is
+ * not a finite number, or its tilt is past the map's own limit (MAX_PITCH), which the map refuses (it would open
+ * on the world instead): an En-route 3D camera's own view, in an address made before the address carried the
+ * journey's flat shot.
+ */
 export function mapHashCamera(hash: string): MapCamera | null {
   const m = MAP_HASH.exec(hash);
   if (!m) return null;
@@ -133,10 +139,10 @@ export function mapHashCamera(hash: string): MapCamera | null {
   if (parts.length < 3 || parts.length > 5 || parts.some((p) => !/^-?\d+(\.\d+)?$/.test(p))) return null;
   const [zoom, lat, lng, bearing = 0, pitch = 0] = parts.map(Number);
   const cam = { zoom, lat, lng, bearing, pitch };
-  return finiteCamera(cam) ? cam : null;
+  return finiteCamera(cam) && pitch <= MAX_PITCH ? cam : null;
 }
 
-/** The address's hash without a `#map=` that names no finite camera (a hidden tab once wrote NaN there); anything else kept. */
+/** The address's hash without a `#map=` that names no camera the map opens on (a hidden tab once wrote NaN there); anything else kept. */
 export function withoutBadMapHash(hash: string): string {
   if (!MAP_HASH.test(hash) || mapHashCamera(hash)) return hash;
   const rest = hash.replace(/^#/, "").split("&").filter((p) => !p.startsWith("map="));

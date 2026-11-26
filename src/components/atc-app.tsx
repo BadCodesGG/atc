@@ -836,8 +836,8 @@ function Viewer({ airport, theme, onTheme, onAirport, filters, onFilters, focusP
       flight: onMap ? (mapFlight ? (mapFlight.callsign ?? mapFlight.id.toUpperCase()) : null) : (chrome.card?.callsign ?? null),
       camera: chrome.camera,
       filters,
-      // From an En-route 3D camera the map's own hash looks past level and down its line of sight: the link carries the journey's flat shot.
-      map: onMap ? (globeRef.current && globeRef.current.enRouteBlend > 0 ? mapHashOf(globeRef.current.journeyCamera) : parseMapHash(window.location.hash)) : null,
+      // The camera the address carries (from an En-route 3D camera the journey's flat shot), now rather than as last written.
+      map: onMap ? (globeRef.current ? mapHashOf(globeRef.current.addressCamera) : parseMapHash(window.location.hash)) : null,
     }).href;
   // /share
 

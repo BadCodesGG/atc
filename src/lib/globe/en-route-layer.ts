@@ -2,16 +2,24 @@ import { type CustomLayerInterface, type CustomRenderMethodInput, type Map as Ma
 import { type AircraftModel, MODEL_LENGTH } from "../aircraft-class";
 import { modelGeometry } from "../scene/aircraft-model";
 import { aircraftMatrix, type AircraftPose } from "./en-route";
+import { hazeShells } from "./map-style";
 
 /**
  * The En-route view's aircraft (docs/adr/0002-en-route-custom-layer.md): the followed flight's procedural
  * class model, the same the Diorama draws, as a MapLibre custom layer in the map's own WebGL context.
  * It draws into the map's framebuffer with the map's depth buffer, so the 3D terrain in front of it hides
  * it. It only draws: the map hands it this frame's pose (sampled once from the shared tracker, with the
- * camera), and it draws the model there.
+ * camera), and it draws the model there. Under the model it draws the far ground's haze (hazeShells), which
+ * MapLibre's own fog does not reach on a look near level.
  */
 
 export const EN_ROUTE_LAYER = "en-route-aircraft";
+
+/** How far over level the haze reaches into the sky, as the sine of the angle (about 3 degrees). */
+const HAZE_ABOVE_LEVEL = 0.05;
+/** The haze shells' sphere: its rings from pole to pole and its segments round each. */
+const SPHERE_RINGS = 32;
+const SPHERE_SEGMENTS = 64;
 
 const VERTEX = `#version 300 es
 in vec3 a_position;
@@ -41,6 +49,34 @@ void main() {
   fragColor = vec4(mix(u_body, u_paint, v_paint) * lit, 1.0);
 }`;
 
+/** A haze shell: the unit sphere round the eye, scaled out to the shell's distance. */
+const HAZE_VERTEX = `#version 300 es
+in vec3 a_direction;
+uniform mat4 u_matrix;
+uniform float u_radius;
+out vec3 v_direction;
+void main() {
+  v_direction = a_direction;
+  gl_Position = u_matrix * vec4(a_direction * u_radius, 1.0);
+}`;
+
+/**
+ * The haze over what is drawn, once a pixel: u_opacity, the haze with every shell nearer than the ground there
+ * (drawHaze counts them). Over level it thins out within a few degrees, so the horizon is soft, and a ridge over
+ * level fades as the sky beside it does.
+ */
+const HAZE_FRAGMENT = `#version 300 es
+precision mediump float;
+in vec3 v_direction;
+uniform vec3 u_colour;
+uniform float u_opacity;
+out vec4 fragColor;
+void main() {
+  float alpha = u_opacity * (1.0 - smoothstep(0.0, ${HAZE_ABOVE_LEVEL.toFixed(4)}, normalize(v_direction).z));
+  if (alpha <= 0.0) discard;
+  fragColor = vec4(u_colour, alpha);
+}`;
+
 /** The light, in Mercator's axes (x east, y south, z up): high, from the south-east. */
 const LIGHT = (() => {
   const v = [0.35, 0.3, 0.88];
@@ -59,6 +95,52 @@ function compile(gl: WebGL2RenderingContext, type: number, source: string): WebG
   gl.compileShader(shader);
   if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) throw new Error(`en-route: shader failed: ${gl.getShaderInfoLog(shader)}`);
   return shader;
+}
+
+function link(gl: WebGL2RenderingContext, vertex: string, fragment: string): WebGLProgram {
+  const program = gl.createProgram()!;
+  const vs = compile(gl, gl.VERTEX_SHADER, vertex);
+  const fs = compile(gl, gl.FRAGMENT_SHADER, fragment);
+  gl.attachShader(program, vs);
+  gl.attachShader(program, fs);
+  gl.linkProgram(program);
+  gl.deleteShader(vs);
+  gl.deleteShader(fs);
+  if (!gl.getProgramParameter(program, gl.LINK_STATUS)) throw new Error(`en-route: program failed: ${gl.getProgramInfoLog(program)}`);
+  return program;
+}
+
+/** The unit sphere the haze's shells are drawn from, as indexed triangles: its points are its directions. */
+function unitSphere(gl: WebGL2RenderingContext, program: WebGLProgram): { vao: WebGLVertexArrayObject; buffers: WebGLBuffer[]; count: number } {
+  const points: number[] = [];
+  for (let r = 0; r <= SPHERE_RINGS; r++) {
+    const polar = (r / SPHERE_RINGS) * Math.PI;
+    for (let s = 0; s <= SPHERE_SEGMENTS; s++) {
+      const round = (s / SPHERE_SEGMENTS) * 2 * Math.PI;
+      points.push(Math.sin(polar) * Math.cos(round), Math.sin(polar) * Math.sin(round), Math.cos(polar));
+    }
+  }
+  const indices: number[] = [];
+  const row = SPHERE_SEGMENTS + 1;
+  for (let r = 0; r < SPHERE_RINGS; r++) {
+    for (let s = 0; s < SPHERE_SEGMENTS; s++) {
+      const a = r * row + s;
+      indices.push(a, a + row, a + 1, a + 1, a + row, a + row + 1);
+    }
+  }
+  const vao = gl.createVertexArray()!;
+  gl.bindVertexArray(vao);
+  const positions = gl.createBuffer()!;
+  gl.bindBuffer(gl.ARRAY_BUFFER, positions);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(points), gl.STATIC_DRAW);
+  const at = gl.getAttribLocation(program, "a_direction");
+  gl.enableVertexAttribArray(at);
+  gl.vertexAttribPointer(at, 3, gl.FLOAT, false, 0, 0);
+  const elements = gl.createBuffer()!;
+  gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, elements);
+  gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(indices), gl.STATIC_DRAW);
+  gl.bindVertexArray(null);
+  return { vao, buffers: [positions, elements], count: indices.length };
 }
 
 interface Mesh {
@@ -82,6 +164,13 @@ export class EnRouteLayer implements CustomLayerInterface {
   private model: AircraftModel = "narrow";
   private lengthM = MODEL_LENGTH.narrow;
   private colours = { body: hexToRgb("#eeeeea"), paint: hexToRgb("#6d28d9") };
+  /** The far ground's haze: its program and uniforms, the unit sphere its shells are drawn from, and this frame's eye and colour (null draws none). */
+  private hazeProgram: WebGLProgram | null = null;
+  private hazeUniforms: Record<"matrix" | "radius" | "colour" | "opacity", WebGLUniformLocation | null> | null = null;
+  private sphere: { vao: WebGLVertexArrayObject; buffers: WebGLBuffer[]; count: number } | null = null;
+  private haze: { eye: { latitude: number; longitude: number; altitudeM: number }; aboveM: number; colour: [number, number, number]; strength: number } | null = null;
+  /** How many shells the layer drew the haze in, last frame: read by the smoke check. */
+  hazeDrawn = 0;
   /** How many frames the layer has drawn the aircraft in: read by the smoke check. */
   drawnFrames = 0;
   /** Where it last drew the aircraft's origin, in normalised device coordinates (x right, y up, -1 to 1 across the map): read by the smoke check. */
@@ -104,28 +193,41 @@ export class EnRouteLayer implements CustomLayerInterface {
     this.map?.triggerRepaint();
   }
 
+  /**
+   * The far ground's haze this frame: the eye (where the camera is) and how far it is over the ground under it,
+   * in `colour` (enRouteHaze), at `strength` (hazeStrength, 0 to 1); null draws none.
+   */
+  setHaze(haze: { eye: { latitude: number; longitude: number; altitudeM: number }; aboveM: number; colour: string; strength: number } | null): void {
+    this.haze = haze && { eye: haze.eye, aboveM: haze.aboveM, colour: hexToRgb(haze.colour), strength: haze.strength };
+  }
+
   onAdd(map: MapLibreMap, gl: WebGL2RenderingContext): void {
     this.map = map;
     this.gl = gl;
-    const program = gl.createProgram()!;
-    const vs = compile(gl, gl.VERTEX_SHADER, VERTEX);
-    const fs = compile(gl, gl.FRAGMENT_SHADER, FRAGMENT);
-    gl.attachShader(program, vs);
-    gl.attachShader(program, fs);
-    gl.linkProgram(program);
-    gl.deleteShader(vs);
-    gl.deleteShader(fs);
-    if (!gl.getProgramParameter(program, gl.LINK_STATUS)) throw new Error(`en-route: program failed: ${gl.getProgramInfoLog(program)}`);
+    const program = link(gl, VERTEX, FRAGMENT);
     this.program = program;
     const at = (name: string) => gl.getUniformLocation(program, name);
     this.uniforms = { matrix: at("u_matrix"), turn: at("u_turn"), body: at("u_body"), paint: at("u_paint"), light: at("u_light") };
+    const haze = link(gl, HAZE_VERTEX, HAZE_FRAGMENT);
+    this.hazeProgram = haze;
+    const hazeAt = (name: string) => gl.getUniformLocation(haze, name);
+    this.hazeUniforms = { matrix: hazeAt("u_matrix"), radius: hazeAt("u_radius"), colour: hazeAt("u_colour"), opacity: hazeAt("u_opacity") };
+    this.sphere = unitSphere(gl, haze);
   }
 
   onRemove(_map: MapLibreMap, gl: WebGL2RenderingContext): void {
     this.dropMesh(gl);
     if (this.program) gl.deleteProgram(this.program);
+    if (this.hazeProgram) gl.deleteProgram(this.hazeProgram);
+    if (this.sphere) {
+      gl.deleteVertexArray(this.sphere.vao);
+      for (const b of this.sphere.buffers) gl.deleteBuffer(b);
+    }
     this.program = null;
     this.uniforms = null;
+    this.hazeProgram = null;
+    this.hazeUniforms = null;
+    this.sphere = null;
     this.map = null;
     this.gl = null;
   }
@@ -170,9 +272,78 @@ export class EnRouteLayer implements CustomLayerInterface {
   }
 
   render(gl: WebGL2RenderingContext | WebGLRenderingContext, args: CustomRenderMethodInput): void {
+    if (this.failed || !("createVertexArray" in gl)) return;
+    // The haze first, over the ground drawn and under the aircraft, which is never in it.
+    this.drawHaze(gl, args);
+    this.drawAircraft(gl, args);
+  }
+
+  /**
+   * The far ground's haze (hazeShells), each shell a sphere round the eye. First the shells only count, in the
+   * stencil, against the map's depth: a pixel's count is how many shells are nearer than the ground there. Then
+   * each count's haze is drawn where the stencil holds it, so every pixel is blended once, at the opacity of the
+   * shells counted. Blended shell by shell instead, 24 faint layers each rounded to the framebuffer's 8 bits
+   * tinted and darkened the sky in a line where the haze thins out. Nothing is written to the depth, and the
+   * stencil is left clear, as found.
+   */
+  private drawHaze(gl: WebGL2RenderingContext, args: CustomRenderMethodInput): void {
+    this.hazeDrawn = 0;
+    const { haze, hazeProgram: program, hazeUniforms: u, sphere, map } = this;
+    if (!haze || !(haze.strength > 0) || !program || !u || !sphere || !map) return;
+    const eye = MercatorCoordinate.fromLngLat([haze.eye.longitude, haze.eye.latitude], haze.eye.altitudeM);
+    const metre = eye.meterInMercatorCoordinateUnits();
+    // The far plane, from MapLibre's pixels (512 to a tile at zoom 0) to metres.
+    const farM = args.farZ / (512 * 2 ** map.getZoom()) / metre;
+    const shells = hazeShells(haze.aboveM, farM);
+    if (!shells.length) return;
+    // Metres round the eye to the map's clip space, composed in doubles: the eye's frame, then the map's projection.
+    const local = [metre, 0, 0, 0, 0, metre, 0, 0, 0, 0, metre, 0, eye.x, eye.y, eye.z, 1];
+    const clip = multiply(args.defaultProjectionData.mainMatrix as ArrayLike<number>, local);
+    gl.useProgram(program);
+    gl.uniformMatrix4fv(u.matrix, false, new Float32Array(clip));
+    gl.uniform3fv(u.colour, haze.colour);
+    gl.disable(gl.CULL_FACE);
+    gl.depthMask(false);
+    gl.enable(gl.STENCIL_TEST);
+    gl.stencilMask(0xff);
+    gl.clearStencil(0);
+    gl.clear(gl.STENCIL_BUFFER_BIT);
+    gl.bindVertexArray(sphere.vao);
+    // Count: each shell adds one where the ground is beyond it, colour untouched.
+    gl.colorMask(false, false, false, false);
+    gl.enable(gl.DEPTH_TEST);
+    gl.depthFunc(gl.LEQUAL);
+    gl.disable(gl.BLEND);
+    gl.stencilFunc(gl.ALWAYS, 0, 0xff);
+    gl.stencilOp(gl.KEEP, gl.KEEP, gl.INCR);
+    for (const shell of shells) {
+      gl.uniform1f(u.radius, shell.distanceM);
+      gl.drawElements(gl.TRIANGLES, sphere.count, gl.UNSIGNED_SHORT, 0);
+    }
+    // Haze: where the count is n, the haze of the nearest n shells, over the whole view (the farthest shell's sphere surrounds it).
+    gl.colorMask(true, true, true, true);
+    gl.disable(gl.DEPTH_TEST);
+    gl.enable(gl.BLEND);
+    gl.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+    gl.stencilOp(gl.KEEP, gl.KEEP, gl.KEEP);
+    gl.uniform1f(u.radius, shells.at(-1)!.distanceM);
+    shells.forEach((shell, i) => {
+      gl.stencilFunc(gl.EQUAL, i + 1, 0xff);
+      gl.uniform1f(u.opacity, shell.opacity * haze.strength);
+      gl.drawElements(gl.TRIANGLES, sphere.count, gl.UNSIGNED_SHORT, 0);
+    });
+    gl.bindVertexArray(null);
+    gl.disable(gl.BLEND);
+    gl.clear(gl.STENCIL_BUFFER_BIT);
+    gl.disable(gl.STENCIL_TEST);
+    gl.depthMask(true);
+    this.hazeDrawn = shells.length;
+  }
+
+  private drawAircraft(gl: WebGL2RenderingContext, args: CustomRenderMethodInput): void {
     const pose = this.pose;
     const program = this.program;
-    if (!pose || !program || this.failed || !("createVertexArray" in gl)) return;
+    if (!pose || !program) return;
     let mesh: Mesh;
     try {
       mesh = this.meshFor(gl, program);

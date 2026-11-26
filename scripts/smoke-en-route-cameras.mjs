@@ -53,6 +53,8 @@ const CAMERA = `(() => {
     centre: [c.lng, c.lat],
     aircraft: mark ? mark.geometry.coordinates : null,
     modelPosed: layer ? !!layer.implementation.pose : null,
+    haze: layer ? layer.implementation.hazeDrawn : null,
+    hashPitch: Number((/(?:^#|&)map=([^&]*)/.exec(location.hash)?.[1] ?? "").split("/")[4] ?? 0),
   };
 })()`;
 
@@ -114,6 +116,9 @@ export async function enRouteCameraChecks({ browser, base, check }) {
     } else {
       check(`cameras (${how}): ${LABEL[camera]} draws the aircraft's model`, s.modelPosed === true, `posed ${s.modelPosed}`);
     }
+    if (camera === "cockpit" || camera === "side") check(`cameras (${how}): ${LABEL[camera]} hazes the far ground to the horizon`, s.haze > 0, `${s.haze} shells`);
+    // Not the 3D view past level, which the map refuses on a reload and opens on the world instead.
+    check(`cameras (${how}): the address carries the journey's flat shot in ${LABEL[camera]} (pitch at most 78), which a reload opens on`, Number.isFinite(s.hashPitch) && s.hashPitch <= 78, `pitch ${s.hashPitch}`);
     return s;
   };
 

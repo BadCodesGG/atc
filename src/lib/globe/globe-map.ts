@@ -15,7 +15,8 @@ import type { JourneyFeatures, JourneyFix } from "../journey-follow";
 import { type EnRouteCamera, type Insets, MAX_PITCH } from "./en-route";
 import { EnRouteController } from "./en-route-controller";
 import { AIRCRAFT_GLYPH, GLYPH_BOX } from "./aircraft-glyph";
-import { finiteCamera, groundView, type Lens, type MapCamera, mapToOrbit, orbitToMap, paddingFor, worldFloor } from "./camera";
+import { withMapHash } from "../share-link";
+import { finiteCamera, groundView, type Lens, type MapCamera, mapHashCamera, mapToOrbit, orbitToMap, paddingFor, worldFloor } from "./camera";
 import { shiftClearOfCard } from "./clear-of-card";
 import { airportFeatures, type ProcedurePiece, procedureFeatures } from "./features";
 import { frameShift, freeBand, type Rect } from "./journey-frame";
@@ -38,6 +39,8 @@ import { countInView, MAP_ORIGIN, mergeRegions, type SkyFeatures, skyFeatures, m
 
 /** The view the page opens on when the map leads and the address names none: the continental US. */
 const START = { center: [-96, 38.5] as [number, number], zoom: 3.4 };
+/** How often at most the map writes its camera into the address, ms (MapLibre's own hash wrote as often). */
+const ADDRESS_MS = 300;
 /** The map shows aircraft from this zoom in: about a few hundred kilometres across. */
 const REGION_ZOOM = 5.5;
 /** At most this many region cells are read for one view; a view wider than that shows airports only. */
@@ -259,17 +262,21 @@ export class GlobeMap {
     const own = new Tracker({ deadReckonMax: options.fixture ? Infinity : REGION_RECKON });
     this.ownTracker = own;
     this.traffic = trackerFeed(own);
+    // The address carries the map's camera, so a reload or a shared link opens on the same view: read here and
+    // written by the map itself (writeAddress), not by MapLibre's own hash, which would write an En-route 3D
+    // camera's view past level, a view the map refuses on the reload and opens on the world instead.
+    const named = mapHashCamera(window.location.hash);
     this.map = new MapLibreMap({
       container,
       style: mapStyle(options.theme, { globe: this.globe }),
-      center: START.center,
-      zoom: START.zoom,
+      center: named ? [named.lng, named.lat] : START.center,
+      zoom: named?.zoom ?? START.zoom,
+      bearing: named?.bearing ?? 0,
+      pitch: named?.pitch ?? 0,
       // The diorama tilts from 12 to 88 degrees above the ground: 78 to 2 degrees of pitch. This app's own
       // limit (MAX_PITCH), not MapLibre's; an En-route 3D camera raises it past level while it is on
       // (EN_ROUTE_MAX_PITCH, en-route-controller.ts) and puts it back on Map.
       maxPitch: MAX_PITCH,
-      // The address carries the map's camera, so a reload or a shared link opens on the same view.
-      hash: "map",
       attributionControl: { compact: true },
       transformCameraUpdate: (next) => this.guideUpdate(next),
     });
@@ -286,6 +293,7 @@ export class GlobeMap {
     // A journey moves the map every frame: its traffic is read on the timer then, not on every move.
     this.map.on("moveend", () => {
       this.viewNumber++;
+      this.writeAddress();
       if (!this.driver) void this.loadRegion();
       // Judged a frame later: a movement interrupted by the next one (flyToward by the landing flyTo) fires its
       // moveend inside the call that starts the next, before that one is under way.
@@ -296,6 +304,9 @@ export class GlobeMap {
         this.applyAnchor();
       });
     });
+    // The view it opened on into the address at once, and an address edited by hand (or Back) taken up, as MapLibre's own hash did.
+    this.writeAddress();
+    window.addEventListener("hashchange", this.onHashChange);
     // Its lost WebGL context and its drags it watches itself.
     this.enRoute = new EnRouteController(
       {
@@ -856,8 +867,36 @@ export class GlobeMap {
     void this.loadCounts();
   };
 
+  /**
+   * The camera the address carries: in an En-route 3D camera the journey's flat shot (journeyCamera), which the
+   * map opens on, not its own view past level down the line of sight; otherwise the map's.
+   */
+  get addressCamera(): MapCamera {
+    return this.enRouteBlend > 0 ? this.journeyCamera : this.camera;
+  }
+
+  /** Writes addressCamera into the address's `#map=`, at most every ADDRESS_MS (a journey moves the map every frame, and the browser throttles an address written faster). */
+  private writeAddress(): void {
+    if (this.addressTimer) return;
+    this.addressTimer = window.setTimeout(() => {
+      this.addressTimer = 0;
+      const { hash, pathname, search } = window.location;
+      const next = withMapHash(hash, this.addressCamera);
+      if (next !== hash) window.history.replaceState(window.history.state, "", `${pathname}${search}${next}`);
+    }, ADDRESS_MS);
+  }
+
+  private addressTimer = 0;
+
+  private readonly onHashChange = () => {
+    const cam = mapHashCamera(window.location.hash);
+    if (cam) this.map.jumpTo({ center: [cam.lng, cam.lat], zoom: cam.zoom, bearing: cam.bearing, pitch: cam.pitch });
+  };
+
   dispose(): void {
     this.enRoute.dispose();
+    window.clearTimeout(this.addressTimer);
+    window.removeEventListener("hashchange", this.onHashChange);
     document.removeEventListener("visibilitychange", this.onShown);
     document.removeEventListener("keydown", this.onKey);
     cancelAnimationFrame(this.frame);

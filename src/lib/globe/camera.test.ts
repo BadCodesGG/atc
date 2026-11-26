@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { finiteCamera, groundView, liftView, type MapCamera, mapHashCamera, mapToOrbit, orbitToMap, paddingFor, seenOnGround, withoutBadMapHash, worldFloor } from "./camera";
+import { MAX_PITCH } from "./en-route";
 
 const equator = { latitude: 0, longitude: 0 };
 const atl = { latitude: 33.6367, longitude: -84.4281 };
@@ -130,6 +131,14 @@ describe("a frame with no size, and the address's map camera", () => {
     expect(withoutBadMapHash("#map=NaN/NaN/NaN")).toBe("");
     expect(withoutBadMapHash("#map=NaN/NaN/NaN&x=1")).toBe("#x=1");
     expect(withoutBadMapHash("#map=6/33.6/-84.4/30/50")).toBe("#map=6/33.6/-84.4/30/50");
+  });
+
+  it("names no camera for a tilt past the map's own limit (MAX_PITCH), which the map would refuse and open on the world instead", () => {
+    // An En-route 3D camera's own view, as an address made before the address carried the journey's flat shot.
+    expect(mapHashCamera("#map=15.6/33.7/-85.454916/-90/90")).toBeNull();
+    expect(mapHashCamera(`#map=9/33.7/-85.4/0/${MAX_PITCH}`)).toEqual({ zoom: 9, lat: 33.7, lng: -85.4, bearing: 0, pitch: MAX_PITCH });
+    expect(mapHashCamera(`#map=9/33.7/-85.4/0/${MAX_PITCH + 1}`)).toBeNull();
+    expect(withoutBadMapHash("#map=15.6/33.7/-85.454916/-90/90&x=1")).toBe("#x=1");
   });
 
   it("lets a camera through only when all of it is finite", () => {

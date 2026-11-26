@@ -62,6 +62,19 @@ export function mapHashOf(cam: MapHash): MapHash {
   return { zoom: round(cam.zoom, 2), lat: round(cam.lat, 5), lng: round(cam.lng, 5), bearing: Math.round(cam.bearing), pitch: Math.round(cam.pitch) };
 }
 
+/**
+ * An address hash with the map's camera in it (rounded by mapHashOf): the `map=` part replaced, or added
+ * after the others, and every other part kept. The map writes its address with it (globe-map.ts).
+ */
+export function withMapHash(hash: string, cam: MapHash): string {
+  const map = formatMapHash(mapHashOf(cam)).slice(1);
+  const parts = hash.replace(/^#/, "").split("&").filter(Boolean);
+  const at = parts.findIndex((p) => p.startsWith("map="));
+  if (at >= 0) parts[at] = map;
+  else parts.push(map);
+  return `#${parts.join("&")}`;
+}
+
 /** The hash the map reads for a view: bearing and pitch only when they are not nothing. */
 export function formatMapHash(h: MapHash): string {
   const tail = h.pitch !== 0 ? `/${h.bearing}/${h.pitch}` : h.bearing !== 0 ? `/${h.bearing}` : "";

@@ -9,7 +9,7 @@ import { bandPadding, blendPadding, EN_ROUTE_MAX_PITCH, type EnRouteCamera, EnRo
 import { blendPlacement, FALLBACK_NOTICE, type FallbackCause, FrameWatch, RETURN_TO_MAP_S, shareBlend, ShareEase } from "./en-route-journey";
 import type { EnRouteLayer } from "./en-route-layer";
 import type { Rect } from "./journey-frame";
-import { enRouteSky, flatSky, mapBackground, HILLSHADE, HILLSHADE_UNDER, hillshadeLayer, PALETTES, TERRAIN, TERRAIN_SOURCE, terrainSource } from "./map-style";
+import { enRouteHaze, enRouteSky, flatSky, hazeStrength, mapBackground, HILLSHADE, HILLSHADE_UNDER, hillshadeLayer, PALETTES, TERRAIN, TERRAIN_SOURCE, terrainSource } from "./map-style";
 
 /** What the En-route view needs of the World map that holds it (globe-map.ts). */
 export interface EnRouteHost {
@@ -236,6 +236,8 @@ export class EnRouteController {
     this.host.place({ center: [cam.lng, cam.lat], zoom: cam.zoom, bearing: cam.bearing, pitch: cam.pitch, elevation: placed.elevationM, padding });
     // From the Cockpit the aircraft is the one the eye sits in: its model is not drawn, so a peek back never fills the view with it.
     this.layer?.setAircraft(camera === "cockpit" ? null : pose, aircraftClass.model, aircraftClass.lengthM);
+    // The far ground's haze round the eye, in the theme's horizon colour (a look near level sees the ground to it).
+    this.layer?.setHaze({ eye, aboveM: overGround, colour: enRouteHaze(this.host.theme()), strength: hazeStrength(placed.pitchDeg) });
     return true;
   }
 
