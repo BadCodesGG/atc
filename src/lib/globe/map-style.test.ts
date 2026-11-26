@@ -368,6 +368,36 @@ describe("hazeShells", () => {
     expect(hazeShells(FL370)[0].distanceM).toBeGreaterThan(hazeShells(FL110)[0].distanceM);
   });
 
+  it("is the same in Light and Dark as the haze with no curve given", () => {
+    expect(PALETTES.light.haze).toEqual(PALETTES.dark.haze);
+    expect(hazeShells(FL110, Infinity, PALETTES.light.haze)).toEqual(hazeShells(FL110));
+    expect(hazeShells(FL370, 60_000, PALETTES.dark.haze)).toEqual(hazeShells(FL370, 60_000));
+  });
+
+  describe("in Satellite, where the imagery changes colour between tile levels some 40 km out", () => {
+    const at = (shells: { distanceM: number; opacity: number }[], m: number) => shells.filter((s) => s.distanceM <= m).at(-1)?.opacity ?? 0;
+    const air = hazeShells(FL110);
+    const satellite = hazeShells(FL110, Infinity, PALETTES.satellite.haze);
+
+    it("is well in by 40 km at 11,000 ft, so the line there reads as distance", () => {
+      expect(at(satellite, 40_000)).toBeGreaterThanOrEqual(0.4);
+      expect(at(satellite, 40_000)).toBeGreaterThan(at(air, 40_000) * 2);
+    });
+
+    it("begins nearer and builds faster than Light and Dark's, and is still full at the horizon", () => {
+      expect(satellite[0].distanceM).toBeLessThan(air[0].distanceM);
+      satellite.forEach((s, i) => expect(s.distanceM).toBeLessThanOrEqual(air[i].distanceM));
+      expect(satellite).toHaveLength(HAZE_SHELLS);
+      expect(satellite.at(-1)!.distanceM).toBeCloseTo(horizon(FL110), -2);
+      expect(satellite.at(-1)!.opacity).toBe(1);
+    });
+
+    it("leaves the ground under the aircraft and just ahead clear: at 11,000 ft none nearer than three times its height", () => {
+      expect(satellite[0].distanceM).toBeGreaterThan(3 * FL110);
+      expect(hazeShells(FL370, Infinity, PALETTES.satellite.haze)[0].distanceM).toBeGreaterThan(satellite[0].distanceM);
+    });
+  });
+
   it("ends inside the map's far plane, where the ground drawn ends, when that comes before the horizon", () => {
     const far = 40_000;
     const shells = hazeShells(FL110, far);

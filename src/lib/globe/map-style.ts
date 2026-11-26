@@ -56,7 +56,21 @@ export interface MapPalette {
   reliefLight: string;
   /** How strongly it shades (MapLibre's hillshade exaggeration, 0 to 1). */
   reliefStrength: number;
+  /** How the far ground's haze builds in a 3D camera (hazeShells). */
+  haze: HazeCurve;
 }
+
+/**
+ * How the far ground's haze builds in a 3D camera: `start`, where it begins, as a share of the way to where it
+ * is full; `rise`, how it thickens past that, as a power of the share of the way (under 1, quickly at first, as air does).
+ */
+export interface HazeCurve {
+  start: number;
+  rise: number;
+}
+
+/** Light and Dark's haze: it starts past the ground near the aircraft (Chase's 13 km at 11,000 ft). */
+const AIR_HAZE: HazeCurve = { start: 0.08, rise: 0.7 };
 
 export const PALETTES: Record<ThemeKey, MapPalette> = {
   // The diorama's paper, warmed: a stone-grey sea, sand-coloured roads and borders.
@@ -86,6 +100,7 @@ export const PALETTES: Record<ThemeKey, MapPalette> = {
     reliefShadow: "#7a7468",
     reliefLight: "#ffffff",
     reliefStrength: 0.35,
+    haze: AIR_HAZE,
   },
   // Night ops: the land the diorama's black, a deep navy sea, faint shores and borders, the cities lit.
   dark: {
@@ -114,6 +129,7 @@ export const PALETTES: Record<ThemeKey, MapPalette> = {
     reliefShadow: "#000000",
     reliefLight: "#2a4468",
     reliefStrength: 0.7,
+    haze: AIR_HAZE,
   },
   satellite: {
     water: "#2c4a63",
@@ -141,6 +157,9 @@ export const PALETTES: Record<ThemeKey, MapPalette> = {
     reliefShadow: "#000000",
     reliefLight: "#ffffff",
     reliefStrength: 0.15,
+    // Nearer and faster than Light and Dark's: the imagery changes colour between its tile levels some 40 km
+    // out, and in haze there the line reads as distance. It still starts past three times the aircraft's height.
+    haze: { start: 0.06, rise: 0.25 },
   },
 };
 
@@ -334,10 +353,6 @@ export const enRouteHaze = (key: ThemeKey): string => THEMES[key].eyeLevel.horiz
 
 /** How many shells the far ground's haze is drawn in: each adds an equal share of it, small enough that no shell's edge on the ground shows. */
 export const HAZE_SHELLS = 24;
-/** Where the haze starts, as a share of the way to where it is full: past the ground near the aircraft (Chase's 13 km at 11,000 ft). */
-const HAZE_START = 0.08;
-/** How the haze thickens with distance past its start: as a power of the share of the way (under 1, quickly at first, as air does). */
-const HAZE_RISE = 0.7;
 const EARTH_RADIUS_M = 6_371_000;
 
 /**
@@ -361,16 +376,16 @@ export interface HazeShell {
  * The far ground's haze in a 3D camera, as spheres round the eye that the ground nearer than each hides
  * (the En-route layer draws them against the map's depth): for an eye `aboveM` over the ground, from a little
  * way out to full haze at the horizon (the distance to it over a round Earth, which the flat map does not
- * have), or just inside the map's far plane (`farM`) where the ground drawn ends first. The haze thickens
- * in equal steps, the last shell opaque.
+ * have), or just inside the map's far plane (`farM`) where the ground drawn ends first, along the theme's
+ * `curve` (its palette's haze). The haze thickens in equal steps, the last shell opaque.
  */
-export function hazeShells(aboveM: number, farM = Infinity): HazeShell[] {
+export function hazeShells(aboveM: number, farM = Infinity, curve: HazeCurve = AIR_HAZE): HazeShell[] {
   if (!(aboveM > 0)) return [];
   const end = Math.min(Math.sqrt(2 * EARTH_RADIUS_M * aboveM + aboveM * aboveM), farM * 0.98);
-  const start = HAZE_START * end;
+  const start = curve.start * end;
   return Array.from({ length: HAZE_SHELLS }, (_, i) => {
     const share = (i + 1) / HAZE_SHELLS;
-    return { distanceM: start + (end - start) * share ** (1 / HAZE_RISE), opacity: share };
+    return { distanceM: start + (end - start) * share ** (1 / curve.rise), opacity: share };
   });
 }
 

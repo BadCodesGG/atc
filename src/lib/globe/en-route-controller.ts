@@ -237,7 +237,8 @@ export class EnRouteController {
     // From the Cockpit the aircraft is the one the eye sits in: its model is not drawn, so a peek back never fills the view with it.
     this.layer?.setAircraft(camera === "cockpit" ? null : pose, aircraftClass.model, aircraftClass.lengthM);
     // The far ground's haze round the eye, in the theme's horizon colour (a look near level sees the ground to it).
-    this.layer?.setHaze({ eye, aboveM: overGround, colour: enRouteHaze(this.host.theme()), strength: hazeStrength(placed.pitchDeg) });
+    const theme = this.host.theme();
+    this.layer?.setHaze({ eye, aboveM: overGround, colour: enRouteHaze(theme), strength: hazeStrength(placed.pitchDeg), curve: PALETTES[theme].haze });
     return true;
   }
 
