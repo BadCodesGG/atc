@@ -24,7 +24,7 @@
 import { launchChrome } from "./lib/chrome.mjs";
 import { CALLSIGN, flatTerrain, HEX, STATE } from "./lib/en-route.mjs";
 import { fiber, GLOBE, sleep, waitForTruthy } from "./lib/page.mjs";
-import { TILT_STEP_DEG, tiltStep } from "./lib/tilt-step.mjs";
+import { judgeFrames, TILT_STEP_DEG } from "./lib/tilt-step.mjs";
 
 /** The journey, or null with none. */
 const JOURNEY = fiber(`typeof c.stage === "string" && typeof c.hex === "string" && c.origin`);
@@ -154,21 +154,22 @@ async function gateToGate({ browser, base, check }) {
     const eased = before.length > 0 && before.every((s) => s.share === 0 && !s.terrain && s.layer === null);
     check("en-route journey: arriving, Chase eases into the journey's own flat shot, terrain off, before the Handover into Charlotte", last3D >= 0 && eased, `last 3D sample ${last3D} of ${onMap.length}; then ${before.length} flat samples; ${JSON.stringify(onMap[last3D])}`);
     // The ease is continuous: no frame-to-frame step in the tilt like the old snap back to Map (75 to 60 degrees
-    // at once). Judged drawn frame to drawn frame, by the time between them (tiltStep): software GL draws slowly.
+    // at once). Judged drawn frame to drawn frame, by the time between them on the ease's clock (judgeFrames):
+    // software GL draws slowly. That clock may run no faster than the page's own, or it would excuse a jump.
     const frames = await page.evaluate(() => window.__enRouteFrames);
     const from = onMap[Math.max(0, takeover - 1)]?.t ?? Infinity;
     const ridden = frames.filter((f) => f.t >= from && f.t <= (onMap.at(-1)?.t ?? 0));
-    const judged = ridden.slice(1).map((f, k) => ({ ...tiltStep(ridden[k], f), i: k + 1 }));
-    // The first frame that fails, else the one nearest its bound.
-    const worst = judged.find((j) => !j.ok) ?? judged.toSorted((x, y) => y.step / y.bound - x.step / x.bound)[0];
-    const f1 = (n) => n.toFixed(1);
-    const near = (f) => onMap.findIndex((s) => s.t >= f.t);
-    const pair = (j) =>
-      `frames ${j.i - 1} and ${j.i} of ${ridden.length}, by sample ${near(ridden[j.i])} of ${onMap.length}: ${f1(j.step)} degrees against ${f1(j.bound)} (${TILT_STEP_DEG} flat under ${Math.round(j.shortGapMs)} ms), share moved ${j.moved.toFixed(3)} against the ease's ${j.pace.toFixed(3)} in ${Math.round(j.gapMs)} ms: ${JSON.stringify([ridden[j.i - 1], ridden[j.i]])}`;
+    const { judged, worst } = judgeFrames(ridden);
+    const easeMs = ridden.slice(1).reduce((sum, f, k) => sum + Math.max(0, f.at - ridden[k].at), 0);
+    const wallMs = ridden.length ? ridden.at(-1).t - ridden[0].t : 0;
+    const degrees = (n) => n.toFixed(1);
+    const sampleNear = (f) => onMap.findIndex((s) => s.t >= f.t);
+    const describePair = (j) =>
+      `frames ${j.from} and ${j.to} of ${ridden.length}, by sample ${sampleNear(ridden[j.to])} of ${onMap.length}: ${degrees(j.step)} degrees against ${degrees(j.bound)} (${TILT_STEP_DEG} flat under ${Math.round(j.shortGapMs)} ms), share moved ${j.moved.toFixed(3)} against the ease's ${j.pace.toFixed(3)} in ${Math.round(j.gapMs)} ms: ${JSON.stringify([ridden[j.from], ridden[j.to]])}`;
     check(
       `en-route journey: the camera's tilt never steps on the way (under ${TILT_STEP_DEG} degrees between drawn frames close together, else what the share's ease explains in the time between them)`,
-      judged.length > 0 && judged.every((j) => j.ok),
-      worst ? `${worst.ok ? "largest" : worst.paced ? "tilt stepped" : "share outran its ease"}: ${pair(worst)}` : `${frames.length} drawn frames recorded, ${ridden.length} on the way`,
+      judged.length > 0 && judged.every((j) => j.ok) && easeMs <= wallMs + 1000,
+      `${judged.length} pairs of ${ridden.length} drawn frames, the ease's clock ${Math.round(easeMs)} ms over ${Math.round(wallMs)} ms of the page's; ${worst ? `${worst.ok ? "largest" : worst.paced ? "tilt stepped" : "share outran its ease"}: ${describePair(worst)}` : `${frames.length} drawn frames recorded`}`,
     );
 
     // Charlotte's Diorama opens in its Approach camera when it has one for the flight, else Orbit.
