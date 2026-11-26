@@ -32,5 +32,11 @@ export function toGeo(origin: Origin, x: number, y: number): [number, number] {
   return [lat / RAD, lon / RAD];
 }
 
+/** Metres in a foot, and metres a second in a knot. */
 export const FEET = 0.3048;
 export const KNOTS = 1852 / 3600;
+
+/** A heading or bearing, degrees, brought into [0, 360). */
+export const wrap360 = (degrees: number) => ((degrees % 360) + 360) % 360;
+/** The signed turn from one heading to another, the short way round, degrees in [-180, 180). */
+export const turn = (from: number, to: number) => ((((to - from) % 360) + 540) % 360) - 180;

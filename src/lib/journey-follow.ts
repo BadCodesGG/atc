@@ -3,7 +3,7 @@ import { type Airport, airportByCode } from "./airports";
 import type { FeedSource } from "./feed-source";
 import { lookupCallsign } from "./flight-lookup";
 import { FEET, type Origin, toGeo, toLocal } from "./geo";
-import { MAP_ORIGIN, mergeRegions } from "./globe/sky";
+import { MAP_ORIGIN, mergeRegions } from "./globe/map-traffic";
 import type { EndsFix, JourneyEnds } from "./journey-ends";
 import { journeyLines } from "./journey-procedure";
 import type { HexSnapshot } from "./hex";
@@ -11,13 +11,14 @@ import { type JourneyEnd, journeyEnd, journeyProgress, type JourneyProgress, typ
 import type { FlightRoute } from "./routes";
 import { groundView, seenOnGround } from "./globe/camera";
 import type { OrbitView } from "./scene/orbit";
-import { PLAYBACK_DELAY, Tracker } from "./tracker";
+import type { FlightFeed, SharedSky } from "./shared-sky";
+import { PLAYBACK_DELAY } from "./tracker";
 
 /**
  * One flight followed gate to gate, held by the page so it outlives each airport's diorama. It reads
- * the aircraft by its hex all the way (`/api/hex`, every five seconds of the feed's clock), on the same
- * playback delay the dioramas draw at, so the map and the diorama show the aircraft at the same moment
- * wherever they hand over. While the map leads, it steers the map's camera behind the flight.
+ * the aircraft by its hex all the way (`/api/hex`, every five seconds of the feed's clock) into the page's
+ * shared tracker, and draws it from there, as the diorama and the map do: the same pose at the same
+ * moment wherever they hand over. While the map leads, it steers the map's camera behind the flight.
  */
 
 /** Where the journey is: on the origin's diorama, on the map, on the destination's diorama, or parked at the end. */
@@ -32,8 +33,6 @@ const ANSWER_FRESH_S = 3 * POLL_S;
 /** Time constants, seconds, of the camera's turn and tilt toward the shot's (slow: it swings round to look ahead at cruise), and of the hand from the diorama's camera to the journey's. */
 const TURN_S = 2.5;
 const SETTLE_S = 0.8;
-/** How long the journey's own reads fly the aircraft on through a gap, seconds. */
-const DEAD_RECKON_S = 60;
 /** A place the flight was on the ground is kept every this many seconds of the feed's clock, the last GROUND_TRAIL_MAX of them. */
 const GROUND_TRAIL_S = 2;
 const GROUND_TRAIL_MAX = 6;
@@ -135,8 +134,10 @@ export class Journey {
   private estimating = false;
   /** What the procedures' chunk has missed while it loaded: the first sightings of the aircraft on the ground and in the air, to replay. */
   private early: EndsFix[] = [];
-  /** Flown on through a gap in the reads for a minute: an aircraft in the air goes on as it was going. */
-  private readonly tracker = new Tracker({ deadReckonMax: DEAD_RECKON_S });
+  /** The page's one picture of the sky (docs/adr/0001-one-shared-tracker.md): its clock and its moment per frame. */
+  private readonly sky: SharedSky;
+  /** The journey's own reads in the shared tracker (flown on through a gap for a minute: in the air an aircraft goes on as it was going), and the flight as it draws it. */
+  private readonly reads: FlightFeed;
   /** When the flight was last drawn by a diorama or read by the journey's own poll, on the feed's clock, seconds. */
   private lastReport: number | null = null;
   /** The newest position the journey's own reads have heard, on the feed's clock (a read's time less its position's age), seconds. */
@@ -173,7 +174,10 @@ export class Journey {
   constructor(
     private readonly source: FeedSource,
     { hex, callsign, origin, route, originKnown = true }: { hex: string; callsign: string; origin: Airport; route: FlightRoute | null; originKnown?: boolean },
+    sky: SharedSky,
   ) {
+    this.sky = sky;
+    this.reads = sky.flight(hex);
     this.hex = hex;
     this.callsign = callsign;
     this.origin = origin;
@@ -200,11 +204,6 @@ export class Journey {
     return this.end.kind === "gate" ? this.end.destination : null;
   }
 
-  /** The feed's clock, the page's one, which the dioramas run on too. */
-  clock(): number {
-    return this.source.clock();
-  }
-
   /**
    * The aircraft as a diorama draws it this frame: while an airport's diorama has the flight in its feed,
    * the journey takes it from there, so the camera aims and the map draws exactly where the diorama does
@@ -221,7 +220,7 @@ export class Journey {
 
   /** The flight was drawn or read at `fix`: it is not lost, and it is held there if it is on the ground. */
   private reported(fix: JourneyFix): void {
-    this.lastReport = this.clock();
+    this.lastReport = this.sky.clock();
     this.ground = fix.onGround ? fix : null;
     if (!fix.onGround) {
       this.groundTrail = [];
@@ -250,7 +249,7 @@ export class Journey {
    * played fast and the live feed lose a flight alike); 0 before it ever was, so a journey that has just begun waits.
    */
   lostFor(): number {
-    return this.lastReport === null ? 0 : (this.clock() - this.lastReport) * 1000;
+    return this.lastReport === null ? 0 : (this.sky.clock() - this.lastReport) * 1000;
   }
 
   /**
@@ -259,8 +258,8 @@ export class Journey {
    * being answered: an upstream that fails or serves its last answer says nothing of the transponder.
    */
   silentFor(): number | null {
-    if (this.lastPosition === null || this.lastAnswer === null || this.clock() - this.lastAnswer > ANSWER_FRESH_S) return null;
-    return this.clock() - this.lastPosition;
+    if (this.lastPosition === null || this.lastAnswer === null || this.sky.clock() - this.lastAnswer > ANSWER_FRESH_S) return null;
+    return this.sky.clock() - this.lastPosition;
   }
 
   /**
@@ -290,9 +289,10 @@ export class Journey {
   fix(): JourneyFix | null {
     if (this.standing) return this.standing;
     if (this.sighting && performance.now() - this.sighting.at < SIGHTING_MS) return this.sighting.fix;
-    const a = this.tracker.at(this.clock()).find((t) => t.id === this.hex);
-    if (!a) return this.ground;
-    const [latitude, longitude] = toGeo(MAP_ORIGIN, a.x, a.y);
+    // The shared tracker's pose, at the moment every view draws this frame: where the diorama and the map draw it too.
+    const a = this.reads.at(this.sky.time());
+    if (!a || a.latitude === undefined || a.longitude === undefined) return this.ground;
+    const { latitude, longitude } = a;
     return { latitude, longitude, altitudeFt: a.altitudeFt, onGround: a.onGround, groundSpeedKt: a.groundSpeedKt, headingDeg: a.headingDeg, verticalRateFpm: a.verticalRateFpm, callsign: a.callsign, typeCode: a.typeCode };
   }
 
@@ -465,7 +465,7 @@ export class Journey {
     };
     const seen = (p: { latitude: number; longitude: number; altitudeFt: number; onGround: boolean }) => place(p.latitude, p.longitude, this.heightOf(p));
     const aircraft = fix ? seen(fix) : null;
-    const drawn = this.clock() - PLAYBACK_DELAY;
+    const drawn = this.sky.time() - PLAYBACK_DELAY;
     const way = this.flown.filter((p) => p.t <= drawn).map((p) => seen({ ...p, onGround: false }));
     const dest = this.destinationPoint();
     const start = this.start();
@@ -544,11 +544,11 @@ export class Journey {
       const body = (await res.json()) as HexSnapshot & { stale?: boolean };
       if (this.stopped || typeof body?.time !== "number") return;
       // A fresh answer that lists nothing is the best evidence of a quiet transponder there is.
-      if (!body.stale) this.lastAnswer = this.clock();
+      if (!body.stale) this.lastAnswer = this.sky.clock();
       if (!body.aircraft) return;
       this.source.heard(body.time);
       this.firstSeen ??= { latitude: body.aircraft.latitude, longitude: body.aircraft.longitude };
-      this.tracker.add(mergeRegions([{ cell: { latitude: 0, longitude: 0 }, time: body.time, aircraft: [body.aircraft] }], MAP_ORIGIN));
+      this.reads.add(mergeRegions([{ cell: { latitude: 0, longitude: 0 }, time: body.time, aircraft: [body.aircraft] }], MAP_ORIGIN));
       const a = body.aircraft;
       this.lastPosition = Math.max(this.lastPosition ?? -Infinity, body.time - (a.positionAgeS ?? 0));
       const fix: JourneyFix = { latitude: a.latitude, longitude: a.longitude, altitudeFt: a.altitudeFt ?? 0, onGround: a.onGround, groundSpeedKt: a.groundSpeedKt, headingDeg: a.trackDeg ?? 0, verticalRateFpm: a.verticalRateFpm, callsign: a.callsign, typeCode: a.typeCode };

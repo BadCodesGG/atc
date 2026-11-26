@@ -11,13 +11,15 @@ import type { GlobeMap } from "@/lib/globe/globe-map";
 import { AIRCRAFT_GLYPH, BEACON_RADIUS_PX, GLYPH_BOX, GLYPH_PX } from "@/lib/globe/aircraft-glyph";
 import { groundView, liftView, mapHashCamera, orbitToMap, withoutBadMapHash } from "@/lib/globe/camera";
 import { journeyIconSize, PALETTES } from "@/lib/globe/map-style";
+import { EN_ROUTE_OFFERED, type EnRouteCamera, enRouteKey } from "@/lib/globe/en-route";
+import { arrivalCamera, enRouteOffered, enRouteShare, mapCamera, shareReach } from "@/lib/globe/en-route-journey";
 import { fogReach } from "@/lib/journey";
-import { type Band, landingAirport, overAirport, reveal, revealMask } from "@/lib/globe/handover";
+import { type Band, landingAirport, overAirport, reveal, revealMask, switchesToLanding } from "@/lib/globe/handover";
 import { type Filters, filterOptions, type FilterOptions, filtersActive, Ghosts, GHOST_MS, matches, NO_OPTIONS, rememberSeen, snapshotSubject, type Subject, subjectOfEntry, withFilters } from "@/lib/filters";
 import { toGeo, toLocal } from "@/lib/geo";
 import type { JourneyFix } from "@/lib/journey-follow";
 import { withAirport } from "@/lib/airport-url";
-import { parseMapHash, shareLink } from "@/lib/share-link";
+import { mapHashOf, parseMapHash, shareLink } from "@/lib/share-link";
 import type { FeedSource } from "@/lib/feed-source";
 import { Journey, type JourneyStatus } from "@/lib/journey-follow";
 import { feedSourceFor } from "@/lib/journey-source";
@@ -32,12 +34,14 @@ import { ease, type OrbitView, orbit, pan, panAlong, turn, zoom } from "@/lib/sc
 import { MODEL, type SceneTheme, THEMES, type ThemeKey } from "@/lib/scene/theme";
 import { viewKey } from "@/lib/scene/view-keys";
 import { fixtureFeed, recordFeedAnswer, recordFeedFailure, startFeed } from "@/lib/feed-health";
-import { PLAYBACK_DELAY, type Tracker } from "@/lib/tracker";
+import type { SharedSky, TrafficFeed } from "@/lib/shared-sky";
+import { PLAYBACK_DELAY } from "@/lib/tracker";
 import type { TrafficSnapshot } from "@/lib/traffic";
 import type { FlightCard as FlightCardData, TrafficEntry, TrafficView } from "@/lib/traffic-view";
 import type { OpsView, PathPulse } from "@/lib/path-pulse";
-import { CameraMenu, CameraSwitch, COLUMN_BESIDE, ColumnPanel, Counts, DataCredit, ESTIMATES_NOTE, FlightCard, Header, JourneyCard, Legend, MapStyleMenu, PHONE, RadarToggle, Search, SideColumn, STACKED, ThemeSwitch, TimeBar, type TimeBarReplay, useMedia, useTrafficReadout, ViewControls, WeatherReadout, WIDE } from "./chrome";
+import { CameraMenu, CameraSwitch, COLUMN_BESIDE, ColumnPanel, Counts, DataCredit, ESTIMATES_NOTE, FLIGHT_CARD, FlightCard, Header, JourneyCard, Legend, MapStyleMenu, PHONE, RadarToggle, Search, SideColumn, STACKED, ThemeSwitch, TimeBar, type TimeBarReplay, useMedia, useTrafficReadout, ViewControls, WeatherReadout, WIDE } from "./chrome";
 import { FilterControl } from "./filter-control";
+import { isTypingTarget } from "./search-box";
 import { ShareControl } from "./share-control";
 import { quietArrival } from "@/lib/journey-arrival";
 import { journeyFrame, type ReaderAction, releasesJourney } from "@/lib/journey-release";
@@ -100,6 +104,8 @@ const KEY_PAN = 0.15;
  */
 const HANDOVER_FAR = 3.2;
 const HANDOVER_MAX_M = 55_000;
+/** How long the Journey card says the 3D view gave way to Map, ms. */
+const NOTICE_MS = 8000;
 /** How often the map under the diorama is moved to keep up with it, ms: it is hidden, so only its tiles need to be ready. */
 const MAP_FOLLOW_MS = 250;
 /** How far down the frame, CSS pixels, the colour under the header's fade is read: the middle of its solid part. */
@@ -152,6 +158,8 @@ interface World {
   onMap: boolean;
   /** Where the feeds come from: the network, or `?fixture=journey`'s recording. Made once, on first ask. */
   source: () => Promise<FeedSource>;
+  /** The page's one tracker on the feed's clock, which every view draws from. Made once, on first ask. */
+  sky: () => Promise<SharedSky>;
   /** The flight followed gate to gate, which outlives each airport's diorama, and what the chrome shows of it. */
   journeyRef: RefObject<Journey | null>;
   journey: JourneyStatus | null;
@@ -177,6 +185,11 @@ interface World {
   mapCardRef: RefObject<HTMLDivElement | null>;
   /** The journey's card on the map. */
   journeyCardRef: RefObject<HTMLDivElement | null>;
+  /** The En-route view's camera chosen on the journey (Map when Following starts), and the pick of another. */
+  enRoute: EnRouteCamera;
+  chooseEnRoute: (camera: EnRouteCamera) => void;
+  /** The short notice that the 3D view gave way to Map by itself; null with none. */
+  enRouteNotice: string | null;
 }
 
 let webgl2: boolean | null = null;
@@ -287,7 +300,8 @@ interface ChromeState {
 /** The traffic side, which outlives any one scene: switching theme rebuilds the model, not the feed. */
 interface Traffic {
   map: AirportMap;
-  tracker: Tracker;
+  /** This airport's feed of the page's tracker (a frozen recording's own tracker). */
+  tracker: TrafficFeed;
   view: TrafficView;
   /** The live clock in the feed's own UTC seconds (frozen for the fixture). */
   clock: () => number;
@@ -340,6 +354,13 @@ export function AtcApp({ initialTheme, initialAirport, initialFilters }: { initi
   // feed-source
   const sourceRef = useRef<Promise<FeedSource> | null>(null);
   const source = useCallback(() => (sourceRef.current ??= feedSourceFor(new URLSearchParams(window.location.search))), []);
+  /**
+   * The page's one tracker, on the feed's clock (docs/adr/0001-one-shared-tracker.md): the airport feed, the map's
+   * region reads and the journey's reads fill it, and the diorama, the map and the journey all draw from it. It
+   * outlives every airport, so the flight a journey follows is where it was when the page lands on the next one.
+   */
+  const skyRef = useRef<Promise<SharedSky> | null>(null);
+  const sky = useCallback(() => (skyRef.current ??= Promise.all([source(), import("@/lib/shared-sky")]).then(([s, { SharedSky }]) => new SharedSky(s))), [source]);
   // /feed-source
 
   // journey
@@ -356,6 +377,54 @@ export function AtcApp({ initialTheme, initialAirport, initialFilters }: { initi
   const journeyGeneration = useRef(0);
   /** Brings the journey card up to date now rather than at the timer's next tick. */
   const journeyRefresh = useRef<() => void>(() => {});
+  /** The En-route camera chosen on the Journey card, and the ref the map's handlers read it from. */
+  const [enRoute, setEnRoute] = useState<EnRouteCamera>("map");
+  const enRouteRef = useRef<EnRouteCamera>("map");
+  /** The notice the Journey card shows when the 3D view gave way to Map by itself; null with none. */
+  const [enRouteNotice, setEnRouteNotice] = useState<string | null>(null);
+  const noticeTimer = useRef(0);
+  /** The camera the card shows chosen, and the notice under it (null clears it), both at once. */
+  const setChosen = (camera: EnRouteCamera, notice: string | null = null) => {
+    enRouteRef.current = camera;
+    setEnRoute(camera);
+    setEnRouteNotice(notice);
+    window.clearTimeout(noticeTimer.current);
+    if (notice) noticeTimer.current = window.setTimeout(() => setEnRouteNotice(null), NOTICE_MS);
+  };
+  /** The 3D view gave way to Map by itself: the card shows Map chosen, and says why for a while. Read by the map through a ref, as it is made once. */
+  const fallbackRef = useRef((notice: string) => setChosen("map", notice));
+  useEffect(() => {
+    fallbackRef.current = (notice: string) => setChosen("map", notice);
+  });
+  /**
+   * Picks the En-route view's camera. The map takes it while it follows the flight; picked in the origin's
+   * Diorama, it waits there and takes over once the map has the flight (mapCamera, journeyToMap).
+   */
+  const chooseEnRoute = (camera: EnRouteCamera) => {
+    setChosen(camera);
+    globeRef.current?.setEnRouteCamera(mapCamera(journeyRef.current?.stage ?? "map", camera));
+  };
+  // The cameras' keys (1 to 5, enRouteKey) while the Journey card offers them, outside a field being typed in.
+  const enRouteKeys = useRef({ offered: false, choose: chooseEnRoute });
+  useEffect(() => {
+    enRouteKeys.current = { offered: !!journey && enRouteOffered(journey.stage), choose: chooseEnRoute };
+  });
+  useEffect(() => {
+    const onKey = (e: globalThis.KeyboardEvent) => {
+      if (!enRouteKeys.current.offered || e.defaultPrevented || e.repeat || isTypingTarget(e.target)) return;
+      const camera = enRouteKey(e);
+      if (!camera) return;
+      e.preventDefault();
+      enRouteKeys.current.choose(camera);
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, []);
+  /** Back to Map at once with the journey over or handed to a diorama: no camera of the journey's to ease into. */
+  const flattenEnRoute = () => {
+    globeRef.current?.setEnRouteCamera("map", true);
+    setChosen("map");
+  };
   const stopJourney = () => {
     journeyGeneration.current++;
     journeyHexRef.current = null;
@@ -367,21 +436,23 @@ export function AtcApp({ initialTheme, initialAirport, initialFilters }: { initi
     globe?.setDriver(null);
     globe?.setUserMove(null);
     globe?.setJourney(null, null);
+    // Following (re)starts in Map: nothing heavy stays loaded once the journey is over.
+    flattenEnRoute();
     setJourney(null);
   };
   const startJourney: World["startJourney"] = (flight, ready) => {
     stopJourney();
     journeyHexRef.current = flight.hex;
     const generation = journeyGeneration.current;
-    void source()
-      .then((s) => {
+    void Promise.all([source(), sky()])
+      .then(([feedSource, sharedSky]) => {
       if (generation !== journeyGeneration.current) return;
-      const j = new Journey(s, flight);
+      const j = new Journey(feedSource, flight, sharedSky);
       journeyRef.current = j;
       // The panel's figures, four times a second, timed by the feed's clock (the fixture's runs fast).
       ready?.();
       const refresh = () => setJourney((prev) => {
-        const next = j.status(j.clock() * 1000);
+        const next = j.status(sharedSky.clock() * 1000);
         return JSON.stringify(prev) === JSON.stringify(next) ? prev : next;
       });
       journeyRefresh.current = refresh;
@@ -398,11 +469,20 @@ export function AtcApp({ initialTheme, initialAirport, initialFilters }: { initi
     leadRef.current = { by: "map", armed: false, land: false };
     globe.handBack(view);
     j.toMap(view, at, now);
+    // A 3D camera picked in the origin's Diorama takes over from here, as the flight leaves it (mapCamera),
+    // starting flat: the flight is in the origin's Handover band.
+    globe.startEnRoute();
+    globe.setEnRouteCamera(mapCamera(j.stage, enRouteRef.current));
     globe.setDriver((frame) => {
       const steer = j.mapView(frame);
       if (!steer) return;
-      globe.followView(steer.view, steer.frame);
-      globe.setJourney(j.hex, j.features(steer.view, steer.frame));
+      // The 3D view frames the flight itself, from the same fix, eased into the journey's own shot as far as
+      // the Handover asks; the journey's lines lie on the flight's true ground track then.
+      if (globe.steerEnRoute(steer.fix, steer.view, steer.frame, frame)) globe.setJourney(j.hex, j.features(null, steer.frame));
+      else {
+        globe.followView(steer.view, steer.frame);
+        globe.setJourney(j.hex, j.features(steer.view, steer.frame));
+      }
       // The card cites what the map was just given, in the same task: not a timer's tick later.
       if (j.citeChanged()) flushSync(journeyRefresh.current);
     });
@@ -413,12 +493,15 @@ export function AtcApp({ initialTheme, initialAirport, initialFilters }: { initi
     journeyRef.current?.landed();
     globeRef.current?.setDriver(null);
     globeRef.current?.setUserMove(null);
+    // The destination's diorama has the camera: the map under it is flat again.
+    flattenEnRoute();
   };
   useEffect(
     () => () => {
       // A start still waiting for the feed source must not build its journey once the page is gone.
       journeyGeneration.current++;
       window.clearInterval(journeyTimer.current);
+      window.clearTimeout(noticeTimer.current);
     },
     [],
   );
@@ -443,12 +526,24 @@ export function AtcApp({ initialTheme, initialAirport, initialFilters }: { initi
       const hash = withoutBadMapHash(window.location.hash);
       if (hash !== window.location.hash) window.history.replaceState(window.history.state, "", `${window.location.pathname}${window.location.search}${hash}`);
       const named = mapHashCamera(hash) !== null;
-      globe = new GlobeMap(container, { theme: themeRef.current, airport: airportRef.current, fixture });
+      // `?fps=hold` keeps a 3D camera on software GL, which the smokes draw with at a few frames a second.
+      globe = new GlobeMap(container, { theme: themeRef.current, airport: airportRef.current, fixture, holdFrameRate: params.get("fps") === "hold" });
       globeRef.current = globe;
+      // The 3D view gave way to Map by itself: the card says so for a while, and shows Map picked.
+      globe.setEnRouteFallback((notice) => fallbackRef.current(notice));
       setGlobeReady(true);
+      // Live, the map reads its regions into the page's one tracker and draws from it.
+      if (!fixture) {
+        const made = globe;
+        void sky()
+          .then((sharedSky) => {
+            if (!stopped) made.setSky(sharedSky);
+          })
+          .catch((error: unknown) => console.error("atc: the map's sky failed to start", error));
+      }
       globe.setFilters(filtersRef.current);
       globe.setSelectionListener(setMapFlight);
-      globe.setCardRect(() => mapCardRef.current?.firstElementChild?.getBoundingClientRect() ?? null);
+      globe.setCardRect(() => mapCardRef.current?.querySelector(FLIGHT_CARD)?.getBoundingClientRect() ?? null);
       // On a phone the followed flight and its approach are kept between the journey's card and the controls at the foot.
       globe.setFrameBand(() =>
         window.matchMedia(WIDE).matches
@@ -475,7 +570,7 @@ export function AtcApp({ initialTheme, initialAirport, initialFilters }: { initi
       setGlobeReady(false);
       globe?.dispose();
     };
-  }, [hasWebGL2]);
+  }, [hasWebGL2, sky]);
 
   useEffect(() => {
     themeRef.current = theme;
@@ -541,7 +636,7 @@ export function AtcApp({ initialTheme, initialAirport, initialFilters }: { initi
     setSwitched(true);
   };
 
-  const world: World = { globeRef, leadRef, mapRef, setLead, onMap, source, journeyRef, journey, journeyHexRef, startJourney, stopJourney, journeyToMap, journeyLanded, showMap: setOnMap, radar, alerts, mapFlight, globeReady, mapCardRef, journeyCardRef };
+  const world: World = { globeRef, leadRef, mapRef, setLead, onMap, source, sky, journeyRef, journey, journeyHexRef, startJourney, stopJourney, journeyToMap, journeyLanded, showMap: setOnMap, radar, alerts, mapFlight, globeReady, mapCardRef, journeyCardRef, enRoute, chooseEnRoute, enRouteNotice };
   return (
     <main data-theme={theme} data-on-map={onMap || undefined} className="relative h-dvh w-full overflow-clip bg-paper font-sans text-ink">
       {/* The world map, under the diorama; shown once the page knows which of the two leads. MapLibre's
@@ -569,7 +664,7 @@ interface ViewerProps {
 }
 
 function Viewer({ airport, theme, onTheme, onAirport, filters, onFilters, focusPicker, world, hasWebGL2 }: ViewerProps) {
-  const { globeRef, leadRef, mapRef, setLead, onMap, source, journeyRef, journey, journeyHexRef, radar, alerts, mapFlight, globeReady, mapCardRef, journeyCardRef } = world;
+  const { globeRef, leadRef, mapRef, setLead, onMap, source, sky, journeyRef, journey, journeyHexRef, radar, alerts, mapFlight, globeReady, mapCardRef, journeyCardRef } = world;
   const feedAlerts = alerts.feed;
   const viewAlerts = alerts.view;
   /** The layer holding the diorama and everything pinned to it, faded in over the map as the camera closes on the airport. */
@@ -741,7 +836,8 @@ function Viewer({ airport, theme, onTheme, onAirport, filters, onFilters, focusP
       flight: onMap ? (mapFlight ? (mapFlight.callsign ?? mapFlight.id.toUpperCase()) : null) : (chrome.card?.callsign ?? null),
       camera: chrome.camera,
       filters,
-      map: onMap ? parseMapHash(window.location.hash) : null,
+      // The camera the address carries (from an En-route 3D camera the journey's flat shot), now rather than as last written.
+      map: onMap ? (globeRef.current ? mapHashOf(globeRef.current.addressCamera) : parseMapHash(window.location.hash)) : null,
     }).href;
   // /share
 
@@ -1020,9 +1116,9 @@ function Viewer({ airport, theme, onTheme, onAirport, filters, onFilters, focusP
     refreshRef.current = true;
   };
   // /journey
-  const actionsRef = useRef({ toMap, mapLeading, outToMap, onAirport, landed, journeyOut, journeyLanded: world.journeyLanded, stopJourney: world.stopJourney, clearFollow, showMap: world.showMap, setLead });
+  const actionsRef = useRef({ toMap, mapLeading, outToMap, onAirport, landed, journeyOut, journeyLanded: world.journeyLanded, stopJourney: world.stopJourney, clearFollow, showMap: world.showMap, setLead, chooseCamera });
   useEffect(() => {
-    actionsRef.current = { toMap, mapLeading, outToMap, onAirport, landed, journeyOut, journeyLanded: world.journeyLanded, stopJourney: world.stopJourney, clearFollow, showMap: world.showMap, setLead };
+    actionsRef.current = { toMap, mapLeading, outToMap, onAirport, landed, journeyOut, journeyLanded: world.journeyLanded, stopJourney: world.stopJourney, clearFollow, showMap: world.showMap, setLead, chooseCamera };
   });
   // /globe
 
@@ -1104,7 +1200,15 @@ function Viewer({ airport, theme, onTheme, onAirport, filters, onFilters, focusP
       ]);
       const map = await loadAirportMap(airport.code);
       if (stopped) return;
-      const tracker = new Tracker();
+      const params = new URLSearchParams(window.location.search);
+      const fixture = params.get("fixture");
+      // A frozen recording (`?fixture=1`, `?fixture=sequence`) is a moment of its own, on a clock that stands
+      // still: it keeps a tracker of its own. Everything else is on the feed's clock, in the page's one tracker,
+      // which this airport's feed fills and its diorama reads (only the aircraft its feed lists, in its metres).
+      const frozenRecording = fixture === "1" || fixture === "sequence";
+      const shared = frozenRecording ? null : await sky();
+      if (stopped) return;
+      const tracker: TrafficFeed = shared ? shared.airport(airport.code, airport) : new Tracker();
       const view = new TrafficView(map, airport);
       // replay
       // Taxi trails follow the taxiways, so the time-lapse never draws an aircraft across the grass.
@@ -1120,8 +1224,6 @@ function Viewer({ airport, theme, onTheme, onAirport, filters, onFilters, focusP
       let clock: () => number;
       let sequence: TrafficSnapshot[] | null = null;
       let notice: string | null = null;
-      const params = new URLSearchParams(window.location.search);
-      const fixture = params.get("fixture");
       if (fixture) startFeed(Date.now(), fixtureFeed(params.get("feed")));
       else startFeed(Date.now());
       // The recorded sequence is of Atlanta: elsewhere it only supplies the frozen moment, and there is no traffic.
@@ -1135,8 +1237,8 @@ function Viewer({ airport, theme, onTheme, onAirport, filters, onFilters, focusP
           tracker.add(recorded.snapshot);
           addRoutes(recorded.routes);
         } else notice = NO_FIXTURE_TRAFFIC;
-        const frozen = fixtureTime(recorded?.snapshot ?? parseTraffic((await import("@/lib/__fixtures__/adsblol_atl.json")).default, atlanta));
-        clock = () => frozen;
+        const frozenAt = fixtureTime(recorded?.snapshot ?? parseTraffic((await import("@/lib/__fixtures__/adsblol_atl.json")).default, atlanta));
+        clock = () => frozenAt;
         // replay
       } else if (fixture === "sequence") {
         // A recorded stretch of live traffic, loaded as if the page had been open all through it; the clock stops at its end.
@@ -1153,16 +1255,16 @@ function Viewer({ airport, theme, onTheme, onAirport, filters, onFilters, focusP
           }
           addRoutes((await import("@/lib/__fixtures__/routes_atl.json")).default);
         }
-        const frozen = fixtureTime(snapshots.at(-1)!);
-        clock = () => frozen;
+        const frozenAt = fixtureTime(snapshots.at(-1)!);
+        clock = () => frozenAt;
         // /replay
       } else {
         // The live feed, or `?fixture=journey`'s recording standing in for the network: the same code reads both.
         const feed = await source();
-        if (stopped) return;
-        // Run on the feed's own clock, the page's one, so the playback delay is measured against its
-        // timestamps and every tracker on the page plays back to the same moment.
-        clock = () => feed.clock();
+        if (stopped || !shared) return;
+        // Run on the feed's own clock, the page's one, read once a frame: the diorama draws the shared tracker at
+        // the very moment the map and the journey draw it, so its playback delay is measured against the same timestamps.
+        clock = shared.time;
         const load = async () => {
           try {
             const res = await feed.get(`/api/traffic/${airport.code}`);
@@ -1209,7 +1311,7 @@ function Viewer({ airport, theme, onTheme, onAirport, filters, onFilters, focusP
         stopPoll = feed.every(POLL_MS / 1000, load);
       }
       // The fixtures hold their traffic from the start; the live feed (and the journey's recording) is heard from its first answer, above.
-      if (fixture === "1" || fixture === "sequence") setHeard(true);
+      if (frozenRecording) setHeard(true);
       if (!stopped) setTraffic({ map, tracker, view, clock, replay, replayView, sequence, notice });
     })().catch((error: unknown) => {
       console.error("atc: traffic failed to start", error);
@@ -1220,7 +1322,7 @@ function Viewer({ airport, theme, onTheme, onAirport, filters, onFilters, focusP
       stopPoll();
       window.clearTimeout(heardTimer);
     };
-  }, [hasWebGL2, airport, globeRef, leadRef, source, journeyRef, feedAlerts, viewAlerts]);
+  }, [hasWebGL2, airport, globeRef, leadRef, source, sky, journeyRef, feedAlerts, viewAlerts]);
 
   // The FAA's delay programs, airport-wide. The fixture has none, so its cards say so.
   useEffect(() => {
@@ -1365,7 +1467,7 @@ function Viewer({ airport, theme, onTheme, onAirport, filters, onFilters, focusP
         const column = columnRef.current;
         if (column?.querySelector("[data-open=true]")) return null;
         const tabs = column?.querySelector("[role=tablist]")?.getBoundingClientRect();
-        const card = column?.querySelector("section[aria-label^='Selected flight']")?.getBoundingClientRect();
+        const card = column?.querySelector(FLIGHT_CARD)?.getBoundingClientRect();
         const foot = column?.getBoundingClientRect();
         if (!tabs || !foot || tabs.height === 0) return { left: 0, top: 0, right: width, bottom: height };
         const bottom = card && card.height > 0 ? card.top : foot.bottom;
@@ -1454,7 +1556,14 @@ function Viewer({ airport, theme, onTheme, onAirport, filters, onFilters, focusP
         // journey
         const j = journeyRef.current;
         const journeying = j?.stage === "map";
-        if (journeying) globe.drive(now, true);
+        if (journeying) {
+          // A 3D camera gives way to the Handover at the end of the journey this Diorama is, as the journey's
+          // own shot comes near its band (enRouteShare); between the two ends there is no band to give way to.
+          const v = globe.journeyView;
+          const atEnd = (airport.code === j.origin.code || airport.code === j.destination?.code) && overAirport(v, scene.homeView, shareReach(band));
+          globe.setEnRouteShare(enRouteShare(v.distance, atEnd ? band : null));
+          globe.drive(now, true);
+        }
         // /journey
         if (lead.by === "map") {
           if (lead.land) {
@@ -1462,13 +1571,14 @@ function Viewer({ airport, theme, onTheme, onAirport, filters, onFilters, focusP
             lead.land = false;
             globe.flyTo({ ...scene.homeView, distance: scene.bounds.maxDistance * 0.98 });
           }
-          const v = globe.view;
+          // In an En-route 3D camera, the journey's own Map shot: the Handover judges the flight's ends as on the flat map.
+          const v = journeying ? globe.journeyView : globe.view;
           // Coming down on another built airport: switch to it, so its diorama is ready by the time the
           // camera reaches it. This one is not drawn again.
-          const centre = globe.camera;
+          const centre = journeying ? globe.journeyCamera : globe.camera;
           const below = landingAirport({ lat: centre.lat, lng: centre.lng }, v.distance, AIRPORTS);
-          // A followed flight's map comes down only on the flight's destination.
-          if (below && below.code !== airport.code && (!journeying || below.code === j.destination?.code)) {
+          // Not the airport just left while a pick flies on, and a followed flight's map only on its destination.
+          if (below && switchesToLanding(below, { here: airport.code, flyingTo: globe.flyingTo, journey: journeying ? { destination: j.destination?.code ?? null } : null })) {
             actionsRef.current.onAirport(below.code, undefined, "landing");
             stage.style.opacity = "0";
             shownNow = 0;
@@ -1480,6 +1590,9 @@ function Viewer({ airport, theme, onTheme, onAirport, filters, onFilters, focusP
           globe.setGuide({ home: scene.homeView, band });
           // journey
           if (journeying) {
+            // The 3D view keeps the diorama out of the way as far as it has the camera: it has eased into the
+            // journey's own shot, the flat camera the diorama is drawn on, by the time the band begins.
+            shown *= 1 - globe.enRouteBlend;
             const entry = entries.find((e) => e.aircraft.id === j.hex);
             if (entry) {
               const shot = j.shot(journeyFix(entry, airport));
@@ -1499,7 +1612,10 @@ function Viewer({ airport, theme, onTheme, onAirport, filters, onFilters, focusP
               goalRef.current = null;
               followRef.current = { id: j.hex, distance: aimed.distance, angle: { azimuthDeg: aimed.azimuthDeg, elevationDeg: aimed.elevationDeg } };
               pickedRef.current = j.hex;
+              // Ridden in a 3D camera, the flight is taken up in the destination's Approach camera when it has one for it, else in Orbit.
+              const ridden3D = globe.enRouteCamera !== "map";
               actionsRef.current.journeyLanded();
+              if (ridden3D) actionsRef.current.chooseCamera(arrivalCamera(cameraModes(map, { runway: entry.situation.runway, state: entry.situation.state })));
               actionsRef.current.setLead("scene");
               refreshRef.current = true;
               stage.style.opacity = "1";
@@ -2091,7 +2207,7 @@ function Viewer({ airport, theme, onTheme, onAirport, filters, onFilters, focusP
   const stacked = useMedia(STACKED, true);
   // A phone's flight card opens as a summary, so the model keeps the screen; a tablet has the room for all of it.
   const compactCard = useMedia(PHONE);
-  const flightCard = <FlightCard key="card" compact={compactCard} card={chrome.card} procedure={chrome.procedure} here={airport.code} status={nas} following={chrome.following} onFollow={follow} journey={chrome.card && journey?.hex === chrome.card.id ? journeyPanel : null} />;
+  const flightCard = <FlightCard key="card" compact={compactCard} card={chrome.card} procedure={chrome.procedure} here={airport.code} status={nas} following={chrome.following} onFollow={follow} journey={chrome.card && journey?.hex === chrome.card.id ? journeyPanel : null} enRoute={chrome.card && journey?.hex === chrome.card.id && enRouteOffered(journey.stage) ? { camera: world.enRoute, cameras: EN_ROUTE_OFFERED, onChange: world.chooseEnRoute } : null} />;
   const trafficTabs = <ColumnPanel key="tabs" movements={chrome.movements} ops={ops} filtered={filtersActive(filters)} readout={readout} onSelect={selectFlight} />;
   const dioramaColumn = (
     <div key="diorama-column" className={dioramaOnly}>
@@ -2119,7 +2235,7 @@ function Viewer({ airport, theme, onTheme, onAirport, filters, onFilters, focusP
     ),
     onMap && journeyPanel && (
       <div key="journey-card" ref={journeyCardRef} className="pointer-events-none absolute inset-x-4 top-[132px] flex flex-col xl:left-auto xl:right-8 xl:top-[104px] xl:w-[300px]">
-        <JourneyCard journey={journeyPanel} onStop={world.stopJourney} />
+        <JourneyCard journey={journeyPanel} onStop={world.stopJourney} camera={world.enRoute} cameras={journey && enRouteOffered(journey.stage) ? EN_ROUTE_OFFERED : null} onCamera={world.chooseEnRoute} notice={world.enRouteNotice} />
       </div>
     ),
   ];

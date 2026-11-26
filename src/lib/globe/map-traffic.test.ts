@@ -3,7 +3,7 @@ import { airportByCode } from "../airports";
 import { toGeo } from "../geo";
 import type { RegionAircraft, RegionSnapshot } from "../region";
 import type { TrackedAircraft } from "../tracker";
-import { classify, countInView, MAP_ORIGIN, mergeRegions, skyFeatures, militaryInView, skySubject, subjectsInView } from "./sky";
+import { classify, countInView, MAP_ORIGIN, mergeRegions, skyFeatures, militaryInView, skySubject, subjectsInView } from "./map-traffic";
 
 const ATL = airportByCode("atl")!;
 const DFW = airportByCode("dfw")!;
@@ -138,6 +138,14 @@ describe("countInView", () => {
   it("counts the aircraft drawn inside the map's bounds", () => {
     expect(countInView(features, { west: -88, east: -78, south: 30, north: 38 })).toEqual({ shown: 2, total: 2 });
     expect(countInView(features, { west: -100, east: -70, south: 20, north: 50 })).toEqual({ shown: 4, total: 4 });
+  });
+
+  it("always counts the subject of the view (the followed flight in a 3D camera), even outside the bounds, and only once", () => {
+    const followed = at(-120, 45);
+    expect(countInView(features, { west: -88, east: -78, south: 30, north: 38 }, [followed])).toEqual({ shown: 3, total: 3 });
+    // Cockpit: the eye is inside the aircraft, so the map's bounds may hold nothing at all.
+    expect(countInView({ type: "FeatureCollection", features: [] }, { west: 0, east: 1, south: 0, north: 1 }, [followed])).toEqual({ shown: 1, total: 1 });
+    expect(countInView(features, { west: -88, east: -78, south: 30, north: 38 }, [features.features[0]])).toEqual({ shown: 2, total: 2 });
   });
 
   it("counts the ones the filters mute in the total but not as shown", () => {

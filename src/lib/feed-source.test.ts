@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fixtureSource, liveSource } from "./feed-source";
+import { PLAYBACK_DELAY } from "./tracker";
 
 beforeEach(() => vi.useFakeTimers());
 afterEach(() => vi.useRealTimers());
@@ -40,11 +41,68 @@ describe("the feed's clock", () => {
     vi.setSystemTime(new Date(1_000_000));
     const source = liveSource();
     expect(source.clock()).toBe(1000);
-    // The feed's server is 12 s ahead of this machine; a later answer does not move the clock again.
+    // The feed's server is 12 s ahead of this machine.
     source.heard(1012);
-    source.heard(1500);
     vi.setSystemTime(new Date(1_002_000));
     expect(source.clock()).toBe(1014);
+  });
+
+  /** Reads every 5 s for `seconds`, the upstream clock at `upstream(wall)`, some answers served `age(i)` seconds old; the clock sampled every 50 ms. */
+  function session(upstream: (wall: number) => number, seconds: number, age: (i: number) => number = () => 0) {
+    vi.setSystemTime(new Date(1_000_000));
+    const source = liveSource();
+    const samples: { wall: number; clock: number }[] = [];
+    let read = 0;
+    for (let ms = 0; ms <= seconds * 1000; ms += 50) {
+      vi.setSystemTime(new Date(1_000_000 + ms));
+      const wall = 1000 + ms / 1000;
+      if (ms % 5000 === 0) source.heard(upstream(wall) - age(read++));
+      samples.push({ wall, clock: source.clock() });
+    }
+    return samples;
+  }
+
+  /**
+   * The clock only ever runs forward, at close to the wall's pace: re-syncing it never jumps the picture.
+   * In its first 8 s nothing is drawn yet (the picture plays 8 s behind), and it takes each answer outright.
+   */
+  function expectSmooth(all: { wall: number; clock: number }[]) {
+    const samples = all.filter((s) => s.wall >= 1000 + PLAYBACK_DELAY);
+    for (let i = 1; i < samples.length; i++) {
+      const rate = (samples[i].clock - samples[i - 1].clock) / (samples[i].wall - samples[i - 1].wall);
+      expect(rate).toBeGreaterThan(0.85);
+      expect(rate).toBeLessThan(1.15);
+    }
+  }
+
+  it("live, follows an upstream clock that drifts ahead of this machine's, re-synced on every read", () => {
+    // 2 ms a second ahead and gaining: 7 s over the hour.
+    const upstream = (wall: number) => wall + 12 + 0.002 * (wall - 1000);
+    const samples = session(upstream, 3600);
+    expectSmooth(samples);
+    const end = samples.at(-1)!;
+    expect(Math.abs(end.clock - upstream(end.wall))).toBeLessThan(0.5);
+  });
+
+  it("live, takes a fresh answer straight away when the first one was served old, before anything is drawn", () => {
+    const upstream = (wall: number) => wall + 12;
+    // The first answer comes out of a cache 30 s old; the next, 5 s on, is fresh.
+    const samples = session(upstream, 60, (i) => (i === 0 ? 30 : 0));
+    const settled = samples.find((s) => s.wall >= 1006)!;
+    expect(settled.clock).toBeCloseTo(upstream(settled.wall), 6);
+    expectSmooth(samples);
+  });
+
+  it("live, follows an upstream clock that drifts behind, and is not dragged back by an answer served old", () => {
+    const upstream = (wall: number) => wall + 12 - 0.002 * (wall - 1000);
+    // Now and then an answer comes out of a cache, up to 4 s old; once, one is a minute old.
+    const samples = session(upstream, 3600, (i) => (i === 300 ? 60 : i % 7 === 3 ? 4 : 0));
+    expectSmooth(samples);
+    const end = samples.at(-1)!;
+    expect(Math.abs(end.clock - upstream(end.wall))).toBeLessThan(0.5);
+    // Around the minute-old answer the clock stays with upstream.
+    const around = samples.find((s) => s.wall >= 1000 + 300 * 5 + 10)!;
+    expect(Math.abs(around.clock - upstream(around.wall))).toBeLessThan(0.5);
   });
 
   it("with a fixture, is the fixture's own clock, which its answers are stamped with", () => {

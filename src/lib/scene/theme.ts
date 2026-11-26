@@ -27,6 +27,12 @@ export const MODEL = {
 } as const;
 
 /**
+ * The least WCAG contrast every theme holds between its runway and its taxiway colour, the runway the
+ * darker: enough that a runway never blends into the taxiways beside it, by day or night.
+ */
+export const RUNWAY_CONTRAST = 1.3;
+
+/**
  * Everything about the look of the scene that a theme can change: surface colours, the light rig and
  * the post effects. Geometry and camera are shared (MODEL), so a new theme is a new object of this
  * shape and nothing else.
@@ -44,6 +50,7 @@ export interface SceneTheme {
     taxilane: string;
     /** Centreline paint on the main taxiways. */
     taxiwayLine: string;
+    /** Clearly darker than `taxiway`: at least RUNWAY_CONTRAST between them. */
     runway: string;
     marking: string;
     roof: string;
@@ -176,7 +183,7 @@ export const DIORAMA: SceneTheme = {
     taxiway: "#dcd9d1",
     taxilane: "#e2dfd8",
     taxiwayLine: "#e6e3dc",
-    runway: "#d5d2ca",
+    runway: "#bfbbb2",
     marking: "#ffffff",
     roof: "#ffffff",
     roofEdge: "#ffffff",
@@ -187,7 +194,7 @@ export const DIORAMA: SceneTheme = {
   trail: DIORAMA_STATES,
   dropLine: "#9a9ca1",
   lightTrails: { opacity: 0.95, intensity: 1, glow: false, widthPx: 3.2 },
-  fixtures: { color: "#bdb9b0", size: 1.6 },
+  fixtures: { color: "#a6a299", size: 1.6 },
   groundVariation: null,
   lights: {
     sky: "#ffffff",
@@ -224,9 +231,9 @@ export const NIGHT_OPS: SceneTheme = {
   surfaces: {
     ground: "#060a10",
     apron: "#0a111b",
-    taxiway: "#0e2a44",
+    taxiway: "#10314e",
     taxilane: "#0c1826",
-    taxiwayLine: "#0f2d49",
+    taxiwayLine: "#123453",
     runway: "#101722",
     marking: "#1a2230",
     roof: "#0f1621",

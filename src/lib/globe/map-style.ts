@@ -1,4 +1,5 @@
-import type { DataDrivenPropertyValueSpecification, ExpressionSpecification, FilterSpecification, LayerSpecification, SourceSpecification, StyleSpecification } from "@maplibre/maplibre-gl-style-spec";
+import type { CalculateTileZoomFunction } from "maplibre-gl";
+import type { DataDrivenPropertyValueSpecification, ExpressionSpecification, FilterSpecification, LayerSpecification, RasterDEMSourceSpecification, SkySpecification, SourceSpecification, StyleSpecification, TerrainSpecification } from "@maplibre/maplibre-gl-style-spec";
 import { RADAR_CREDIT, RADAR_MAX_ZOOM } from "../radar";
 import { MODEL, THEMES, type ThemeKey } from "../scene/theme";
 import { BEACON_RADIUS_PX } from "./aircraft-glyph";
@@ -48,6 +49,14 @@ export interface MapPalette {
   chipRing: string;
   chipText: string;
   chipCount: string;
+  /** The En-route view's aircraft model: its metal, painted in `selected`. */
+  modelBody: string;
+  /** The En-route view's relief (its hillshade over the terrain): the slopes facing away from the light. */
+  reliefShadow: string;
+  /** The slopes facing the light. */
+  reliefLight: string;
+  /** How strongly it shades (MapLibre's hillshade exaggeration, 0 to 1). */
+  reliefStrength: number;
 }
 
 export const PALETTES: Record<ThemeKey, MapPalette> = {
@@ -73,6 +82,11 @@ export const PALETTES: Record<ThemeKey, MapPalette> = {
     chipRing: "#e6e3dc",
     chipText: "#1d1f24",
     chipCount: "#5d6068",
+    modelBody: "#f2f1ec",
+    // Subtle: the labels' warm grey in the shade, the paper lit.
+    reliefShadow: "#7a7468",
+    reliefLight: "#ffffff",
+    reliefStrength: 0.35,
   },
   // Night ops: the land the diorama's black, a deep navy sea, faint shores and borders, the cities lit.
   dark: {
@@ -96,6 +110,11 @@ export const PALETTES: Record<ThemeKey, MapPalette> = {
     chipRing: "#1e2d45",
     chipText: "#f2f6fb",
     chipCount: "#6ff0a6",
+    modelBody: "#c9ced8",
+    // Visible by night: black shade, the slopes lit in the shores' navy.
+    reliefShadow: "#000000",
+    reliefLight: "#2a4468",
+    reliefStrength: 0.7,
   },
   satellite: {
     water: "#2c4a63",
@@ -118,6 +137,11 @@ export const PALETTES: Record<ThemeKey, MapPalette> = {
     chipRing: "rgba(0,0,0,0.12)",
     chipText: "#16181c",
     chipCount: "#4a4e55",
+    modelBody: "#f2f1ec",
+    // The imagery shows its own relief: only a touch more.
+    reliefShadow: "#000000",
+    reliefLight: "#ffffff",
+    reliefStrength: 0.15,
   },
 };
 
@@ -268,8 +292,169 @@ function trail(kind: string, color: string): LayerSpecification {
   };
 }
 
-/** `radar`: a frame's tile URL (radar.ts) to draw the weather radar from; without it the style has no radar layer. */
-export function mapStyle(key: ThemeKey, { globe = false, radar = null }: { globe?: boolean; radar?: string | null } = {}): StyleSpecification {
+/** The en-route view's terrain source id, and the terrain it draws: true heights, no exaggeration. */
+export const TERRAIN_SOURCE = "terrain";
+export const TERRAIN: TerrainSpecification = { source: TERRAIN_SOURCE, exaggeration: 1 };
+
+/**
+ * The en-route view's 3D terrain: AWS Terrain Tiles (open data, no key), Terrarium encoded. Credited as
+ * the data's attribution page asks, which names each elevation source it is made from.
+ */
+export function terrainSource(): RasterDEMSourceSpecification {
+  return {
+    type: "raster-dem",
+    tiles: ["https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png"],
+    encoding: "terrarium",
+    tileSize: 256,
+    maxzoom: 15,
+    attribution: '<a href="https://github.com/tilezen/joerd/blob/master/docs/attribution.md" target="_blank" rel="noopener">Terrain Tiles</a> (Mapzen, USGS, NOAA and others)',
+  };
+}
+
+/** The flat map's sky: the page colour all round, as the diorama's fog is, so a tilted flat map fades into the page. */
+export function flatSky(key: ThemeKey): SkySpecification {
+  const page = THEMES[key].background;
+  return { "sky-color": page, "horizon-color": page, "fog-color": page, "sky-horizon-blend": 0.5, "horizon-fog-blend": 0.5, "fog-ground-blend": 0.6, "atmosphere-blend": 0 };
+}
+
+/**
+ * The En-route view's sky, while a 3D camera is on: the Diorama's own air in a close camera (the theme's
+ * eyeLevel), graded from its horizon up to its zenith over most of the sky, so the view has a horizon and the
+ * sky reads apart from the ground. MapLibre's own fog is in the horizon's haze too (enRouteHaze), but it only
+ * reaches the last of the ground on a look near level: its fog starts at the map's centre's height over sea
+ * level over the cosine of a pitch near 89 degrees, about 250 km out at 11,000 ft. The far ground's haze is the
+ * En-route layer's (hazeShells).
+ */
+export function enRouteSky(key: ThemeKey): SkySpecification {
+  const air = THEMES[key].eyeLevel;
+  return { "sky-color": air.zenith, "horizon-color": air.horizon, "fog-color": enRouteHaze(key), "sky-horizon-blend": 0.9, "horizon-fog-blend": 0.3, "fog-ground-blend": 0.25, "atmosphere-blend": 0 };
+}
+
+/** The haze the far ground fades into in a 3D camera: the horizon's own colour, so the ground, the haze over it and the sky meet without a line. */
+export const enRouteHaze = (key: ThemeKey): string => THEMES[key].eyeLevel.horizon;
+
+/** How many shells the far ground's haze is drawn in: each adds an equal share of it, small enough that no shell's edge on the ground shows. */
+export const HAZE_SHELLS = 24;
+/** Where the haze starts, as a share of the way to where it is full: past the ground near the aircraft (Chase's 13 km at 11,000 ft). */
+const HAZE_START = 0.08;
+/** How the haze thickens with distance past its start: as a power of the share of the way (under 1, quickly at first, as air does). */
+const HAZE_RISE = 0.7;
+const EARTH_RADIUS_M = 6_371_000;
+
+/**
+ * How much of the haze a 3D camera draws, by its pitch: in full on a look near level (85 degrees and past),
+ * where the far ground is in view, none at Chase's 75 or steeper, so Chase and Top look as they did; between,
+ * as a drag tilts Chase up, it eases in.
+ */
+export function hazeStrength(pitchDeg: number): number {
+  const t = Math.min(1, Math.max(0, (pitchDeg - 75) / 10));
+  return t * t * (3 - 2 * t);
+}
+
+export interface HazeShell {
+  /** From the eye, metres. */
+  distanceM: number;
+  /** The haze's opacity over ground beyond it, with every shell nearer: an equal share more than the shell before. */
+  opacity: number;
+}
+
+/**
+ * The far ground's haze in a 3D camera, as spheres round the eye that the ground nearer than each hides
+ * (the En-route layer draws them against the map's depth): for an eye `aboveM` over the ground, from a little
+ * way out to full haze at the horizon (the distance to it over a round Earth, which the flat map does not
+ * have), or just inside the map's far plane (`farM`) where the ground drawn ends first. The haze thickens
+ * in equal steps, the last shell opaque.
+ */
+export function hazeShells(aboveM: number, farM = Infinity): HazeShell[] {
+  if (!(aboveM > 0)) return [];
+  const end = Math.min(horizonM(aboveM), farM * 0.98);
+  const start = HAZE_START * end;
+  return Array.from({ length: HAZE_SHELLS }, (_, i) => {
+    const share = (i + 1) / HAZE_SHELLS;
+    return { distanceM: start + (end - start) * share ** (1 / HAZE_RISE), opacity: share };
+  });
+}
+
+/** The distance to the horizon over a round Earth from `aboveM` over the ground, metres: where the haze is full (hazeShells). 0 at or under the ground. */
+export function horizonM(aboveM: number): number {
+  return aboveM > 0 ? Math.sqrt(2 * EARTH_RADIUS_M * aboveM + aboveM * aboveM) : 0;
+}
+
+/** The Satellite theme's imagery source and layer. */
+export const IMAGERY = "imagery";
+
+/**
+ * The lowest zoom of USGSImageryOnly's own large-scale imagery. At 8 and under the service serves a different,
+ * small-scale product: olive and much darker over the same ground (mean colour 54/57/17 at zoom 8 against
+ * 109/111/94 at zoom 9 over Alabama, measured on the tiles). A 3D camera looking near level has MapLibre take
+ * lower zooms with distance, so where its tiles went from 9 to 8, about 40 km out, the ground changed colour
+ * in a hard line.
+ */
+export const IMAGERY_NEAR_ZOOM = 9;
+
+/**
+ * MapLibre's own level of detail with distance on a pitched map (covering_tiles.ts in maplibre-gl:
+ * defaultMaxZoomLevelsOnScreen, defaultTileCountMaxMinRatio): `setSourceTileLodParams` with these gives the
+ * source MapLibre's default `calculateTileZoom`, which imageryTileZoom then wraps.
+ */
+export const MAPLIBRE_LOD = { maxZoomLevelsOnScreen: 9.314, tileCountMaxMinRatio: 3 } as const;
+
+/**
+ * How far the 3D camera's imagery keeps its large-scale product (imageryTileZoom): `metres` of ground from the
+ * eye, and the metres of ground in one of MapLibre's Mercator units there. The camera updates it each frame;
+ * imageryTileZoom reads it on every tile, so it is shared, not copied.
+ */
+export interface ImageryReach {
+  metres: number;
+  metresPerUnit: number;
+}
+
+/**
+ * The imagery's tile zoom in a 3D camera: MapLibre's own (`base`), but never under IMAGERY_NEAR_ZOOM for a tile
+ * nearer than `reach.metres` (the horizon, where the haze is full; read each call, so the camera moves it), so
+ * the ground in sight is all one product and the olive one is only ever under full haze. MapLibre's distances
+ * are in Mercator units, `reach.metresPerUnit` metres of ground each. A map zoomed out past zoom 9 keeps
+ * MapLibre's zooms.
+ */
+export function imageryTileZoom(base: CalculateTileZoomFunction, reach: ImageryReach): CalculateTileZoomFunction {
+  return (centreZoom, toTile2D, toTileZ, toCentre3D, fovDeg) => {
+    const z = base(centreZoom, toTile2D, toTileZ, toCentre3D, fovDeg);
+    return centreZoom >= IMAGERY_NEAR_ZOOM && toTile2D * reach.metresPerUnit < reach.metres ? Math.max(z, IMAGERY_NEAR_ZOOM) : z;
+  };
+}
+
+/**
+ * The map's background colour: flat, the land's (under the imagery, the page's); in a 3D camera the sky's
+ * haze (enRouteHaze), since a look near level sees past the farthest tile MapLibre draws, and the
+ * ground there should read as the haze at the horizon, not as bare land.
+ */
+export function mapBackground(key: ThemeKey, terrain = false): string {
+  if (terrain) return enRouteSky(key)["fog-color"] as string;
+  const theme = THEMES[key];
+  return key === "satellite" ? theme.background : theme.surfaces.ground;
+}
+
+/** The En-route view's hillshade layer id, and the layer it goes under (the first drawn over the land), in the style and when added to the map. */
+export const HILLSHADE = "hillshade";
+export const HILLSHADE_UNDER = "water";
+
+/** The relief of the En-route view's terrain, shaded from the same Terrarium source in the theme's colours: subtle by day, plainer by night. Under everything else drawn. */
+export function hillshadeLayer(key: ThemeKey): LayerSpecification {
+  const p = PALETTES[key];
+  return {
+    id: HILLSHADE,
+    type: "hillshade",
+    source: TERRAIN_SOURCE,
+    paint: { "hillshade-shadow-color": p.reliefShadow, "hillshade-accent-color": p.reliefShadow, "hillshade-highlight-color": p.reliefLight, "hillshade-exaggeration": p.reliefStrength },
+  };
+}
+
+/**
+ * The map's style. `radar`: a frame's tile URL (radar.ts) to draw the weather radar from; without it the
+ * style has no radar layer. `terrain`: the en-route view's terrain is on (only while a 3D camera is), with
+ * its hillshade and its sky.
+ */
+export function mapStyle(key: ThemeKey, { globe = false, radar = null, terrain = false }: { globe?: boolean; radar?: string | null; terrain?: boolean } = {}): StyleSpecification {
   const theme = THEMES[key];
   const p = PALETTES[key];
   const satellite = key === "satellite";
@@ -286,13 +471,15 @@ export function mapStyle(key: ThemeKey, { globe = false, radar = null }: { globe
     hover: EMPTY,
   };
   if (radar) sources.radar = radarSource(radar);
+  if (terrain) sources[TERRAIN_SOURCE] = terrainSource();
   if (satellite) {
-    sources.imagery = { type: "raster", tiles: [USGS_IMAGERY], tileSize: 256, maxzoom: 16, attribution: "Imagery: USDA, USGS The National Map: Orthoimagery" };
+    sources[IMAGERY] = { type: "raster", tiles: [USGS_IMAGERY], tileSize: 256, maxzoom: 16, attribution: "Imagery: USDA, USGS The National Map: Orthoimagery" };
   }
   const arc = arcOpacities(key);
   const layers: LayerSpecification[] = [
-    { id: "background", type: "background", paint: { "background-color": satellite ? theme.background : theme.surfaces.ground } },
-    ...(satellite ? [{ id: "imagery", type: "raster", source: "imagery", paint: { "raster-saturation": -0.1 } } satisfies LayerSpecification] : []),
+    { id: "background", type: "background", paint: { "background-color": mapBackground(key, terrain) } },
+    ...(satellite ? [{ id: IMAGERY, type: "raster", source: IMAGERY, paint: { "raster-saturation": -0.1 } } satisfies LayerSpecification] : []),
+    ...(terrain ? [hillshadeLayer(key)] : []),
     // The shore is the fill's own outline, not a line layer over the same polygons: a lake's outline is one ring of thousands of points (Lake Lanier is 6,500 at zoom 10), and a
     // line bucket asks for ten vertices a point, past the 65,535 a segment holds ("Max vertices per segment is 65535" in the console, the line drawn wrong). A fill asks for one a point.
     // On the aerial view the fill is transparent rather than faded out, so its outline still draws.
@@ -539,7 +726,8 @@ export function mapStyle(key: ThemeKey, { globe = false, radar = null }: { globe
     // Web Mercator at region zoom and closer, which the camera conversion assumes. At world zoom a globe
     // where the renderer draws one properly (see globeCapable).
     projection: { type: globe ? ["interpolate", ["linear"], ["zoom"], 4.5, "vertical-perspective", 6, "mercator"] : "mercator" },
-    // The horizon fades into the page colour, as the diorama's fog does.
-    sky: { "sky-color": theme.background, "horizon-color": theme.background, "fog-color": theme.background, "sky-horizon-blend": 0.5, "horizon-fog-blend": 0.5, "fog-ground-blend": 0.6, "atmosphere-blend": 0 },
+    // Flat, the horizon fades into the page colour, as the diorama's fog does; a 3D camera has a sky.
+    sky: terrain ? enRouteSky(key) : flatSky(key),
+    ...(terrain ? { terrain: TERRAIN } : {}),
   };
 }

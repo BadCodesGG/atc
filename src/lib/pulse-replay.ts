@@ -3,7 +3,7 @@ import type { Airport } from "./airports";
 import type { PathPulse } from "./path-pulse";
 import { PLAYBACK_DELAY, Tracker } from "./tracker";
 import type { TrafficSnapshot } from "./traffic";
-import { TrafficView } from "./traffic-view";
+import { fixtureTime, TrafficView } from "./traffic-view";
 
 /**
  * Plays a recorded run of snapshots (`?fixture=sequence`, read by `readSequence`) into the pulse, as
@@ -22,7 +22,8 @@ export function replayPulse(ops: PathPulse, snapshots: TrafficSnapshot[], map: A
   snapshots.forEach((snapshot, i) => {
     tracker.add(snapshot);
     view.addRoutes(snapshot.routes);
-    const next = snapshots[i + 1]?.time ?? snapshot.time + STEP;
+    // After the last snapshot, on to the moment the page stands at (fixtureTime): the picture runs PLAYBACK_DELAY behind it.
+    const next = snapshots[i + 1]?.time ?? fixtureTime(snapshot) + STEP;
     for (let t = snapshot.time; t < next; t += STEP) {
       ops.observe(view.frame(tracker.at(t)).entries, t - PLAYBACK_DELAY);
       end = t;

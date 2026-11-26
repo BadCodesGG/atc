@@ -1,7 +1,7 @@
-import { validateStyleMin } from "@maplibre/maplibre-gl-style-spec";
+import { type LayerSpecification, validateStyleMin } from "@maplibre/maplibre-gl-style-spec";
 import { describe, expect, it } from "vitest";
 import { THEMES, type ThemeKey } from "../scene/theme";
-import { arcOpacities, buildingHeight, journeyIconSize, mapStyle, PALETTES, radarLayer, radarSource, ripple, SELECTED_SCALE, SELECTION_DIM } from "./map-style";
+import { arcOpacities, buildingHeight, enRouteHaze, enRouteSky, flatSky, HAZE_SHELLS, hazeShells, hazeStrength, HILLSHADE, HILLSHADE_UNDER, hillshadeLayer, horizonM, IMAGERY_NEAR_ZOOM, imageryTileZoom, journeyIconSize, mapBackground, mapStyle, PALETTES, radarLayer, radarSource, ripple, SELECTED_SCALE, SELECTION_DIM, TERRAIN, TERRAIN_SOURCE, terrainSource } from "./map-style";
 
 const KEYS = Object.keys(THEMES) as ThemeKey[];
 const paint = (key: ThemeKey, id: string, prop: string) => {
@@ -225,5 +225,192 @@ describe("the shores of lakes and seas", () => {
   it("still draws on the aerial view, where the fill is clear rather than faded out (fill-opacity would take the outline with it)", () => {
     expect(paint("satellite", "water", "fill-opacity")).toBeUndefined();
     expect(paint("satellite", "water", "fill-color")).toBe("rgba(0,0,0,0)");
+  });
+});
+
+describe("the en-route view's terrain", () => {
+  it("is not in the style unless a 3D camera asks for it: the flat map never loads it", () => {
+    for (const key of ["light", "dark", "satellite"] as ThemeKey[]) {
+      const style = mapStyle(key);
+      expect(Object.values(style.sources).some((s) => s.type === "raster-dem")).toBe(false);
+      expect(style.terrain).toBeUndefined();
+    }
+  });
+
+  it("is AWS Terrain Tiles, Terrarium encoded, no key, 256 px tiles to zoom 15, credited with a link to the data's own attribution", () => {
+    const source = terrainSource();
+    expect(source).toMatchObject({ type: "raster-dem", tiles: ["https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png"], encoding: "terrarium", tileSize: 256, maxzoom: 15 });
+    expect(source.attribution).toContain("https://github.com/tilezen/joerd/blob/master/docs/attribution.md");
+    expect(source.attribution).toMatch(/Terrain Tiles/);
+  });
+
+  it("goes into the style with the terrain on it when asked (so a theme switch keeps it), and the style is valid", () => {
+    const style = mapStyle("dark", { terrain: true });
+    expect(style.sources[TERRAIN_SOURCE]).toEqual(terrainSource());
+    expect(style.terrain).toEqual(TERRAIN);
+    expect(validateStyleMin(style)).toEqual([]);
+  });
+
+  it.each(KEYS)("in %s, the flat map keeps its own sky (the page colour all round) and has no hillshade", (key) => {
+    const style = mapStyle(key);
+    const page = THEMES[key].background;
+    expect(style.sky).toEqual({ "sky-color": page, "horizon-color": page, "fog-color": page, "sky-horizon-blend": 0.5, "horizon-fog-blend": 0.5, "fog-ground-blend": 0.6, "atmosphere-blend": 0 });
+    expect(style.sky).toEqual(flatSky(key));
+    expect(style.layers.some((l) => l.type === "hillshade")).toBe(false);
+  });
+
+  it.each(KEYS)("in %s, a 3D camera's style shades the terrain's relief, under the water, roads and everything else drawn, from the same Terrarium source", (key) => {
+    const style = mapStyle(key, { terrain: true });
+    const shaded = style.layers.filter((l) => l.type === "hillshade");
+    expect(shaded).toEqual([hillshadeLayer(key)]);
+    expect(shaded[0]).toMatchObject({ id: HILLSHADE, source: TERRAIN_SOURCE });
+    // Right under the layer the controller adds it under, so the style and a 3D camera turned on agree.
+    expect(style.layers.findIndex((l) => l.id === HILLSHADE)).toBe(style.layers.findIndex((l) => l.id === HILLSHADE_UNDER) - 1);
+    // Nothing else changes: the same layers as the flat map, the hillshade and the background's colour aside.
+    const flatBackground = (l: LayerSpecification) => (l.id === "background" ? { ...l, paint: { "background-color": mapBackground(key) } } : l);
+    expect(style.layers.filter((l) => l.id !== HILLSHADE).map(flatBackground)).toEqual(mapStyle(key).layers);
+    expect(validateStyleMin(style)).toEqual([]);
+  });
+
+  it.each(KEYS)("in %s, a 3D camera's sky is the Diorama's own air (its zenith over its horizon), so there is a horizon and the sky is not the ground", (key) => {
+    const sky = mapStyle(key, { terrain: true }).sky!;
+    const air = THEMES[key].eyeLevel;
+    expect(sky).toEqual(enRouteSky(key));
+    expect(sky["sky-color"]).toBe(air.zenith);
+    expect(sky["horizon-color"]).toBe(air.horizon);
+    // The haze the far ground fades into is the horizon's own colour, so ground, haze and sky meet without a line.
+    expect(sky["fog-color"]).toBe(air.horizon);
+    expect(enRouteHaze(key)).toBe(air.horizon);
+    // The sky reads apart from the ground under it (the map's background) and from the horizon.
+    const ground = paint(key, "background", "background-color");
+    expect(sky["sky-color"]).not.toBe(ground);
+    expect(sky["sky-color"]).not.toBe(sky["horizon-color"]);
+  });
+
+  it.each(KEYS)("in %s, a 3D camera's sky grades from the horizon's haze to the zenith over most of the sky, not in a thin line over a flat fill", (key) => {
+    expect(enRouteSky(key)["sky-horizon-blend"]).toBeGreaterThanOrEqual(0.8);
+    expect(enRouteSky(key)["sky-horizon-blend"]).toBeLessThanOrEqual(1);
+  });
+
+  it.each(KEYS)("in %s, a 3D camera's background is the sky's haze, so the ground past the farthest tile drawn reads as the horizon's haze, not bare land", (key) => {
+    const background = (style: ReturnType<typeof mapStyle>) => (style.layers.find((l) => l.id === "background") as { paint: Record<string, unknown> }).paint["background-color"];
+    expect(mapBackground(key, true)).toBe(enRouteSky(key)["fog-color"]);
+    expect(mapBackground(key, true)).toBe(enRouteHaze(key));
+    expect(background(mapStyle(key, { terrain: true }))).toBe(mapBackground(key, true));
+    // The flat map keeps its own: the land's colour, or under the imagery the page's.
+    expect(background(mapStyle(key))).toBe(mapBackground(key));
+    expect(mapBackground(key)).toBe(key === "satellite" ? THEMES[key].background : THEMES[key].surfaces.ground);
+  });
+
+  it("shades the relief subtly by day and more strongly by night, in colours named for each theme", () => {
+    const strength = (key: ThemeKey) => (hillshadeLayer(key) as { paint: Record<string, unknown> }).paint["hillshade-exaggeration"] as number;
+    expect(strength("dark")).toBeGreaterThan(strength("light"));
+    for (const key of KEYS) {
+      const p = (hillshadeLayer(key) as { paint: Record<string, unknown> }).paint;
+      expect(p["hillshade-shadow-color"]).toBe(PALETTES[key].reliefShadow);
+      expect(p["hillshade-highlight-color"]).toBe(PALETTES[key].reliefLight);
+      expect(p["hillshade-exaggeration"]).toBe(PALETTES[key].reliefStrength);
+    }
+  });
+});
+
+describe("hazeStrength", () => {
+  it("is the haze in full on a look near level (Cockpit, Side) and none at Chase's 75 degrees or steeper (Chase and Top as they were)", () => {
+    expect(hazeStrength(90)).toBe(1);
+    expect(hazeStrength(110)).toBe(1);
+    expect(hazeStrength(85)).toBe(1);
+    expect(hazeStrength(75)).toBe(0);
+    expect(hazeStrength(0)).toBe(0);
+    expect(hazeStrength(80)).toBeGreaterThan(0);
+    expect(hazeStrength(80)).toBeLessThan(1);
+  });
+});
+
+describe("hazeShells", () => {
+  const FL110 = 11_000 * 0.3048;
+  const FL370 = 37_000 * 0.3048;
+  const horizon = (aboveM: number) => Math.sqrt(2 * 6_371_000 * aboveM + aboveM * aboveM);
+  const opacity = (shells: { opacity: number }[]) => shells.at(-1)!.opacity;
+
+  it("draws nothing for an eye at or under the ground", () => {
+    expect(hazeShells(0)).toEqual([]);
+    expect(hazeShells(-50)).toEqual([]);
+    expect(hazeShells(Number.NaN)).toEqual([]);
+  });
+
+  it("builds the haze in HAZE_SHELLS shells, ever farther out, to full haze at the horizon", () => {
+    const shells = hazeShells(FL110);
+    expect(shells).toHaveLength(HAZE_SHELLS);
+    for (let i = 1; i < shells.length; i++) expect(shells[i].distanceM).toBeGreaterThan(shells[i - 1].distanceM);
+    for (const s of shells) {
+      expect(s.opacity).toBeGreaterThan(0);
+      expect(s.opacity).toBeLessThanOrEqual(1);
+    }
+    expect(shells.at(-1)!.distanceM).toBeCloseTo(horizon(FL110), -2);
+    expect(opacity(shells)).toBe(1);
+  });
+
+  it("thickens in equal steps, so no shell's edge on the ground stands out from the others", () => {
+    const shells = hazeShells(FL110);
+    shells.forEach((s, i) => expect(s.opacity).toBeCloseTo((i + 1) / shells.length, 9));
+    expect(1 / HAZE_SHELLS).toBeLessThanOrEqual(0.05);
+  });
+
+  it("leaves the near ground clear: at 11,000 ft it starts past Chase's 13 km and the Cockpit's nearer relief", () => {
+    expect(hazeShells(FL110)[0].distanceM).toBeGreaterThan(13_000);
+    // Quickly at first, as air does: half the haze well inside half the way to the horizon.
+    const shells = hazeShells(FL110);
+    expect(shells[shells.length / 2 - 1].distanceM).toBeLessThan(horizon(FL110) / 2);
+  });
+
+  it("reaches farther from higher up, with the horizon", () => {
+    expect(hazeShells(FL370).at(-1)!.distanceM).toBeGreaterThan(hazeShells(FL110).at(-1)!.distanceM * 1.5);
+    expect(hazeShells(FL370)[0].distanceM).toBeGreaterThan(hazeShells(FL110)[0].distanceM);
+  });
+
+  it("ends inside the map's far plane, where the ground drawn ends, when that comes before the horizon", () => {
+    const far = 40_000;
+    const shells = hazeShells(FL110, far);
+    expect(shells.at(-1)!.distanceM).toBeLessThan(far);
+    expect(shells.at(-1)!.distanceM).toBeGreaterThan(far * 0.9);
+    expect(opacity(shells)).toBe(1);
+  });
+});
+
+describe("horizonM", () => {
+  it("is the distance to the horizon over a round Earth, where the haze is full", () => {
+    expect(horizonM(11_000 * 0.3048)).toBeCloseTo(206_700, -3);
+    expect(horizonM(37_000 * 0.3048)).toBeCloseTo(379_100, -3);
+    expect(hazeShells(11_000 * 0.3048).at(-1)!.distanceM).toBeCloseTo(horizonM(11_000 * 0.3048), 6);
+    expect(horizonM(0)).toBe(0);
+    expect(horizonM(Number.NaN)).toBe(0);
+  });
+});
+
+describe("imageryTileZoom", () => {
+  // MapLibre's distances are in Mercator units (the world is 1 across); at the equator one is 40,075 km of ground.
+  const reach = { metres: 200_000, metresPerUnit: 40_075_016 };
+  const km = (k: number) => (k * 1000) / reach.metresPerUnit;
+  const base = (z: number) => () => z;
+
+  it("keeps the imagery at its own large-scale product (zoom 9 or more) out to the reach, where the haze is full", () => {
+    expect(IMAGERY_NEAR_ZOOM).toBe(9);
+    // The olive small-scale product MapLibre would take 40 km out, and 190 km out, is the large-scale one.
+    expect(imageryTileZoom(base(8), reach)(15, km(40), km(3), km(4), 37)).toBe(9);
+    expect(imageryTileZoom(base(6), reach)(15, km(190), km(3), km(4), 37)).toBe(9);
+  });
+
+  it("leaves past the reach, nearer tiles already finer, and a map zoomed out past zoom 9 as MapLibre has them", () => {
+    expect(imageryTileZoom(base(6), reach)(15, km(210), km(3), km(4), 37)).toBe(6);
+    expect(imageryTileZoom(base(13), reach)(15, km(5), km(3), km(4), 37)).toBe(13);
+    expect(imageryTileZoom(base(7), reach)(8, km(5), km(3), km(4), 37)).toBe(7);
+  });
+
+  it("reads the reach as it is now, so the camera can move it every frame", () => {
+    const moving = { ...reach };
+    const zoom = imageryTileZoom(base(6), moving);
+    expect(zoom(15, km(150), km(3), km(4), 37)).toBe(9);
+    moving.metres = 100_000;
+    expect(zoom(15, km(150), km(3), km(4), 37)).toBe(6);
   });
 });

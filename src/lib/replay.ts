@@ -1,6 +1,8 @@
+import { KNOTS, toGeo } from "./geo";
 import { History } from "./history";
 import { type GroundWays, type TrailHead, TrailFeed, type TrailUpdate } from "./timelapse";
-import { DEAD_RECKON_MAX, FADE_IN, FADE_OUT, PLAYBACK_DELAY, type TrackedAircraft, Tracker } from "./tracker";
+import { CORRECTION_SNAP, DEAD_RECKON_MAX, FADE_IN, FADE_OUT, MAX_FRAME_GAP, PLAYBACK_DELAY, STEP_FLOOR, STEP_SECONDS, STOPPED_KT, type TrackedAircraft, Tracker } from "./tracker";
+import type { TrafficFeed } from "./shared-sky";
 import type { TrafficSnapshot } from "./traffic";
 
 /**
@@ -107,6 +109,70 @@ export class ReplayClock {
   }
 }
 
+/**
+ * The seam where a replay catches up with live. The Replayer and the live tracker are apart on purpose
+ * (docs/adr/0001-one-shared-tracker.md), so where they draw an aircraft at that moment can differ by tens
+ * of metres. Across the switch each aircraft is eased from where the replay last drew it to where live has
+ * it, under the Tracker's own rules for a frame (src/lib/tracker.ts): a step no longer than STEP_SECONDS of
+ * its speed (never under STEP_FLOOR), not back along its heading unless it is at rest (it holds there and
+ * live catches up with it), a gap over CORRECTION_SNAP taken at once, and frames over MAX_FRAME_GAP apart
+ * not one motion. An aircraft is let go once it is drawn where live has it.
+ */
+export class Seam {
+  /** Where each aircraft still being eased was last drawn, and when (the reader's clock, seconds). */
+  private drawn = new Map<string, { x: number; y: number }>();
+  private wall = 0;
+
+  /** The replay's last frame, drawn at `wall`: what the next live frames ease from. */
+  start(last: readonly TrackedAircraft[], wall: number): void {
+    this.drawn = new Map(last.map((a) => [a.id, { x: a.x, y: a.y }]));
+    this.wall = wall;
+  }
+
+  /** Nothing to ease: the picture jumped (LIVE pressed, a seek, a replay started). */
+  clear(): void {
+    this.drawn.clear();
+  }
+
+  /** Live's aircraft at `wall`, each still being eased drawn a step on from where it was. */
+  ease(list: TrackedAircraft[], wall: number): TrackedAircraft[] {
+    if (this.drawn.size === 0) return list;
+    const gap = wall - this.wall;
+    this.wall = wall;
+    if (gap > MAX_FRAME_GAP) {
+      this.drawn.clear();
+      return list;
+    }
+    const next = new Map<string, { x: number; y: number }>();
+    const out = list.map((a) => {
+      const was = this.drawn.get(a.id);
+      if (!was) return a;
+      let [sx, sy] = [a.x - was.x, a.y - was.y];
+      if (Math.hypot(sx, sy) > CORRECTION_SNAP) return a;
+      const speedKt = a.groundSpeedKt ?? 0;
+      if (a.headingKnown && speedKt >= STOPPED_KT) {
+        // Not back along its heading: that part of the step is held, and live comes on to meet it.
+        const h = (a.headingDeg * Math.PI) / 180;
+        const [hx, hy] = [Math.sin(h), Math.cos(h)];
+        const along = sx * hx + sy * hy;
+        if (along < 0) [sx, sy] = [sx - along * hx, sy - along * hy];
+      }
+      const step = Math.hypot(sx, sy);
+      const bound = Math.max(speedKt * KNOTS * STEP_SECONDS, STEP_FLOOR);
+      if (step > bound) [sx, sy] = [(sx / step) * bound, (sy / step) * bound];
+      const [x, y] = [was.x + sx, was.y + sy];
+      // There: drawn where live has it from now on.
+      if (Math.hypot(a.x - x, a.y - y) < 1e-6) return a;
+      next.set(a.id, { x, y });
+      if (a.latitude === undefined || a.longitude === undefined) return { ...a, x, y };
+      const [latitude, longitude] = toGeo({ latitude: a.latitude, longitude: a.longitude }, x - a.x, y - a.y);
+      return { ...a, x, y, latitude, longitude };
+    });
+    this.drawn = next;
+    return out;
+  }
+}
+
 /** What the time bar shows. */
 export interface ReplayStatus {
   live: boolean;
@@ -132,9 +198,13 @@ export class Replay {
   private jumps = 0;
   private seen = { jumps: 0, live: true };
   private trailing = false;
+  /** Eases the aircraft across a replay's catching up with live; the replay's last frame is what it eases from. */
+  private readonly seam = new Seam();
+  private lastReplay: TrackedAircraft[] = [];
 
   constructor(
-    private readonly live: Tracker,
+    /** The live picture: the airport's feed of the page's tracker, in the airport's metres. */
+    private readonly live: Pick<TrafficFeed, "at">,
     {
       elevationFt,
       ground = null,
@@ -170,13 +240,18 @@ export class Replay {
 
   /** The aircraft to draw at this frame, and the moment they are of. `wall` is the reader's clock in seconds. */
   frame(liveClock: number, wall: number): { aircraft: TrackedAircraft[]; picture: number } {
+    const replaying = !this.clock.live;
     const picture = this.clock.picture(liveClock - PLAYBACK_DELAY, wall);
     if (this.clock.live) {
+      // The replay caught up with live this frame (LIVE pressed goes live before the frame, and is a jump).
+      if (replaying) this.seam.start(this.lastReplay, wall);
       this.drawn = null;
-      return { picture, aircraft: this.live.at(liveClock) };
+      this.lastReplay = [];
+      return { picture, aircraft: this.seam.ease(this.live.at(liveClock), wall) };
     }
     this.drawn = picture;
-    return { picture, aircraft: this.replayer.at(picture) };
+    this.lastReplay = this.replayer.at(picture);
+    return { picture, aircraft: this.lastReplay };
   }
 
   /** Where the replay is, as of the last frame. */
@@ -189,16 +264,19 @@ export class Replay {
   play(rate: ReplayRate, liveClock: number, wall: number): void {
     if (rate === 1 && this.clock.live) return;
     if (this.clock.live) this.jumps++;
+    this.seam.clear();
     this.clock.play(rate, this.range(liveClock), wall);
   }
 
   seek(picture: number, liveClock: number, wall: number): void {
     this.jumps++;
+    this.seam.clear();
     this.clock.seek(picture, this.range(liveClock), wall);
   }
 
   goLive(): void {
     this.jumps++;
+    this.seam.clear();
     this.clock.goLive();
   }
 

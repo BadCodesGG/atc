@@ -227,11 +227,53 @@ export interface TaxiwayRun {
   minor: boolean;
 }
 
+/** A segment runs along a runway when the cosine of its angle to the runway's heading is at least this (within about 26 degrees). */
+const ALONG_RUNWAY_COS = 0.9;
+
 /**
- * Every taxiway, cut into runs that are wholly minor or wholly major, with every segment kept. A
- * segment is on an apron when its midpoint is.
+ * Whether the stretch a to b lies along a runway: both ends on that runway's pavement (within its half
+ * width of the centreline, between its ends) and running its way, as the lead-ons and back-taxi
+ * stretches mappers draw on the centreline do. A taxiway crossing the runway does not.
  */
-export function taxiwayRuns(map: Pick<AirportMap, "taxiways" | "aprons">): TaxiwayRun[] {
+function liesAlongRunway(stretches: RunwayStretch[], a: Point, b: Point): boolean {
+  const len = Math.hypot(b[0] - a[0], b[1] - a[1]);
+  if (!(len > 0)) return false;
+  return stretches.some(({ from, ux, uy, length, halfWidth }) => {
+    const onPavement = ([x, y]: Point) => {
+      const along = (x - from[0]) * ux + (y - from[1]) * uy;
+      return along >= 0 && along <= length && Math.abs(-(x - from[0]) * uy + (y - from[1]) * ux) <= halfWidth;
+    };
+    return onPavement(a) && onPavement(b) && Math.abs((b[0] - a[0]) * ux + (b[1] - a[1]) * uy) / len >= ALONG_RUNWAY_COS;
+  });
+}
+
+/** One straight stretch of a runway's pavement: where it starts, its heading as a unit vector, its length and half its width. */
+interface RunwayStretch {
+  from: Point;
+  ux: number;
+  uy: number;
+  length: number;
+  halfWidth: number;
+}
+
+/** Every runway as straight stretches, between its ends as the scene draws it (its mapped centreline when the ends are unknown). */
+function runwayStretches(runways: Runway[]): RunwayStretch[] {
+  return runways.flatMap((runway) => {
+    const line = runway.ends.length >= 2 ? runway.ends.map((e): Point => [e.x, e.y]) : runway.centerline;
+    return line.slice(1).flatMap((to, i) => {
+      const from = line[i];
+      const length = Math.hypot(to[0] - from[0], to[1] - from[1]);
+      return length > 0 ? [{ from, ux: (to[0] - from[0]) / length, uy: (to[1] - from[1]) / length, length, halfWidth: runway.width / 2 }] : [];
+    });
+  });
+}
+
+/**
+ * Every taxiway, cut into runs that are wholly minor or wholly major. A segment is on an apron when its
+ * midpoint is. Every segment is kept except those lying along a runway: drawn there, a taxiway would
+ * cover the runway it shares, and its centre lights would double the runway's.
+ */
+export function taxiwayRuns(map: Pick<AirportMap, "taxiways" | "aprons" | "runways">): TaxiwayRun[] {
   const aprons = map.aprons.map((a) => {
     let minX = Infinity;
     let maxX = -Infinity;
@@ -247,17 +289,19 @@ export function taxiwayRuns(map: Pick<AirportMap, "taxiways" | "aprons">): Taxiw
   });
   const onApron = (x: number, y: number) => aprons.some((a) => x >= a.minX && x <= a.maxX && y >= a.minY && y <= a.maxY && inPolygon(x, y, a.rings));
 
+  const runways = runwayStretches(map.runways);
   const runs: TaxiwayRun[] = [];
   for (const t of map.taxiways) {
-    if (t.kind === "taxilane" || t.ref === null) {
-      runs.push({ ref: t.ref, line: t.line, width: t.width, minor: true });
-      continue;
-    }
+    const alwaysMinor = t.kind === "taxilane" || t.ref === null;
     let current: TaxiwayRun | null = null;
     for (let i = 1; i < t.line.length; i++) {
       const [ax, ay] = t.line[i - 1];
       const [bx, by] = t.line[i];
-      const minor = onApron((ax + bx) / 2, (ay + by) / 2);
+      if (liesAlongRunway(runways, t.line[i - 1], t.line[i])) {
+        current = null;
+        continue;
+      }
+      const minor = alwaysMinor || onApron((ax + bx) / 2, (ay + by) / 2);
       if (current && current.minor === minor) current.line.push(t.line[i]);
       else {
         current = { ref: t.ref, line: [t.line[i - 1], t.line[i]], width: t.width, minor };

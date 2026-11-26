@@ -11,31 +11,15 @@
  */
 
 import { launchChrome } from "./lib/chrome.mjs";
-import { waitForTruthy } from "./smoke-journey-procedures.mjs";
+import { fiber, selectOnMap, sleep, waitForTruthy } from "./lib/page.mjs";
 
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-
-const FIBER = (test, from = "main", ref = false) => `(() => {
-  const el = document.querySelector(${JSON.stringify(from)});
-  const key = el && Object.keys(el).find((k) => k.startsWith("__reactFiber$"));
-  if (!key) return null;
-  for (let f = el[key]; f; f = f.return) {
-    for (let h = f.memoizedState; h; h = h.next) {
-      const c = h.memoizedState && h.memoizedState.current;
-      if (c && ${test}) return ${ref ? "h.memoizedState" : "c"};
-    }
-  }
-  return null;
-})()`;
-/** The map's instance. */
-const GLOBE = FIBER(`c.map && typeof c.map.project === "function" && c.drawn`);
 /** The journey, or null with none. */
-const JOURNEY = FIBER(`typeof c === "object" && typeof c.stage === "string" && typeof c.hex === "string" && c.origin`);
+const JOURNEY = fiber(`typeof c.stage === "string" && typeof c.hex === "string" && c.origin`);
 /** The diorama's follow (the aircraft its camera follows), or null; it lives in the Viewer, below `main`, so it is found from the model's own element. */
 const FOLLOW_TEST = `typeof c === "object" && typeof c.id === "string" && typeof c.distance === "number" && "angle" in c`;
-const FOLLOW = FIBER(FOLLOW_TEST, "[role='application']");
+const FOLLOW = fiber(FOLLOW_TEST, { from: "[role='application']" });
 /** The same, as the ref that holds it, so a check can clear it. */
-const FOLLOW_REF = FIBER(FOLLOW_TEST, "[role='application']", true);
+const FOLLOW_REF = fiber(FOLLOW_TEST, { from: "[role='application']", ref: true });
 /** What the page shows of the flight: the diorama's selected card, the map's followed card, and the journey panel. */
 const SHOWN = `(() => {
   const text = (s) => { const e = document.querySelector(s); return e ? e.innerText.replace(/\\s+/g, " ") : null; };
@@ -70,14 +54,9 @@ async function handIntoTheAirportOnShow({ browser, base, check }) {
   await page.route("**/api/weather/atl", (r) => r.fulfill({ json: { station: "KATL", raw: "", wind: { directionDeg: 270, speedKt: 8, gustKt: null, variable: false, range: null } } }));
   await page.goto(`${base}/?fixture=1#map=7/33.6/-84.4`);
   await page.locator("main[data-on-map]").waitFor({ timeout: 60_000 });
-  let at = null;
-  for (let i = 0; i < 120 && !at; i++) {
-    at = await page.evaluate(`(() => { const g = ${GLOBE}; const f = g && g.drawn.find((x) => x.properties.id === "${HEX}"); if (!f) return null; const p = g.map.project(f.geometry.coordinates); return { x: p.x, y: p.y }; })()`);
-    if (!at) await sleep(500);
-  }
-  // The map keeps the recorded route it learns first for the flight; this one has none, as a flight first met on the map often has.
-  await page.evaluate(`(() => { const g = ${GLOBE}; g.routes.delete("${CALLSIGN}"); })()`);
-  if (at) await page.mouse.click(at.x, at.y);
+  // Selected with no route: the map keeps the recorded route it learns first for the flight, and this one has
+  // none, as a flight first met on the map often has.
+  await selectOnMap(page, HEX, { forgetRoute: CALLSIGN });
   await page.locator("section[aria-label^='Selected flight']").locator("visible=true").waitFor({ timeout: 15_000 }).catch(() => {});
   await page.getByRole("button", { name: "Follow this flight" }).locator("visible=true").first().click();
   // From the first frame the diorama shows (the hand's first half), until it has the flight in its own feed (it never will here), its card is not another flight's.

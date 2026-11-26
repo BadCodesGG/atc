@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { finiteCamera, groundView, liftView, type MapCamera, mapHashCamera, mapToOrbit, orbitToMap, paddingFor, seenOnGround, withoutBadMapHash, worldFloor } from "./camera";
+import { finiteCamera, groundView, liftView, type MapCamera, mapHashCamera, mapToOrbit, MAX_PITCH, orbitToMap, paddingFor, seenOnGround, shotBounds, viewArea, withoutBadMapHash, worldFloor } from "./camera";
 
 const equator = { latitude: 0, longitude: 0 };
 const atl = { latitude: 33.6367, longitude: -84.4281 };
@@ -132,6 +132,14 @@ describe("a frame with no size, and the address's map camera", () => {
     expect(withoutBadMapHash("#map=6/33.6/-84.4/30/50")).toBe("#map=6/33.6/-84.4/30/50");
   });
 
+  it("names no camera for a tilt past the map's own limit (MAX_PITCH), which the map would refuse and open on the world instead", () => {
+    // An En-route 3D camera's own view, as an address made before the address carried the journey's flat shot.
+    expect(mapHashCamera("#map=15.6/33.7/-85.454916/-90/90")).toBeNull();
+    expect(mapHashCamera(`#map=9/33.7/-85.4/0/${MAX_PITCH}`)).toEqual({ zoom: 9, lat: 33.7, lng: -85.4, bearing: 0, pitch: MAX_PITCH });
+    expect(mapHashCamera(`#map=9/33.7/-85.4/0/${MAX_PITCH + 1}`)).toBeNull();
+    expect(withoutBadMapHash("#map=15.6/33.7/-85.454916/-90/90&x=1")).toBe("#x=1");
+  });
+
   it("lets a camera through only when all of it is finite", () => {
     expect(finiteCamera({ lng: 1, lat: 2, zoom: 3, bearing: 4, pitch: 5 })).toBe(true);
     expect(finiteCamera({ lng: 1, lat: 2, zoom: Number.NaN, bearing: 4, pitch: 5 })).toBe(false);
@@ -156,5 +164,71 @@ describe("seenOnGround", () => {
 
   it("leaves a point on the ground where it is", () => {
     expect(seenOnGround(view, [123, 456], 0)).toEqual([123, 456]);
+  });
+});
+
+describe("shotBounds", () => {
+  const frame = { width: 1280, height: 900, fovDeg: 36.87 };
+  const none = { top: 0, bottom: 0, left: 0, right: 0 };
+  const shot: MapCamera = { lng: -84.4281, lat: 33.6367, zoom: 9, bearing: 30, pitch: 40 };
+  const inside = (b: { west: number; east: number; south: number; north: number }, lng: number, lat: number) => lng >= b.west && lng <= b.east && lat >= b.south && lat <= b.north;
+
+  it("spans the frame's width and height at the map's scale, looking straight down", () => {
+    // Zoom 0 is a 512 px world, so a 1280 px frame at zoom 2 spans 1280 / 2048 of the 360 degrees round.
+    const b = shotBounds({ lng: 0, lat: 0, zoom: 2, bearing: 0, pitch: 0 }, frame, none);
+    expect(b.east - b.west).toBeCloseTo((1280 / 2048) * 360, 6);
+    expect(b.west).toBeCloseTo(-b.east, 6);
+    expect(b.north).toBeCloseTo(-b.south, 6);
+  });
+
+  it("holds the flight it frames, padded or not", () => {
+    expect(inside(shotBounds(shot, frame, none), shot.lng, shot.lat)).toBe(true);
+    expect(inside(shotBounds(shot, frame, { top: 0, bottom: 0, left: 600, right: 0 }), shot.lng, shot.lat)).toBe(true);
+  });
+
+  it("holds an aircraft about 10 km off and not one 500 km off", () => {
+    const b = shotBounds(shot, frame, none);
+    expect(inside(b, shot.lng + 0.06, shot.lat + 0.05)).toBe(true);
+    expect(inside(b, shot.lng + 5, shot.lat + 2)).toBe(false);
+  });
+
+  it("is a real, finite area at any pitch, straight at the horizon included", () => {
+    for (const pitch of [0, 60, 78, 90, 110]) {
+      const b = shotBounds({ ...shot, pitch }, frame, none);
+      expect([b.west, b.east, b.south, b.north].every(Number.isFinite)).toBe(true);
+      expect(b.east - b.west).toBeGreaterThan(0.01);
+      expect(b.north - b.south).toBeGreaterThan(0.01);
+      expect(inside(b, shot.lng, shot.lat)).toBe(true);
+    }
+  });
+});
+
+describe("viewArea", () => {
+  const frame = { width: 1280, height: 900, fovDeg: 36.87 };
+  const padding = { top: 0, bottom: 0, left: 0, right: 0 };
+  const shot: MapCamera = { lng: -85.42, lat: 33.7, zoom: 9, bearing: 0, pitch: 0 };
+  const near = { lng: -85.33, lat: 33.72 };
+  const far = { lng: -80, lat: 36 };
+  const inside = (b: { west: number; east: number; south: number; north: number }, p: { lng: number; lat: number }) => p.lng >= b.west && p.lng <= b.east && p.lat >= b.south && p.lat <= b.north;
+
+  it("is the map's own bounds, unchanged, on Map", () => {
+    const own = { west: -86, east: -85, south: 33, north: 34 };
+    expect(viewArea(own, null)).toBe(own);
+  });
+
+  it("is the journey's flat shot in every 3D camera, whatever the map's own bounds are", () => {
+    // Cockpit and Side at pitch 90 report a point; Chase and Top a small or odd area down the line of sight.
+    const owns = [
+      { west: -85.42, east: -85.42, south: 33.7, north: 33.7 },
+      { west: -85.5, east: -85.41, south: 33.69, north: 33.75 },
+      { west: -84, east: -83.5, south: 34, north: 34.2 },
+    ];
+    const areas = owns.map((own) => viewArea(own, { camera: shot, frame, padding }));
+    for (const a of areas) {
+      expect(a).toEqual(areas[0]);
+      expect(a.east - a.west).toBeGreaterThan(0.01);
+      expect(inside(a, near)).toBe(true);
+      expect(inside(a, far)).toBe(false);
+    }
   });
 });

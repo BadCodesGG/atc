@@ -17,7 +17,15 @@ import { journeyProcedureChecks } from "./smoke-journey-procedures.mjs";
 import { mapSelectChecks } from "./smoke-map-select.mjs";
 import { procedureChecks } from "./smoke-procedures.mjs";
 import { remoteFlightChecks } from "./smoke-remote-flight.mjs";
+import { runwayVisibleChecks } from "./smoke-runway-visible.mjs";
 import { titleRowChecks, titleRowPointerChecks } from "./smoke-title-row.mjs";
+import { wideColumnChecks } from "./smoke-wide-column.mjs";
+import { trackerMotionChecks } from "./smoke-tracker-motion.mjs";
+import { sharedTrackerChecks } from "./smoke-shared-tracker.mjs";
+import { enRouteChaseChecks } from "./smoke-en-route-chase.mjs";
+import { enRouteCameraChecks } from "./smoke-en-route-cameras.mjs";
+import { enRouteJourneyChecks } from "./smoke-en-route-journey.mjs";
+import { airportPickChecks } from "./smoke-airport-pick.mjs";
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
 const PORT = Number(process.env.SMOKE_PORT ?? 3119);
@@ -53,8 +61,20 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
  */
 const GL_DRIVER_NOTE = /^\[\.WebGL-0x[0-9a-f]+\]GL Driver Message \(OpenGL, Performance, /;
 
-/** A console message that counts against a clean console: an error or a warning, but for the driver's performance notes. */
-const isConsoleProblem = (m) => (m.type() === "error" || m.type() === "warning") && !GL_DRIVER_NOTE.test(m.text());
+/**
+ * A blit the software GPU (ANGLE on SwiftShader, Chrome 158.0.8127.38, November 2026) rejects now and then:
+ * "[.WebGL-0x…] GL_INVALID_OPERATION: glBlitFramebuffer: Blit feedback loop: the read and draw framebuffers
+ * are the same.", reported as a warning. It is rare and predates the en-route work: once in a full smoke run
+ * on ticket/23, once in 10 loops of the share steps on origin/main (on the DFW Diorama), none in 10 such loops
+ * on ticket/23. A probe on the page's own blitFramebuffer (three.js's MSAA resolve, 20 to 25 a page) found
+ * the read and draw bindings the same, or a GL error after the blit, in none of 70 loops; the message never
+ * came while the probe was in, so the blit is attributed to Chrome, not proven to be Chrome's. Only this
+ * exact message is let through; any other GL error still counts.
+ */
+const GL_BLIT_FEEDBACK = /^\[\.WebGL-0x[0-9a-f]+\] GL_INVALID_OPERATION: glBlitFramebuffer: Blit feedback loop: the read and draw framebuffers are the same\.$/;
+
+/** A console message that counts against a clean console: an error or a warning, but for the driver's performance notes and the blit message above. */
+const isConsoleProblem = (m) => (m.type() === "error" || m.type() === "warning") && !GL_DRIVER_NOTE.test(m.text()) && !GL_BLIT_FEEDBACK.test(m.text());
 
 async function waitFor(url, ms = 60_000) {
   const end = Date.now() + ms;
@@ -1107,6 +1127,9 @@ try {
   await titleRowChecks({ browser, base: BASE, check });
   await titleRowPointerChecks({ browser, base: BASE, check });
 
+  // A tall flight card in the wide column: the column scrolls as one to each tab's last row (scripts/smoke-wide-column.mjs).
+  await wideColumnChecks({ browser, base: BASE, check });
+
   // The published approach and climb-out paths, cited on the card (scripts/smoke-procedures.mjs).
   await procedureChecks({ browser, base: BASE, check });
   await remoteFlightChecks({ browser, base: BASE, check });
@@ -1119,6 +1142,27 @@ try {
 
   // The journey under what the live feed brings that the recording does not: a hand into the airport already on show, a quiet transponder, a feed that loses the aircraft (scripts/smoke-journey-live.mjs).
   await journeyLiveChecks({ browser, base: BASE, check });
+
+  // A small airport's runway, drawn clearly darker than its taxiways and the ground by day (scripts/smoke-runway-visible.mjs).
+  await runwayVisibleChecks({ browser, base: BASE, check });
+
+  // The Tracker's motion rules in the page's own frames: no aircraft steps back along its track or jumps as reads arrive (scripts/smoke-tracker-motion.mjs).
+  await trackerMotionChecks({ browser, base: BASE, check });
+
+  // The page's one tracker: the Diorama, the World map and the Journey draw a followed flight at the same place in a frame (scripts/smoke-shared-tracker.mjs).
+  await sharedTrackerChecks({ browser, base: BASE, check });
+
+  // The En-route view: a followed flight in Chase, with terrain and its model, and back to Map with the terrain gone (scripts/smoke-en-route-chase.mjs).
+  await enRouteChaseChecks({ browser, base: BASE, check });
+
+  // The En-route view's cameras: Chase, Cockpit, Side and Top by button and key, held across reads, and a drag that eases back (scripts/smoke-en-route-cameras.mjs).
+  await enRouteCameraChecks({ browser, base: BASE, check });
+
+  // The En-route view in the Journey: Chase from Atlanta's Diorama to Charlotte's Approach, the switch on phone and tablet, and the fallback to Map (scripts/smoke-en-route-journey.mjs).
+  await enRouteJourneyChecks({ browser, base: BASE, check });
+
+  // The header's airport picker with motion on: the map flies to the airport picked and lands there, never back to the one left (scripts/smoke-airport-pick.mjs).
+  await airportPickChecks({ base: BASE, check });
 } catch (error) {
   check("smoke run completed", false, String(error));
 } finally {

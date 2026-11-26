@@ -52,6 +52,31 @@ export function parseMapHash(hash: string): MapHash | null {
   return { zoom, lat, lng, bearing, pitch };
 }
 
+/**
+ * A map camera as the hash would carry it, rounded as MapLibre's own hash is (zoom to 2 places, the centre to 5,
+ * bearing and pitch to whole degrees): the journey's flat shot, shared from an En-route 3D camera, whose own
+ * hash looks past level and down its line of sight.
+ */
+export function mapHashOf(cam: MapHash): MapHash {
+  const round = (v: number, places: number) => Math.round(v * 10 ** places) / 10 ** places;
+  return { zoom: round(cam.zoom, 2), lat: round(cam.lat, 5), lng: round(cam.lng, 5), bearing: Math.round(cam.bearing), pitch: Math.round(cam.pitch) };
+}
+
+/**
+ * An address hash with the map's camera in it (rounded by mapHashOf): the `map=` part replaced, or added
+ * after the others, and every other part kept; the hash unchanged for a camera that is not all finite numbers.
+ * The map writes its address with it (globe-map.ts).
+ */
+export function withMapHash(hash: string, cam: MapHash): string {
+  if (!Object.values(cam).every(Number.isFinite)) return hash;
+  const map = formatMapHash(mapHashOf(cam)).slice(1);
+  const parts = hash.replace(/^#/, "").split("&").filter(Boolean);
+  const at = parts.findIndex((p) => p.startsWith("map="));
+  if (at >= 0) parts[at] = map;
+  else parts.push(map);
+  return `#${parts.join("&")}`;
+}
+
 /** The hash the map reads for a view: bearing and pitch only when they are not nothing. */
 export function formatMapHash(h: MapHash): string {
   const tail = h.pitch !== 0 ? `/${h.bearing}/${h.pitch}` : h.bearing !== 0 ? `/${h.bearing}` : "";
