@@ -155,7 +155,8 @@ async function gateToGate({ browser, base, check }) {
     check("en-route journey: arriving, Chase eases into the journey's own flat shot, terrain off, before the Handover into Charlotte", last3D >= 0 && eased, `last 3D sample ${last3D} of ${onMap.length}; then ${before.length} flat samples; ${JSON.stringify(onMap[last3D])}`);
     // The ease is continuous: no frame-to-frame step in the tilt like the old snap back to Map (75 to 60 degrees
     // at once). Judged drawn frame to drawn frame, by the time between them on the ease's clock (judgeFrames):
-    // software GL draws slowly. That clock may run no faster than the page's own, or it would excuse a jump.
+    // software GL draws slowly. That clock may run no faster than the page's own, or it would excuse a jump; the
+    // page's time is read as each frame renders, which lags the frame's own time by up to a slow frame, hence the slack.
     const frames = await page.evaluate(() => window.__enRouteFrames);
     const from = onMap[Math.max(0, takeover - 1)]?.t ?? Infinity;
     const ridden = frames.filter((f) => f.t >= from && f.t <= (onMap.at(-1)?.t ?? 0));
@@ -168,7 +169,7 @@ async function gateToGate({ browser, base, check }) {
       `frames ${j.from} and ${j.to} of ${ridden.length}, by sample ${sampleNear(ridden[j.to])} of ${onMap.length}: ${degrees(j.step)} degrees against ${degrees(j.bound)} (${TILT_STEP_DEG} flat under ${Math.round(j.shortGapMs)} ms), share moved ${j.moved.toFixed(3)} against the ease's ${j.pace.toFixed(3)} in ${Math.round(j.gapMs)} ms: ${JSON.stringify([ridden[j.from], ridden[j.to]])}`;
     check(
       `en-route journey: the camera's tilt never steps on the way (under ${TILT_STEP_DEG} degrees between drawn frames close together, else what the share's ease explains in the time between them)`,
-      judged.length > 0 && judged.every((j) => j.ok) && easeMs <= wallMs + 1000,
+      judged.length > 0 && judged.every((j) => j.ok) && easeMs <= wallMs * 1.05 + 2000,
       `${judged.length} pairs of ${ridden.length} drawn frames, the ease's clock ${Math.round(easeMs)} ms over ${Math.round(wallMs)} ms of the page's; ${worst ? `${worst.ok ? "largest" : worst.paced ? "tilt stepped" : "share outran its ease"}: ${describePair(worst)}` : `${frames.length} drawn frames recorded`}`,
     );
 
