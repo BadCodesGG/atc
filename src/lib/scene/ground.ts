@@ -227,11 +227,41 @@ export interface TaxiwayRun {
   minor: boolean;
 }
 
+/** A segment runs along a runway when the cosine of its angle to the runway's heading is at least this (within about 26 degrees). */
+const ALONG_RUNWAY_COS = 0.9;
+
 /**
- * Every taxiway, cut into runs that are wholly minor or wholly major, with every segment kept. A
- * segment is on an apron when its midpoint is.
+ * Whether the stretch a to b lies along a runway: both ends on that runway's pavement (within its half
+ * width of the centreline, between its ends) and running its way, as the lead-ons and back-taxi
+ * stretches mappers draw on the centreline do. A taxiway crossing the runway does not.
  */
-export function taxiwayRuns(map: Pick<AirportMap, "taxiways" | "aprons">): TaxiwayRun[] {
+function alongRunway(runways: Runway[], a: Point, b: Point): boolean {
+  const len = Math.hypot(b[0] - a[0], b[1] - a[1]);
+  if (!(len > 0)) return false;
+  return runways.some((runway) => {
+    const line = runway.ends.length >= 2 ? runway.ends.map((e): Point => [e.x, e.y]) : runway.centerline;
+    for (let i = 1; i < line.length; i++) {
+      const [p, q] = [line[i - 1], line[i]];
+      const length = Math.hypot(q[0] - p[0], q[1] - p[1]);
+      if (!(length > 0)) continue;
+      const ux = (q[0] - p[0]) / length;
+      const uy = (q[1] - p[1]) / length;
+      const on = ([x, y]: Point) => {
+        const along = (x - p[0]) * ux + (y - p[1]) * uy;
+        return along >= 0 && along <= length && Math.abs(-(x - p[0]) * uy + (y - p[1]) * ux) <= runway.width / 2;
+      };
+      if (on(a) && on(b) && Math.abs((b[0] - a[0]) * ux + (b[1] - a[1]) * uy) / len >= ALONG_RUNWAY_COS) return true;
+    }
+    return false;
+  });
+}
+
+/**
+ * Every taxiway, cut into runs that are wholly minor or wholly major. A segment is on an apron when its
+ * midpoint is. Every segment is kept except those lying along a runway: drawn there, a taxiway would
+ * cover the runway it shares, and its centre lights would double the runway's.
+ */
+export function taxiwayRuns(map: Pick<AirportMap, "taxiways" | "aprons" | "runways">): TaxiwayRun[] {
   const aprons = map.aprons.map((a) => {
     let minX = Infinity;
     let maxX = -Infinity;
@@ -249,15 +279,16 @@ export function taxiwayRuns(map: Pick<AirportMap, "taxiways" | "aprons">): Taxiw
 
   const runs: TaxiwayRun[] = [];
   for (const t of map.taxiways) {
-    if (t.kind === "taxilane" || t.ref === null) {
-      runs.push({ ref: t.ref, line: t.line, width: t.width, minor: true });
-      continue;
-    }
+    const alwaysMinor = t.kind === "taxilane" || t.ref === null;
     let current: TaxiwayRun | null = null;
     for (let i = 1; i < t.line.length; i++) {
       const [ax, ay] = t.line[i - 1];
       const [bx, by] = t.line[i];
-      const minor = onApron((ax + bx) / 2, (ay + by) / 2);
+      if (alongRunway(map.runways, t.line[i - 1], t.line[i])) {
+        current = null;
+        continue;
+      }
+      const minor = alwaysMinor || onApron((ax + bx) / 2, (ay + by) / 2);
       if (current && current.minor === minor) current.line.push(t.line[i]);
       else {
         current = { ref: t.ref, line: [t.line[i - 1], t.line[i]], width: t.width, minor };

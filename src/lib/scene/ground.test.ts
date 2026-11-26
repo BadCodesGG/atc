@@ -1,5 +1,7 @@
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { describe, expect, it } from "vitest";
-import type { Runway } from "../airport-map";
+import type { AirportMap, Point, Runway } from "../airport-map";
 import { extrude, fill, type MeshData, ribbons, runwayMarkings, taxiwayRuns } from "./ground";
 
 /** Total area of a mesh's triangles, square metres, computed independently of the builders. */
@@ -145,23 +147,23 @@ describe("taxiwayRuns", () => {
   const apron = { rings: [[[0, 0], [400, 0], [400, 400], [0, 400]]] as [number, number][][] };
 
   it("keeps a taxiway off the aprons as one major run", () => {
-    const runs = taxiwayRuns({ taxiways: [{ ref: "A", width: 23, kind: "taxiway", line: [[-500, -100], [-100, -100], [-100, 600]] }], aprons: [apron] });
+    const runs = taxiwayRuns({ taxiways: [{ ref: "A", width: 23, kind: "taxiway", line: [[-500, -100], [-100, -100], [-100, 600]] }], aprons: [apron], runways: [] });
     expect(runs).toEqual([{ ref: "A", line: [[-500, -100], [-100, -100], [-100, 600]], width: 23, minor: false }]);
   });
 
   it("marks every mapped taxilane minor", () => {
-    const runs = taxiwayRuns({ taxiways: [{ ref: null, width: 15, kind: "taxilane", line: [[-500, -100], [-100, -100]] }], aprons: [] });
+    const runs = taxiwayRuns({ taxiways: [{ ref: null, width: 15, kind: "taxilane", line: [[-500, -100], [-100, -100]] }], aprons: [], runways: [] });
     expect(runs).toEqual([{ ref: null, line: [[-500, -100], [-100, -100]], width: 15, minor: true }]);
   });
 
   it("marks a taxiway mapped without a designator minor: the connectors and lanes the charts do not name", () => {
-    const runs = taxiwayRuns({ taxiways: [{ ref: null, width: 23, kind: "taxiway", line: [[-500, -100], [-100, -100]] }], aprons: [] });
+    const runs = taxiwayRuns({ taxiways: [{ ref: null, width: 23, kind: "taxiway", line: [[-500, -100], [-100, -100]] }], aprons: [], runways: [] });
     expect(runs.map((r) => r.minor)).toEqual([true]);
   });
 
   it("splits a taxiway where it runs across an apron, without losing any of its geometry", () => {
     const line: [number, number][] = [[-200, 200], [100, 200], [300, 200], [600, 200]];
-    const runs = taxiwayRuns({ taxiways: [{ ref: "B", width: 23, kind: "taxiway", line }], aprons: [apron] });
+    const runs = taxiwayRuns({ taxiways: [{ ref: "B", width: 23, kind: "taxiway", line }], aprons: [apron], runways: [] });
     expect(runs.map((r) => r.minor)).toEqual([false, true, false]);
     expect(runs.map((r) => r.line)).toEqual([
       [[-200, 200], [100, 200]],
@@ -172,7 +174,81 @@ describe("taxiwayRuns", () => {
 
   it("treats a hole in an apron as off it", () => {
     const holed = { rings: [...apron.rings, [[100, 100], [300, 100], [300, 300], [100, 300]]] as [number, number][][] };
-    const runs = taxiwayRuns({ taxiways: [{ ref: "C", width: 23, kind: "taxiway", line: [[150, 200], [250, 200]] }], aprons: [holed] });
+    const runs = taxiwayRuns({ taxiways: [{ ref: "C", width: 23, kind: "taxiway", line: [[150, 200], [250, 200]] }], aprons: [holed], runways: [] });
     expect(runs[0].minor).toBe(false);
+  });
+
+  describe("on a runway", () => {
+    const runway: Runway = { ref: "09/27", width: 45, surface: "asphalt", centerline: [[0, 0], [2000, 0]], ends: [{ ref: "09", x: 0, y: 0 }, { ref: "27", x: 2000, y: 0 }] };
+
+    it("drops the stretch of a taxiway mapped along the runway's centreline, and keeps the rest of it", () => {
+      // Lead-on at the 09 end, along the runway for 300 m, then off to the north.
+      const line: [number, number][] = [[50, 0], [350, 0], [450, 200], [450, 400]];
+      const runs = taxiwayRuns({ taxiways: [{ ref: "A", width: 23, kind: "taxiway", line }], aprons: [], runways: [runway] });
+      expect(runs.map((r) => r.line)).toEqual([[[350, 0], [450, 200], [450, 400]]]);
+    });
+
+    it("drops it for a taxilane and an unnamed connector too", () => {
+      const taxiways = [
+        { ref: null, width: 15, kind: "taxilane" as const, line: [[100, 5], [600, -5]] as [number, number][] },
+        { ref: null, width: 23, kind: "taxiway" as const, line: [[700, 0], [900, 0], [900, -300]] as [number, number][] },
+      ];
+      const runs = taxiwayRuns({ taxiways, aprons: [], runways: [runway] });
+      expect(runs).toEqual([{ ref: null, line: [[900, 0], [900, -300]], width: 23, minor: true }]);
+    });
+
+    it("keeps a taxiway that crosses the runway, and a parallel taxiway off its pavement", () => {
+      const taxiways = [
+        { ref: "B", width: 23, kind: "taxiway" as const, line: [[1000, -200], [1000, 200]] as [number, number][] },
+        { ref: "C", width: 23, kind: "taxiway" as const, line: [[0, 120], [2000, 120]] as [number, number][] },
+      ];
+      const runs = taxiwayRuns({ taxiways, aprons: [], runways: [runway] });
+      expect(runs.map((r) => r.ref)).toEqual(["B", "C"]);
+      expect(runs.map((r) => r.line)).toEqual(taxiways.map((t) => t.line));
+    });
+
+    it("keeps a taxiway in line with the runway but past its end", () => {
+      const runs = taxiwayRuns({ taxiways: [{ ref: "D", width: 23, kind: "taxiway", line: [[2100, 0], [2400, 0]] }], aprons: [], runways: [runway] });
+      expect(runs).toHaveLength(1);
+    });
+  });
+});
+
+describe("taxiwayRuns at Pittsburgh-Butler (BTP)", () => {
+  const btp = JSON.parse(readFileSync(path.join(import.meta.dirname, "../../data/airports/btp.json"), "utf8")) as AirportMap;
+  const runway = btp.runways.find((r) => r.ref === "08/26")!;
+  const [e0, e1] = runway.ends;
+  const length = Math.hypot(e1.x - e0.x, e1.y - e0.y);
+  const [ux, uy] = [(e1.x - e0.x) / length, (e1.y - e0.y) / length];
+  /** Distance off the 08/26 centreline, and distance along it from the 08 end. */
+  const across = ([x, y]: Point) => Math.abs(-(x - e0.x) * uy + (y - e0.y) * ux);
+  const along = ([x, y]: Point) => (x - e0.x) * ux + (y - e0.y) * uy;
+  const segments = (line: Point[]) => line.slice(1).map((b, i) => [line[i], b] as const);
+  const runs = taxiwayRuns(btp);
+
+  it("draws no taxiway ribbon along the 08/26 centreline", () => {
+    const along0826 = runs.flatMap((r) =>
+      segments(r.line).filter(([a, b]) => {
+        const len = Math.hypot(b[0] - a[0], b[1] - a[1]);
+        const parallel = Math.abs((b[0] - a[0]) * ux + (b[1] - a[1]) * uy) / len > 0.9;
+        const onPavement = [a, b].every((p) => across(p) < runway.width / 2 && along(p) > 0 && along(p) < length);
+        return parallel && onPavement;
+      }),
+    );
+    expect(along0826).toEqual([]);
+  });
+
+  it("keeps taxiway A's parallel stretch and every other taxiway off the runway", () => {
+    const drawn = new Set(runs.flatMap((r) => segments(r.line).map(([a, b]) => JSON.stringify([a, b]))));
+    // Every mapped stretch that is not on the runway's pavement is still drawn.
+    for (const t of btp.taxiways) {
+      for (const [a, b] of segments(t.line)) {
+        if (across(a) > runway.width && across(b) > runway.width) expect(drawn.has(JSON.stringify([a, b])), `${t.ref ?? "unnamed"} ${JSON.stringify([a, b])}`).toBe(true);
+      }
+    }
+    const a = runs.filter((r) => r.ref === "A");
+    const aLength = a.flatMap((r) => segments(r.line)).reduce((s, [p, q]) => s + Math.hypot(q[0] - p[0], q[1] - p[1]), 0);
+    expect(aLength).toBeGreaterThan(1200);
+    expect(new Set(runs.map((r) => r.ref))).toEqual(new Set(["A", "B", "C", "D", "E", null]));
   });
 });

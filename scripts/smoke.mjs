@@ -17,6 +17,7 @@ import { journeyProcedureChecks } from "./smoke-journey-procedures.mjs";
 import { mapSelectChecks } from "./smoke-map-select.mjs";
 import { procedureChecks } from "./smoke-procedures.mjs";
 import { remoteFlightChecks } from "./smoke-remote-flight.mjs";
+import { runwayVisibleChecks } from "./smoke-runway-visible.mjs";
 import { titleRowChecks, titleRowPointerChecks } from "./smoke-title-row.mjs";
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -1119,6 +1120,9 @@ try {
 
   // The journey under what the live feed brings that the recording does not: a hand into the airport already on show, a quiet transponder, a feed that loses the aircraft (scripts/smoke-journey-live.mjs).
   await journeyLiveChecks({ browser, base: BASE, check });
+
+  // A small airport's runway, drawn clearly darker than its taxiways and the ground by day (scripts/smoke-runway-visible.mjs).
+  await runwayVisibleChecks({ browser, base: BASE, check });
 } catch (error) {
   check("smoke run completed", false, String(error));
 } finally {
