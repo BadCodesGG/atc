@@ -39,7 +39,7 @@ import { PLAYBACK_DELAY } from "@/lib/tracker";
 import type { TrafficSnapshot } from "@/lib/traffic";
 import type { FlightCard as FlightCardData, TrafficEntry, TrafficView } from "@/lib/traffic-view";
 import type { OpsView, PathPulse } from "@/lib/path-pulse";
-import { CameraMenu, CameraSwitch, COLUMN_BESIDE, ColumnPanel, Counts, DataCredit, ESTIMATES_NOTE, FlightCard, Header, JourneyCard, Legend, MapStyleMenu, PHONE, RadarToggle, Search, SideColumn, STACKED, ThemeSwitch, TimeBar, type TimeBarReplay, useMedia, useTrafficReadout, ViewControls, WeatherReadout, WIDE } from "./chrome";
+import { CameraMenu, CameraSwitch, COLUMN_BESIDE, ColumnPanel, Counts, DataCredit, ESTIMATES_NOTE, FLIGHT_CARD, FlightCard, Header, JourneyCard, Legend, MapStyleMenu, PHONE, RadarToggle, Search, SideColumn, STACKED, ThemeSwitch, TimeBar, type TimeBarReplay, useMedia, useTrafficReadout, ViewControls, WeatherReadout, WIDE } from "./chrome";
 import { FilterControl } from "./filter-control";
 import { isTypingTarget } from "./search-box";
 import { ShareControl } from "./share-control";
@@ -445,14 +445,14 @@ export function AtcApp({ initialTheme, initialAirport, initialFilters }: { initi
     journeyHexRef.current = flight.hex;
     const generation = journeyGeneration.current;
     void Promise.all([source(), sky()])
-      .then(([s, k]) => {
+      .then(([feedSource, sharedSky]) => {
       if (generation !== journeyGeneration.current) return;
-      const j = new Journey(s, flight, k);
+      const j = new Journey(feedSource, flight, sharedSky);
       journeyRef.current = j;
       // The panel's figures, four times a second, timed by the feed's clock (the fixture's runs fast).
       ready?.();
       const refresh = () => setJourney((prev) => {
-        const next = j.status(j.clock() * 1000);
+        const next = j.status(sharedSky.clock() * 1000);
         return JSON.stringify(prev) === JSON.stringify(next) ? prev : next;
       });
       journeyRefresh.current = refresh;
@@ -536,14 +536,14 @@ export function AtcApp({ initialTheme, initialAirport, initialFilters }: { initi
       if (!fixture) {
         const made = globe;
         void sky()
-          .then((k) => {
-            if (!stopped) made.setSky(k);
+          .then((sharedSky) => {
+            if (!stopped) made.setSky(sharedSky);
           })
           .catch((error: unknown) => console.error("atc: the map's sky failed to start", error));
       }
       globe.setFilters(filtersRef.current);
       globe.setSelectionListener(setMapFlight);
-      globe.setCardRect(() => mapCardRef.current?.querySelector("section[aria-label^='Selected flight']")?.getBoundingClientRect() ?? null);
+      globe.setCardRect(() => mapCardRef.current?.querySelector(FLIGHT_CARD)?.getBoundingClientRect() ?? null);
       // On a phone the followed flight and its approach are kept between the journey's card and the controls at the foot.
       globe.setFrameBand(() =>
         window.matchMedia(WIDE).matches
@@ -1204,8 +1204,8 @@ function Viewer({ airport, theme, onTheme, onAirport, filters, onFilters, focusP
       // A frozen recording (`?fixture=1`, `?fixture=sequence`) is a moment of its own, on a clock that stands
       // still: it keeps a tracker of its own. Everything else is on the feed's clock, in the page's one tracker,
       // which this airport's feed fills and its diorama reads (only the aircraft its feed lists, in its metres).
-      const frozen = fixture === "1" || fixture === "sequence";
-      const shared = frozen ? null : await sky();
+      const frozenRecording = fixture === "1" || fixture === "sequence";
+      const shared = frozenRecording ? null : await sky();
       if (stopped) return;
       const tracker: TrafficFeed = shared ? shared.airport(airport.code, airport) : new Tracker();
       const view = new TrafficView(map, airport);
@@ -1236,8 +1236,8 @@ function Viewer({ airport, theme, onTheme, onAirport, filters, onFilters, focusP
           tracker.add(recorded.snapshot);
           addRoutes(recorded.routes);
         } else notice = NO_FIXTURE_TRAFFIC;
-        const frozen = fixtureTime(recorded?.snapshot ?? parseTraffic((await import("@/lib/__fixtures__/adsblol_atl.json")).default, atlanta));
-        clock = () => frozen;
+        const frozenAt = fixtureTime(recorded?.snapshot ?? parseTraffic((await import("@/lib/__fixtures__/adsblol_atl.json")).default, atlanta));
+        clock = () => frozenAt;
         // replay
       } else if (fixture === "sequence") {
         // A recorded stretch of live traffic, loaded as if the page had been open all through it; the clock stops at its end.
@@ -1254,8 +1254,8 @@ function Viewer({ airport, theme, onTheme, onAirport, filters, onFilters, focusP
           }
           addRoutes((await import("@/lib/__fixtures__/routes_atl.json")).default);
         }
-        const frozen = fixtureTime(snapshots.at(-1)!);
-        clock = () => frozen;
+        const frozenAt = fixtureTime(snapshots.at(-1)!);
+        clock = () => frozenAt;
         // /replay
       } else {
         // The live feed, or `?fixture=journey`'s recording standing in for the network: the same code reads both.
@@ -1310,7 +1310,7 @@ function Viewer({ airport, theme, onTheme, onAirport, filters, onFilters, focusP
         stopPoll = feed.every(POLL_MS / 1000, load);
       }
       // The fixtures hold their traffic from the start; the live feed (and the journey's recording) is heard from its first answer, above.
-      if (frozen) setHeard(true);
+      if (frozenRecording) setHeard(true);
       if (!stopped) setTraffic({ map, tracker, view, clock, replay, replayView, sequence, notice });
     })().catch((error: unknown) => {
       console.error("atc: traffic failed to start", error);
@@ -1466,7 +1466,7 @@ function Viewer({ airport, theme, onTheme, onAirport, filters, onFilters, focusP
         const column = columnRef.current;
         if (column?.querySelector("[data-open=true]")) return null;
         const tabs = column?.querySelector("[role=tablist]")?.getBoundingClientRect();
-        const card = column?.querySelector("section[aria-label^='Selected flight']")?.getBoundingClientRect();
+        const card = column?.querySelector(FLIGHT_CARD)?.getBoundingClientRect();
         const foot = column?.getBoundingClientRect();
         if (!tabs || !foot || tabs.height === 0) return { left: 0, top: 0, right: width, bottom: height };
         const bottom = card && card.height > 0 ? card.top : foot.bottom;
@@ -1612,9 +1612,9 @@ function Viewer({ airport, theme, onTheme, onAirport, filters, onFilters, focusP
               followRef.current = { id: j.hex, distance: aimed.distance, angle: { azimuthDeg: aimed.azimuthDeg, elevationDeg: aimed.elevationDeg } };
               pickedRef.current = j.hex;
               // Ridden in a 3D camera, the flight is taken up in the destination's Approach camera when it has one for it, else in Orbit.
-              const rode = globe.enRouteCamera !== "map";
+              const ridden3D = globe.enRouteCamera !== "map";
               actionsRef.current.journeyLanded();
-              if (rode) actionsRef.current.chooseCamera(arrivalCamera(cameraModes(map, { runway: entry.situation.runway, state: entry.situation.state })));
+              if (ridden3D) actionsRef.current.chooseCamera(arrivalCamera(cameraModes(map, { runway: entry.situation.runway, state: entry.situation.state })));
               actionsRef.current.setLead("scene");
               refreshRef.current = true;
               stage.style.opacity = "1";
