@@ -161,21 +161,39 @@ export async function enRouteCameraChecks({ browser, base, check }) {
   // A drag peeks round the aircraft and eases back on release; it neither ends the journey nor changes the camera.
   const box = await page.evaluate(`(() => { const r = ${GLOBE}.map.getContainer().getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
   const start = { x: box.x - 250, y: box.y + 120 };
+  /** The camera while a drag is held, once `turned` holds or after 6 s: software GL draws Side about once a second, so the drag's turn shows on the next frame, not at once. */
+  const heldTurn = async (turned) => {
+    await sleep(600);
+    let s = await page.evaluate(CAMERA);
+    for (let i = 0; i < 11 && !turned(s); i++) {
+      await sleep(500);
+      s = await page.evaluate(CAMERA);
+    }
+    return s;
+  };
   await page.mouse.move(start.x, start.y);
   await page.mouse.down();
   // Right and down: the bearing turns and the camera tilts down toward the aircraft.
   for (let i = 1; i <= 10; i++) await page.mouse.move(start.x + i * 20, start.y + i * 6);
-  await sleep(600);
-  const dragged = await page.evaluate(CAMERA);
+  const dragged = await heldTurn((s) => Math.abs(turn(0, s.bearing)) > 40 && s.pitch < 82);
   const turned = Math.abs(turn(0, dragged.bearing));
   check("cameras: a mouse drag in Side turns and tilts the camera round the aircraft while held", turned > 40 && dragged.pitch < 82 && dragged.camera === "side", `bearing ${dragged.bearing.toFixed(1)} (${turned.toFixed(1)} off the framing), pitch ${dragged.pitch.toFixed(1)}`);
   await page.mouse.up();
-  /** Waits up to 8 s for Side's framing again: the ease back runs on the map's frames. */
+  /**
+   * Waits for Side's framing again, or for the camera to stop moving (unchanged for 3 s), at most 40 s: the
+   * ease back runs on the map's frames, and the smokes' software GL draws Side with its haze about one frame a
+   * second (1.1 s a frame, 0.6 s without the haze), so the ease takes about 14 s there (2.6 s on hardware GL).
+   */
   const easedBack = async () => {
+    const framedAgain = (s) => Math.abs(turn(0, s.bearing)) < 2 && Math.abs(s.pitch - 90) < 1.5;
+    const until = Date.now() + 40_000;
     let s = await page.evaluate(CAMERA);
-    for (let i = 0; i < 16 && (Math.abs(turn(0, s.bearing)) >= 2 || Math.abs(s.pitch - 90) >= 1.5); i++) {
+    let moved = Date.now();
+    while (!framedAgain(s) && Date.now() - moved < 3_000 && Date.now() < until) {
       await sleep(500);
-      s = await page.evaluate(CAMERA);
+      const next = await page.evaluate(CAMERA);
+      if (Math.abs(turn(s.bearing, next.bearing)) > 0.01 || Math.abs(next.pitch - s.pitch) > 0.01) moved = Date.now();
+      s = next;
     }
     return s;
   };
@@ -190,8 +208,7 @@ export async function enRouteCameraChecks({ browser, base, check }) {
     at("pointerdown", ${start.x}, ${start.y});
     for (let i = 1; i <= 10; i++) { at("pointermove", ${start.x} - i * 20, ${start.y}); await new Promise((r) => setTimeout(r, 16)); }
   })()`);
-  await sleep(600);
-  const touched = await page.evaluate(CAMERA);
+  const touched = await heldTurn((s) => turn(0, s.bearing) > 40);
   const touchTurn = turn(0, touched.bearing);
   check("cameras: a touch drag in Side turns the camera too (left drag, bearing up)", touchTurn > 40, `bearing ${touched.bearing.toFixed(1)}`);
   await page.evaluate(`(() => { ${GLOBE}.map.getCanvasContainer().dispatchEvent(new PointerEvent("pointerup", { pointerId: 7, pointerType: "touch", isPrimary: true, bubbles: true })); })()`);
