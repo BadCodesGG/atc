@@ -7,7 +7,7 @@ import type { RadarFrame } from "../radar";
 import type { FlightRoute } from "../routes";
 import type { OrbitView } from "../scene/orbit";
 import type { ThemeKey } from "../scene/theme";
-import { REGION_FEED, REGION_RECKON, type SharedSky } from "../shared-sky";
+import { REGION_LISTING, REGION_RECKON, type SharedSky } from "../shared-sky";
 import { PLAYBACK_DELAY, type TrackedAircraft, Tracker } from "../tracker";
 import { routeArcs } from "./arcs";
 import { toGeo, toLocal, type Origin } from "../geo";
@@ -982,7 +982,7 @@ export class GlobeMap {
     const snapshot = mergeRegions(read, MAP_ORIGIN);
     // The page's feed clock follows these answers too, and the fixes join the airport feed's and the journey's in the one tracker.
     shared.heard(snapshot.time);
-    shared.tracker.add(snapshot, { feed: REGION_FEED, reckon: REGION_RECKON });
+    shared.tracker.add(snapshot, REGION_LISTING);
   }
 
   /**

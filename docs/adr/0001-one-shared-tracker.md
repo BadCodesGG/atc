@@ -58,7 +58,9 @@ Two things stay outside the shared tracker on purpose: a frozen recording (`?fix
 `?fixture=sequence`, and the map's recorded regions in any fixture) is a moment of its own on a clock that
 stands still or starts at that moment, so it keeps a tracker of its own; and the Replayer that answers a
 rewind (10x, 30x) rebuilds its own tracker from the history, 30 s behind its own clock, because it knows
-what came next. Both play back at the same 12 s.
+what came next. Neither moves the picture off 12 s: a recording is drawn 12 s behind its own moment, and
+the Replayer's picture is the live clock less the same 12 s, its 30 s being only how far ahead in the
+history it reads.
 
 ## Consequences
 

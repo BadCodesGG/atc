@@ -11,7 +11,7 @@ import { type JourneyEnd, journeyEnd, journeyProgress, type JourneyProgress, typ
 import type { FlightRoute } from "./routes";
 import { groundView, seenOnGround } from "./globe/camera";
 import type { OrbitView } from "./scene/orbit";
-import { HEX_RECKON, hexFeed, SharedSky } from "./shared-sky";
+import { hexListing, SharedSky } from "./shared-sky";
 import { PLAYBACK_DELAY } from "./tracker";
 
 /**
@@ -550,7 +550,7 @@ export class Journey {
       if (!body.aircraft) return;
       this.source.heard(body.time);
       this.firstSeen ??= { latitude: body.aircraft.latitude, longitude: body.aircraft.longitude };
-      this.sky.tracker.add(mergeRegions([{ cell: { latitude: 0, longitude: 0 }, time: body.time, aircraft: [body.aircraft] }], MAP_ORIGIN), { feed: hexFeed(this.hex), reckon: HEX_RECKON });
+      this.sky.tracker.add(mergeRegions([{ cell: { latitude: 0, longitude: 0 }, time: body.time, aircraft: [body.aircraft] }], MAP_ORIGIN), hexListing(this.hex));
       const a = body.aircraft;
       this.lastPosition = Math.max(this.lastPosition ?? -Infinity, body.time - (a.positionAgeS ?? 0));
       const fix: JourneyFix = { latitude: a.latitude, longitude: a.longitude, altitudeFt: a.altitudeFt ?? 0, onGround: a.onGround, groundSpeedKt: a.groundSpeedKt, headingDeg: a.trackDeg ?? 0, verticalRateFpm: a.verticalRateFpm, callsign: a.callsign, typeCode: a.typeCode };

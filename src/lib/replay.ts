@@ -1,6 +1,7 @@
 import { History } from "./history";
 import { type GroundWays, type TrailHead, TrailFeed, type TrailUpdate } from "./timelapse";
 import { DEAD_RECKON_MAX, FADE_IN, FADE_OUT, PLAYBACK_DELAY, type TrackedAircraft, Tracker } from "./tracker";
+import type { TrafficFeed } from "./shared-sky";
 import type { TrafficSnapshot } from "./traffic";
 
 /**
@@ -135,7 +136,7 @@ export class Replay {
 
   constructor(
     /** The live picture: the airport's feed of the page's tracker, in the airport's metres. */
-    private readonly live: Pick<Tracker, "at">,
+    private readonly live: Pick<TrafficFeed, "at">,
     {
       elevationFt,
       ground = null,

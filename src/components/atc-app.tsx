@@ -1235,7 +1235,7 @@ function Viewer({ airport, theme, onTheme, onAirport, filters, onFilters, focusP
         stopPoll = feed.every(POLL_MS / 1000, load);
       }
       // The fixtures hold their traffic from the start; the live feed (and the journey's recording) is heard from its first answer, above.
-      if (fixture === "1" || fixture === "sequence") setHeard(true);
+      if (frozen) setHeard(true);
       if (!stopped) setTraffic({ map, tracker, view, clock, replay, replayView, sequence, notice });
     })().catch((error: unknown) => {
       console.error("atc: traffic failed to start", error);

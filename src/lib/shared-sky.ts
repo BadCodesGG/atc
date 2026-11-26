@@ -1,6 +1,6 @@
 import type { FeedSource } from "./feed-source";
 import type { Origin } from "./geo";
-import { DEAD_RECKON_MAX, type TrackedAircraft, Tracker } from "./tracker";
+import { DEAD_RECKON_MAX, type Listing, type TrackedAircraft, Tracker } from "./tracker";
 import type { TrafficSnapshot } from "./traffic";
 
 /**
@@ -20,7 +20,12 @@ export const HEX_RECKON = 60;
 /** Each poll's snapshots are a feed of their own in the shared tracker. */
 export const airportFeed = (code: string) => `airport:${code}`;
 export const REGION_FEED = "region";
-export const hexFeed = (hex: string) => `hex:${hex}`;
+const hexFeedName = (hex: string) => `hex:${hex}`;
+
+/** How the World map's region reads list their aircraft in the shared tracker. */
+export const REGION_LISTING: Listing = { feed: REGION_FEED, reckon: REGION_RECKON };
+/** How a followed flight's own reads (the Journey's /api/hex poll) list it in the shared tracker. */
+export const hexListing = (hex: string): Listing => ({ feed: hexFeedName(hex), reckon: HEX_RECKON });
 
 /** One feed of a tracker as the view drawing it fills and reads it: its snapshots in, its aircraft out, in the view's metres. */
 export interface TrafficFeed {

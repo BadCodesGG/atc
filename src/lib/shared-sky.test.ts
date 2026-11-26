@@ -5,7 +5,7 @@ import { toGeo, toLocal } from "./geo";
 import { MAP_ORIGIN, mergeRegions, skyFeatures } from "./globe/sky";
 import { Journey } from "./journey-follow";
 import type { RegionAircraft } from "./region";
-import { oncePerFrame, REGION_FEED, REGION_RECKON, SharedSky } from "./shared-sky";
+import { oncePerFrame, REGION_LISTING, SharedSky } from "./shared-sky";
 import { PLAYBACK_DELAY } from "./tracker";
 
 const ATL = airportByCode("atl")!;
@@ -96,7 +96,7 @@ describe("one tracker for the Diorama, the World map and the Journey", () => {
       p.time = start + s;
       const flown = 200 * s;
       if (s % 5 === 0) airport.add(mergeRegions([{ cell: { latitude: 0, longitude: 0 }, time: p.time, aircraft: [climbing(flown)] }], ATL));
-      if (s % 10 === 3) p.sky.tracker.add(mergeRegions([{ cell: { latitude: 0, longitude: 0 }, time: p.time + 0.6, aircraft: [climbing(flown, 0.6)] }], MAP_ORIGIN), { feed: REGION_FEED, reckon: REGION_RECKON });
+      if (s % 10 === 3) p.sky.tracker.add(mergeRegions([{ cell: { latitude: 0, longitude: 0 }, time: p.time + 0.6, aircraft: [climbing(flown, 0.6)] }], MAP_ORIGIN), REGION_LISTING);
       if (s % 5 === 2) await p.hexRead(climbing(flown));
       if (s < PLAYBACK_DELAY + 2) continue;
       // The diorama's frame, the map's and the journey's, all at this frame's one moment.
