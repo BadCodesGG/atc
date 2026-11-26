@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { toLocal } from "../geo";
-import { aircraftMatrix, type AircraftPose, CHASE, COCKPIT, EASE_S, EN_ROUTE_OFFERED, enRouteKey, EnRoutePeek, enRoutePose, enRouteShot, EnRouteRig, is3D, MAX_PITCH, NO_PEEK, PEEK_DEG_PER_PX, peekPlacement, SIDE, TOP } from "./en-route";
+import { aircraftMatrix, type AircraftPose, CHASE, COCKPIT, EASE_S, EN_ROUTE_OFFERED, enRouteKey, EnRoutePeek, enRouteShortcut, enRoutePose, enRouteShot, EnRouteRig, is3D, MAX_PITCH, NO_PEEK, PEEK_DEG_PER_PX, peekPlacement, SIDE, TOP } from "./en-route";
 
 const cruise: AircraftPose = { latitude: 35, longitude: -100, altitudeM: 10_000, trackDeg: 90, pitchDeg: 0 };
 
@@ -233,10 +233,19 @@ describe("the cameras offered", () => {
 });
 
 describe("enRouteKey", () => {
-  const press = (key: string, mods: Partial<Record<"ctrlKey" | "altKey" | "metaKey", boolean>> = {}) => enRouteKey({ key, ctrlKey: false, altKey: false, metaKey: false, ...mods });
+  const press = (key: string, mods: Partial<Record<"ctrlKey" | "altKey" | "metaKey", boolean>> = {}, code = "") => enRouteKey({ key, code, ctrlKey: false, altKey: false, metaKey: false, ...mods });
 
-  it("picks the cameras with 1 to 5, in the card's order", () => {
+  it("picks the cameras with 1 to 5, in the card's order, each button showing its key", () => {
     expect(["1", "2", "3", "4", "5"].map((k) => press(k))).toEqual(["map", "chase", "cockpit", "side", "top"]);
+    expect(EN_ROUTE_OFFERED.map(enRouteShortcut)).toEqual(["1", "2", "3", "4", "5"]);
+  });
+
+  it("reads the number row by its place on a layout that types something else there, and the number pad", () => {
+    // AZERTY: the 3 key types a double quote unshifted.
+    expect(press('"', {}, "Digit3")).toBe("cockpit");
+    expect(press("4", {}, "Numpad4")).toBe("side");
+    expect(press("&", { ctrlKey: true }, "Digit1")).toBeNull();
+    expect(press("q", {}, "KeyA")).toBeNull();
   });
 
   it("leaves every other key, and the browser's own chords, alone", () => {

@@ -40,7 +40,7 @@ import type { FlightCard as FlightCardData, TrafficEntry, TrafficView } from "@/
 import type { OpsView, PathPulse } from "@/lib/path-pulse";
 import { CameraMenu, CameraSwitch, COLUMN_BESIDE, ColumnPanel, Counts, DataCredit, ESTIMATES_NOTE, FlightCard, Header, JourneyCard, Legend, MapStyleMenu, PHONE, RadarToggle, Search, SideColumn, STACKED, ThemeSwitch, TimeBar, type TimeBarReplay, useMedia, useTrafficReadout, ViewControls, WeatherReadout, WIDE } from "./chrome";
 import { FilterControl } from "./filter-control";
-import { typing } from "./search-box";
+import { isTypingTarget } from "./search-box";
 import { ShareControl } from "./share-control";
 import { quietArrival } from "@/lib/journey-arrival";
 import { journeyFrame, type ReaderAction, releasesJourney } from "@/lib/journey-release";
@@ -393,7 +393,7 @@ export function AtcApp({ initialTheme, initialAirport, initialFilters }: { initi
   });
   useEffect(() => {
     const onKey = (e: globalThis.KeyboardEvent) => {
-      if (!enRouteKeys.current.offered || e.defaultPrevented || e.repeat || typing(e.target)) return;
+      if (!enRouteKeys.current.offered || e.defaultPrevented || e.repeat || isTypingTarget(e.target)) return;
       const camera = enRouteKey(e);
       if (!camera) return;
       e.preventDefault();

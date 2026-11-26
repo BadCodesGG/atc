@@ -13,13 +13,19 @@ export type EnRouteCamera = "map" | "chase" | "cockpit" | "side" | "top";
 /** The cameras the Journey card offers, in its order: Map first, as Following starts there. */
 export const EN_ROUTE_OFFERED: readonly EnRouteCamera[] = ["map", "chase", "cockpit", "side", "top"];
 
+/** A camera's key: its place in the Journey card's order, from 1. */
+export const enRouteShortcut = (camera: EnRouteCamera): string => String(EN_ROUTE_OFFERED.indexOf(camera) + 1);
+
 /**
  * The camera a key press picks: 1 to 5, in the Journey card's order (no other key of the page's uses a
- * digit), or null for any other key and for one held with Ctrl, Alt or Meta (the browser's own).
+ * digit), or null for any other key and for one held with Ctrl, Alt or Meta (the browser's own). The
+ * digit is read from the key's place too (`code`), so the number row picks a camera on a layout where it
+ * types something else unshifted (AZERTY's & é " ' ( ), and so does the number pad.
  */
-export function enRouteKey(e: Pick<KeyboardEvent, "key" | "ctrlKey" | "altKey" | "metaKey">): EnRouteCamera | null {
-  if (e.ctrlKey || e.altKey || e.metaKey || !/^[1-9]$/.test(e.key)) return null;
-  return EN_ROUTE_OFFERED[Number(e.key) - 1] ?? null;
+export function enRouteKey(e: Pick<KeyboardEvent, "key" | "code" | "ctrlKey" | "altKey" | "metaKey">): EnRouteCamera | null {
+  if (e.ctrlKey || e.altKey || e.metaKey) return null;
+  const digit = /^[1-9]$/.test(e.key) ? e.key : /^(?:Digit|Numpad)([1-9])$/.exec(e.code)?.[1];
+  return digit ? (EN_ROUTE_OFFERED[Number(digit) - 1] ?? null) : null;
 }
 
 /** Whether a camera tilts the map into 3D, with terrain and the aircraft's model. */
@@ -111,7 +117,8 @@ export interface Peek {
 
 export const NO_PEEK: Peek = { bearingDeg: 0, pitchDeg: 0 };
 
-const clampPitch = (deg: number) => Math.max(0, Math.min(MAX_PITCH, deg));
+const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
+const clampPitch = (deg: number) => clamp(deg, 0, MAX_PITCH);
 
 /** Where a placement's eye is: back from the centre against the bearing, and up, by its distance and tilt. */
 function eyeOf(p: EnRoutePlacement): EnRouteShot["eye"] {
@@ -272,8 +279,8 @@ export class EnRoutePeek {
   drag(dxPx: number, dyPx: number): void {
     this.held = true;
     this.last = null;
-    const bearingDeg = Math.max(-180, Math.min(180, this.offset.bearingDeg - dxPx * PEEK_DEG_PER_PX));
-    const pitchDeg = Math.max(-90, Math.min(90, this.offset.pitchDeg - dyPx * PEEK_DEG_PER_PX));
+    const bearingDeg = clamp(this.offset.bearingDeg - dxPx * PEEK_DEG_PER_PX, -180, 180);
+    const pitchDeg = clamp(this.offset.pitchDeg - dyPx * PEEK_DEG_PER_PX, -90, 90);
     this.offset = { bearingDeg, pitchDeg };
   }
 

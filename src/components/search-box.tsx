@@ -52,7 +52,7 @@ function isFlightAnswer(v: unknown): v is FlightAnswer {
 }
 
 /** Whether a key press belongs to a field the reader is typing in (the page's own shortcuts leave it alone). */
-export function typing(target: EventTarget | null): boolean {
+export function isTypingTarget(target: EventTarget | null): boolean {
   const el = target instanceof HTMLElement ? target : null;
   return !!el && (el.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(el.tagName));
 }
@@ -76,7 +76,7 @@ export function Search({ read, onFlight, onPlace, onAirport, onRemote, mapFollow
   // "/" from anywhere outside a field.
   useEffect(() => {
     const onKey = (e: globalThis.KeyboardEvent) => {
-      if (e.key !== "/" || e.ctrlKey || e.metaKey || e.altKey || typing(e.target)) return;
+      if (e.key !== "/" || e.ctrlKey || e.metaKey || e.altKey || isTypingTarget(e.target)) return;
       e.preventDefault();
       inputRef.current?.focus();
     };

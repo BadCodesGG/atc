@@ -162,16 +162,40 @@ export async function enRouteCameraChecks({ browser, base, check }) {
   const start = { x: box.x - 250, y: box.y + 120 };
   await page.mouse.move(start.x, start.y);
   await page.mouse.down();
-  for (let i = 1; i <= 10; i++) await page.mouse.move(start.x + i * 20, start.y - i * 4);
+  // Right and down: the bearing turns and the camera tilts down toward the aircraft.
+  for (let i = 1; i <= 10; i++) await page.mouse.move(start.x + i * 20, start.y + i * 6);
   await sleep(600);
   const dragged = await page.evaluate(CAMERA);
   const turned = Math.abs(turn(0, dragged.bearing));
-  check("cameras: a drag in Side turns the camera round the aircraft while held", turned > 40 && dragged.camera === "side", `bearing ${dragged.bearing.toFixed(1)} (${turned.toFixed(1)} off the framing), pitch ${dragged.pitch.toFixed(1)}`);
+  check("cameras: a mouse drag in Side turns and tilts the camera round the aircraft while held", turned > 40 && dragged.pitch < 70 && dragged.camera === "side", `bearing ${dragged.bearing.toFixed(1)} (${turned.toFixed(1)} off the framing), pitch ${dragged.pitch.toFixed(1)}`);
   await page.mouse.up();
-  await sleep(4_000);
-  const eased = await page.evaluate(CAMERA);
+  /** Waits up to 8 s for Side's framing again: the ease back runs on the map's frames. */
+  const easedBack = async () => {
+    let s = await page.evaluate(CAMERA);
+    for (let i = 0; i < 16 && (Math.abs(turn(0, s.bearing)) >= 2 || Math.abs(s.pitch - 78) >= 1.5); i++) {
+      await sleep(500);
+      s = await page.evaluate(CAMERA);
+    }
+    return s;
+  };
+  const eased = await easedBack();
   check("cameras: let go, the camera eases back to Side's framing", Math.abs(turn(0, eased.bearing)) < 2 && Math.abs(eased.pitch - 78) < 1.5, `bearing ${eased.bearing.toFixed(1)}, pitch ${eased.pitch.toFixed(1)}`);
   check("cameras: the drag kept the journey and the camera", eased.camera === "side" && eased.pressed === "Side" && (await page.locator("section[aria-label^='Followed flight']").count()) > 0, JSON.stringify({ camera: eased.camera, pressed: eased.pressed }));
+
+  // A touch drag takes the same path: touch pointer events on the map's canvas.
+  await page.evaluate(`(async () => {
+    const el = ${GLOBE}.map.getCanvasContainer();
+    const at = (type, x, y) => el.dispatchEvent(new PointerEvent(type, { pointerId: 7, pointerType: "touch", isPrimary: true, button: type === "pointermove" ? -1 : 0, clientX: x, clientY: y, bubbles: true }));
+    at("pointerdown", ${start.x}, ${start.y});
+    for (let i = 1; i <= 10; i++) { at("pointermove", ${start.x} - i * 20, ${start.y}); await new Promise((r) => setTimeout(r, 16)); }
+  })()`);
+  await sleep(600);
+  const touched = await page.evaluate(CAMERA);
+  const touchTurn = turn(0, touched.bearing);
+  check("cameras: a touch drag in Side turns the camera too (left drag, bearing up)", touchTurn > 40, `bearing ${touched.bearing.toFixed(1)}`);
+  await page.evaluate(`(() => { ${GLOBE}.map.getCanvasContainer().dispatchEvent(new PointerEvent("pointerup", { pointerId: 7, pointerType: "touch", isPrimary: true, bubbles: true })); })()`);
+  const touchEased = await easedBack();
+  check("cameras: let go of the touch, the camera eases back to Side's framing", Math.abs(turn(0, touchEased.bearing)) < 2 && touchEased.camera === "side", `bearing ${touchEased.bearing.toFixed(1)}`);
 
   await page.keyboard.press("1");
   await framed("map", "key 1");

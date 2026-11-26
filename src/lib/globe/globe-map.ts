@@ -293,6 +293,7 @@ export class GlobeMap {
     canvas.addEventListener("pointermove", this.onPeekMove);
     canvas.addEventListener("pointerup", this.onPeekUp);
     canvas.addEventListener("pointercancel", this.onPeekUp);
+    canvas.addEventListener("lostpointercapture", this.onPeekUp);
     // A drag, wheel or pinch carries an original event; the page's own moves do not.
     this.map.on("movestart", (e) => {
       if ((e as { originalEvent?: unknown }).originalEvent) {
@@ -568,16 +569,17 @@ export class GlobeMap {
   /** Brings the map to the En-route camera: terrain, the aircraft's layer, the followed flight's flat marks and the camera's clamp to the ground. Waits for the style. */
   private applyEnRoute(): void {
     const { map } = this;
-    if (!map.getLayer("aircraft")) return;
     const on = is3D(this.enRoute);
-    map.setCenterClampedToGround(!on);
     // In a 3D camera the map's own drags are off: a drag peeks round the aircraft (onPeekDown) and never
     // moves the map, so it does not end the journey as a drag on the flat map does. The wheel still does.
+    // Set at once, even before the style has loaded: the handlers do not wait for it.
     for (const handler of [map.dragPan, map.dragRotate, map.touchZoomRotate, map.touchPitch, map.doubleClickZoom]) {
       if (on) handler.disable();
       else handler.enable();
     }
     map.getCanvasContainer().style.touchAction = on ? "none" : "";
+    if (!map.getLayer("aircraft")) return;
+    map.setCenterClampedToGround(!on);
     if (on) {
       if (!map.getSource(TERRAIN_SOURCE)) map.addSource(TERRAIN_SOURCE, terrainSource());
       if (!map.getTerrain()) map.setTerrain(TERRAIN);
@@ -867,7 +869,12 @@ export class GlobeMap {
   private readonly onPeekDown = (e: PointerEvent) => {
     if (!is3D(this.enRoute) || this.peekPointer || !e.isPrimary || e.button !== 0) return;
     this.peekPointer = { id: e.pointerId, x: e.clientX, y: e.clientY };
-    (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
+    try {
+      // Held through a drag off the map's edge; a pointer the browser no longer has cannot be captured.
+      (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    } catch {
+      // The drag still runs, from the moves over the map.
+    }
   };
 
   private readonly onPeekMove = (e: PointerEvent) => {
@@ -897,6 +904,7 @@ export class GlobeMap {
     canvas.removeEventListener("pointermove", this.onPeekMove);
     canvas.removeEventListener("pointerup", this.onPeekUp);
     canvas.removeEventListener("pointercancel", this.onPeekUp);
+    canvas.removeEventListener("lostpointercapture", this.onPeekUp);
     cancelAnimationFrame(this.frame);
     for (const t of this.timers) window.clearInterval(t);
     this.map.remove();
