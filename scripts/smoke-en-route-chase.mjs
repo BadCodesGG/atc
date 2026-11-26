@@ -37,7 +37,7 @@ export async function enRouteChaseChecks({ browser, base, check, shots = null })
   // `fps=hold`: the smokes' software GL draws 3D at a few frames a second, which would otherwise send the view back to Map.
   await page.goto(`${base}/?fixture=1&fps=hold#map=7/33.6/-84.4`);
   await page.locator("main[data-on-map]").waitFor({ timeout: 60_000 });
-  await selectOnMap(page, HEX, { beforeClick: () => page.evaluate(`(() => { const g = ${GLOBE}; g.routes.delete("${CALLSIGN}"); })()`) });
+  await selectOnMap(page, HEX, { forgetRoute: CALLSIGN });
   await page.locator("section[aria-label^='Selected flight']").locator("visible=true").waitFor({ timeout: 15_000 });
   await page.getByRole("button", { name: "Follow this flight" }).locator("visible=true").first().click();
 

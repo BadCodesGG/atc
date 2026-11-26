@@ -202,7 +202,7 @@ async function followOnMap(browser, base, viewport, { query = "fixture=1&fps=hol
   await before(page);
   await page.goto(`${base}/?${query}#map=7/33.6/-84.4`);
   await page.locator("main[data-on-map]").waitFor({ timeout: 60_000 });
-  await selectOnMap(page, HEX, { beforeClick: () => page.evaluate(`(() => { const g = ${GLOBE}; g.routes.delete("${CALLSIGN}"); })()`) });
+  await selectOnMap(page, HEX, { forgetRoute: CALLSIGN });
   await page.locator("section[aria-label^='Selected flight']").locator("visible=true").waitFor({ timeout: 15_000 });
   await page.getByRole("button", { name: "Follow this flight" }).locator("visible=true").first().click();
   const group = page.getByRole("group", { name: "En-route camera" });
@@ -312,8 +312,7 @@ async function smallScreens({ browser, base, check }) {
           // Chase's 75 degrees at every size; software GL draws a frame every half second or so, so a fixed count of
           // frames drawn says nothing of how far in it is: wait for the tilt, up to 30 s, then read once.
           const tilted = on && (await waitForTruthy(page, `(() => { const s = ${STATE}; return s && s.camera === "chase" && s.pitch > 60; })()`, 30_000).then(() => true, () => false));
-          const s = await page.evaluate(STATE);
-          check(`en-route ${name}: Chase comes on (terrain, the aircraft's model, the map tilted behind it)`, on && tilted && s.pitch > 60, JSON.stringify({ ...s, credit: undefined }));
+          check(`en-route ${name}: Chase comes on (terrain, the aircraft's model, the map tilted behind it)`, tilted, JSON.stringify({ ...(await page.evaluate(STATE)), credit: undefined }));
         }
         // The rig eases onto the aircraft; software GL draws a frame every second or so: wait until it holds still.
         let at = null;
