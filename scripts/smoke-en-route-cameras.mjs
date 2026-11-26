@@ -180,7 +180,7 @@ export async function enRouteCameraChecks({ browser, base, check }) {
   check("cameras: a mouse drag in Side turns and tilts the camera round the aircraft while held", turned > 40 && dragged.pitch < 82 && dragged.camera === "side", `bearing ${dragged.bearing.toFixed(1)} (${turned.toFixed(1)} off the framing), pitch ${dragged.pitch.toFixed(1)}`);
   await page.mouse.up();
   /**
-   * Waits for Side's framing again, or for the camera to stop moving (unchanged for 3 s), at most 40 s: the
+   * Waits for Side's framing again, or for the camera to stop moving (unchanged for 6 s: the frames there come a second or two apart), at most 40 s: the
    * ease back runs on the map's frames, and the smokes' software GL draws Side with its haze about one frame a
    * second (1.1 s a frame, 0.6 s without the haze), so the ease takes about 14 s there (2.6 s on hardware GL).
    */
@@ -189,7 +189,7 @@ export async function enRouteCameraChecks({ browser, base, check }) {
     const until = Date.now() + 40_000;
     let s = await page.evaluate(CAMERA);
     let moved = Date.now();
-    while (!framedAgain(s) && Date.now() - moved < 3_000 && Date.now() < until) {
+    while (!framedAgain(s) && Date.now() - moved < 6_000 && Date.now() < until) {
       await sleep(500);
       const next = await page.evaluate(CAMERA);
       if (Math.abs(turn(s.bearing, next.bearing)) > 0.01 || Math.abs(next.pitch - s.pitch) > 0.01) moved = Date.now();
