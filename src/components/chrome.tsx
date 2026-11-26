@@ -423,10 +423,6 @@ function JourneyPanel({ journey }: { journey: JourneyViewData }) {
   );
 }
 
-/**
- * The followed flight on the map, between its two dioramas: the flight card's own panel, with the
- * journey's progress, speed, height and estimated arrival. Its toggle lets go of the journey there.
- */
 /** The En-route view's cameras as the Journey card names them. */
 const EN_ROUTE_LABELS: Record<EnRouteCamera, string> = { map: "Map", chase: "Chase", cockpit: "Cockpit", side: "Side", top: "Top" };
 
@@ -452,19 +448,24 @@ export function EnRouteSwitch({ camera, cameras, onChange }: { camera: EnRouteCa
   );
 }
 
+/**
+ * The followed flight on the map, between its two dioramas: the flight card's own panel, with the
+ * journey's progress, speed, height and estimated arrival, and the En-route view's camera switch while the
+ * map follows it. Its toggle lets go of the journey there.
+ */
 export function JourneyCard({
   journey,
   onStop,
-  camera = "map",
-  cameras = null,
-  onCamera = () => {},
+  camera,
+  cameras,
+  onCamera,
 }: {
   journey: JourneyViewData;
   onStop: () => void;
   /** The En-route view's camera, and those offered (null while the map does not follow the flight). */
-  camera?: EnRouteCamera;
-  cameras?: readonly EnRouteCamera[] | null;
-  onCamera?: (camera: EnRouteCamera) => void;
+  camera: EnRouteCamera;
+  cameras: readonly EnRouteCamera[] | null;
+  onCamera: (camera: EnRouteCamera) => void;
 }) {
   const facts: [string, string][] = [
     ["Speed", journey.speed],

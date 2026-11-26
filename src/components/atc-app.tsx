@@ -384,6 +384,11 @@ export function AtcApp({ initialTheme, initialAirport, initialFilters }: { initi
     if (left && j?.stage === "map") j.toMap(left, airportByCode(globe.airportCode) ?? j.origin, performance.now());
     setEnRoute(camera);
   };
+  /** Back to Map with the journey over or handed to a diorama: no camera of the journey's to ease in. */
+  const flattenEnRoute = () => {
+    globeRef.current?.setEnRouteCamera("map");
+    setEnRoute("map");
+  };
   const stopJourney = () => {
     journeyGeneration.current++;
     journeyHexRef.current = null;
@@ -396,8 +401,7 @@ export function AtcApp({ initialTheme, initialAirport, initialFilters }: { initi
     globe?.setUserMove(null);
     globe?.setJourney(null, null);
     // Following (re)starts in Map: nothing heavy stays loaded once the journey is over.
-    globe?.setEnRouteCamera("map");
-    setEnRoute("map");
+    flattenEnRoute();
     setJourney(null);
   };
   const startJourney: World["startJourney"] = (flight, ready) => {
@@ -451,8 +455,7 @@ export function AtcApp({ initialTheme, initialAirport, initialFilters }: { initi
     globeRef.current?.setDriver(null);
     globeRef.current?.setUserMove(null);
     // The destination's diorama has the camera: the map under it is flat again.
-    globeRef.current?.setEnRouteCamera("map");
-    setEnRoute("map");
+    flattenEnRoute();
   };
   useEffect(
     () => () => {

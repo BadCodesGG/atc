@@ -33,13 +33,16 @@ export interface AircraftPose {
 }
 
 /** A placement of the map's camera: the point it looks at (and that point's height), how far back it stands, which way it faces and its tilt from straight down. */
-export interface EnRouteShot {
+export interface EnRoutePlacement {
   center: { latitude: number; longitude: number };
   elevationM: number;
   distanceM: number;
   bearingDeg: number;
   pitchDeg: number;
-  /** Where the camera itself is. */
+}
+
+/** A camera's ideal placement for a pose, and where its eye then is. */
+export interface EnRouteShot extends EnRoutePlacement {
   eye: { latitude: number; longitude: number; altitudeM: number };
 }
 
@@ -143,7 +146,7 @@ export class EnRouteRig {
   private state: { east: number; north: number; up: number; distanceM: number; bearingDeg: number; pitchDeg: number; at: number } | null = null;
 
   /** Starts easing from the camera `from` toward the shot `to`, at `now` (ms). */
-  start(from: Omit<EnRouteShot, "eye">, to: EnRouteShot, now: number): void {
+  start(from: EnRoutePlacement, to: EnRoutePlacement, now: number): void {
     const [east, north] = toLocal(to.center, from.center.latitude, from.center.longitude);
     this.state = { east, north, up: from.elevationM - to.elevationM, distanceM: from.distanceM, bearingDeg: from.bearingDeg, pitchDeg: from.pitchDeg, at: now };
   }
@@ -153,12 +156,13 @@ export class EnRouteRig {
     this.state = null;
   }
 
-  /** The camera for this frame at `now` (ms), eased toward `target`. */
-  step(target: EnRouteShot, now: number): EnRouteShot {
+  /** The camera for this frame at `now` (ms), eased toward `target`, never tilted past the map's limit. */
+  step(target: EnRoutePlacement, now: number): EnRoutePlacement {
     const s = this.state;
     if (!s) {
       this.state = { east: 0, north: 0, up: 0, distanceM: target.distanceM, bearingDeg: target.bearingDeg, pitchDeg: target.pitchDeg, at: now };
-      return target;
+      const { center, elevationM, distanceM, bearingDeg, pitchDeg } = target;
+      return { center, elevationM, distanceM, bearingDeg, pitchDeg: Math.min(MAX_PITCH, pitchDeg) };
     }
     const dt = Math.max(0, Math.min(MAX_STEP_S, (now - s.at) / 1000));
     s.at = now;
@@ -170,6 +174,6 @@ export class EnRouteRig {
     s.bearingDeg = wrap360(s.bearingDeg + turn(s.bearingDeg, target.bearingDeg) * (1 - keep));
     s.pitchDeg += (target.pitchDeg - s.pitchDeg) * (1 - keep);
     const [latitude, longitude] = toGeo(target.center, s.east, s.north);
-    return { ...target, center: { latitude, longitude }, elevationM: target.elevationM + s.up, distanceM: s.distanceM, bearingDeg: s.bearingDeg, pitchDeg: s.pitchDeg };
+    return { center: { latitude, longitude }, elevationM: target.elevationM + s.up, distanceM: s.distanceM, bearingDeg: s.bearingDeg, pitchDeg: Math.min(MAX_PITCH, s.pitchDeg) };
   }
 }

@@ -75,6 +75,8 @@ export class EnRouteLayer implements CustomLayerInterface {
   private map: MapLibreMap | null = null;
   private gl: WebGL2RenderingContext | null = null;
   private program: WebGLProgram | null = null;
+  /** The program's uniforms, looked up once. */
+  private uniforms: Record<"matrix" | "turn" | "body" | "paint" | "light", WebGLUniformLocation | null> | null = null;
   private mesh: Mesh | null = null;
   private pose: AircraftPose | null = null;
   private model: AircraftModel = "narrow";
@@ -109,12 +111,15 @@ export class EnRouteLayer implements CustomLayerInterface {
     gl.deleteShader(fs);
     if (!gl.getProgramParameter(program, gl.LINK_STATUS)) throw new Error(`en-route: program failed: ${gl.getProgramInfoLog(program)}`);
     this.program = program;
+    const at = (name: string) => gl.getUniformLocation(program, name);
+    this.uniforms = { matrix: at("u_matrix"), turn: at("u_turn"), body: at("u_body"), paint: at("u_paint"), light: at("u_light") };
   }
 
   onRemove(_map: MapLibreMap, gl: WebGL2RenderingContext): void {
     this.dropMesh(gl);
     if (this.program) gl.deleteProgram(this.program);
     this.program = null;
+    this.uniforms = null;
     this.map = null;
     this.gl = null;
   }
@@ -166,16 +171,17 @@ export class EnRouteLayer implements CustomLayerInterface {
     const at = MercatorCoordinate.fromLngLat([pose.longitude, pose.latitude], pose.altitudeM);
     const model = aircraftMatrix(at, at.meterInMercatorCoordinateUnits(), pose, this.lengthM / MODEL_LENGTH[this.model]);
     // The map's projection (doubles) times the model's, multiplied here in doubles, then handed to the GPU.
-    const m = multiply(args.defaultProjectionData.mainMatrix as ArrayLike<number>, model);
+    const clip = multiply(args.defaultProjectionData.mainMatrix as ArrayLike<number>, model);
     // The rotation alone, for the normals: the model matrix's columns without their scale.
-    const k = Math.hypot(model[0], model[1], model[2]);
-    const turn = [model[0], model[1], model[2], model[4], model[5], model[6], model[8], model[9], model[10]].map((v) => v / k);
+    const scale = Math.hypot(model[0], model[1], model[2]);
+    const rotation = [model[0], model[1], model[2], model[4], model[5], model[6], model[8], model[9], model[10]].map((v) => v / scale);
+    const u = this.uniforms!;
     gl.useProgram(program);
-    gl.uniformMatrix4fv(gl.getUniformLocation(program, "u_matrix"), false, new Float32Array(m));
-    gl.uniformMatrix3fv(gl.getUniformLocation(program, "u_turn"), false, new Float32Array(turn));
-    gl.uniform3fv(gl.getUniformLocation(program, "u_body"), this.colours.body);
-    gl.uniform3fv(gl.getUniformLocation(program, "u_paint"), this.colours.paint);
-    gl.uniform3fv(gl.getUniformLocation(program, "u_light"), LIGHT);
+    gl.uniformMatrix4fv(u.matrix, false, new Float32Array(clip));
+    gl.uniformMatrix3fv(u.turn, false, new Float32Array(rotation));
+    gl.uniform3fv(u.body, this.colours.body);
+    gl.uniform3fv(u.paint, this.colours.paint);
+    gl.uniform3fv(u.light, LIGHT);
     gl.enable(gl.DEPTH_TEST);
     gl.depthFunc(gl.LEQUAL);
     gl.depthMask(true);

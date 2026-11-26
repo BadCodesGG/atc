@@ -130,7 +130,14 @@ describe("EnRouteRig", () => {
 
   it("takes the shot as it is when it has nothing to ease from", () => {
     const rig = new EnRouteRig();
-    expect(rig.step(shot, 0)).toEqual(shot);
+    const { center, elevationM, distanceM, bearingDeg, pitchDeg } = shot;
+    expect(rig.step(shot, 0)).toEqual({ center, elevationM, distanceM, bearingDeg, pitchDeg });
+  });
+
+  it("never tilts the camera past the map's limit, wherever it eases from", () => {
+    const rig = new EnRouteRig();
+    rig.start({ ...shot, pitchDeg: 85 }, shot, 0);
+    expect(rig.step(shot, 16).pitchDeg).toBeLessThanOrEqual(MAX_PITCH);
   });
 
   it("eases from where the camera was toward the shot, never overshooting, and arrives", () => {

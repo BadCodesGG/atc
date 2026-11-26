@@ -48,6 +48,8 @@ export interface MapPalette {
   chipRing: string;
   chipText: string;
   chipCount: string;
+  /** The En-route view's aircraft model: its metal, painted in `selected`. */
+  modelBody: string;
 }
 
 export const PALETTES: Record<ThemeKey, MapPalette> = {
@@ -73,6 +75,7 @@ export const PALETTES: Record<ThemeKey, MapPalette> = {
     chipRing: "#e6e3dc",
     chipText: "#1d1f24",
     chipCount: "#5d6068",
+    modelBody: "#f2f1ec",
   },
   // Night ops: the land the diorama's black, a deep navy sea, faint shores and borders, the cities lit.
   dark: {
@@ -96,6 +99,7 @@ export const PALETTES: Record<ThemeKey, MapPalette> = {
     chipRing: "#1e2d45",
     chipText: "#f2f6fb",
     chipCount: "#6ff0a6",
+    modelBody: "#c9ced8",
   },
   satellite: {
     water: "#2c4a63",
@@ -118,6 +122,7 @@ export const PALETTES: Record<ThemeKey, MapPalette> = {
     chipRing: "rgba(0,0,0,0.12)",
     chipText: "#16181c",
     chipCount: "#4a4e55",
+    modelBody: "#f2f1ec",
   },
 };
 
@@ -268,7 +273,6 @@ function trail(kind: string, color: string): LayerSpecification {
   };
 }
 
-/** `radar`: a frame's tile URL (radar.ts) to draw the weather radar from; without it the style has no radar layer. */
 /** The en-route view's terrain source id, and the terrain it draws: true heights, no exaggeration. */
 export const TERRAIN_SOURCE = "terrain";
 export const TERRAIN: TerrainSpecification = { source: TERRAIN_SOURCE, exaggeration: 1 };
@@ -288,7 +292,10 @@ export function terrainSource(): RasterDEMSourceSpecification {
   };
 }
 
-/** The map's style; with `terrain`, the en-route view's terrain is on (only while a 3D camera is). */
+/**
+ * The map's style. `radar`: a frame's tile URL (radar.ts) to draw the weather radar from; without it the
+ * style has no radar layer. `terrain`: the en-route view's terrain is on (only while a 3D camera is).
+ */
 export function mapStyle(key: ThemeKey, { globe = false, radar = null, terrain = false }: { globe?: boolean; radar?: string | null; terrain?: boolean } = {}): StyleSpecification {
   const theme = THEMES[key];
   const p = PALETTES[key];

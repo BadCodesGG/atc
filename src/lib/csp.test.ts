@@ -21,8 +21,10 @@ describe("the Content-Security-Policy", () => {
     expect(directive(prod, "img-src")).toEqual(expect.arrayContaining(["data:", "blob:", "https://*.plnspttrs.net", "https://*.planespotters.net", "https://*.rainviewer.com", "https://basemap.nationalmap.gov"]));
     expect(directive(prod, "worker-src")).toEqual(["'self'", "blob:"]);
     // The en-route view's terrain tiles, which MapLibre's workers fetch and decode as images.
-    expect(directive(prod, "connect-src")).toContain("https://s3.amazonaws.com");
-    expect(directive(prod, "img-src")).toContain("https://s3.amazonaws.com");
+    // Only the terrain bucket's path, not every bucket on the S3 host.
+    expect(directive(prod, "connect-src")).toContain("https://s3.amazonaws.com/elevation-tiles-prod/");
+    expect(directive(prod, "img-src")).toContain("https://s3.amazonaws.com/elevation-tiles-prod/");
+    expect(prod).not.toMatch(/https:\/\/s3\.amazonaws\.com[ ;]/);
     expect(prod).not.toMatch(/(^|[ ;])\*([ ;]|$)/);
     expect(directive(prod, "object-src")).toEqual(["'none'"]);
   });

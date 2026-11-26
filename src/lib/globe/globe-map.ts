@@ -241,7 +241,7 @@ export class GlobeMap {
   /** Whether the rig has been started from the camera the map had when the 3D camera was picked. */
   private rigStarted = false;
   /** In a 3D camera: the journey's own (Map) shot, in the airport's metres, which the Handover still reads; null in Map. */
-  private shadow: OrbitView | null = null;
+  private journeyShot: OrbitView | null = null;
   /** In a 3D camera: the camera this frame, as an orbit in the airport's metres aimed at the aircraft in the air. */
   private enRouteView: OrbitView | null = null;
 
@@ -527,7 +527,7 @@ export class GlobeMap {
    * would stand), so the Handover judges the flight's ends as it does on the flat map; otherwise the map's.
    */
   get journeyView(): OrbitView {
-    return this.shadow ?? this.view;
+    return this.journeyShot ?? this.view;
   }
 
   /**
@@ -543,7 +543,7 @@ export class GlobeMap {
     this.enRoute = camera;
     this.rig.reset();
     this.rigStarted = false;
-    this.shadow = null;
+    this.journeyShot = null;
     this.enRouteView = null;
     this.applyEnRoute();
     if (!is3D(camera)) {
@@ -587,7 +587,7 @@ export class GlobeMap {
 
   /** The aircraft's colours for the theme: light metal, painted in the selection colour. */
   private paintLayer(): void {
-    this.layer?.setColours(this.theme === "dark" ? "#c9ced8" : "#f2f1ec", PALETTES[this.theme].selected);
+    this.layer?.setColours(PALETTES[this.theme].modelBody, PALETTES[this.theme].selected);
   }
 
   /**
@@ -600,7 +600,7 @@ export class GlobeMap {
     const camera = this.enRoute;
     if (!is3D(camera)) return;
     const [slat, slon] = toGeo(frame, mapShot.target[0], mapShot.target[1]);
-    this.shadow = groundView({ ...mapShot, target: toLocal(this.airport, slat, slon) });
+    this.journeyShot = groundView({ ...mapShot, target: toLocal(this.airport, slat, slon) });
     const ground = this.map.queryTerrainElevation([fix.longitude, fix.latitude]) ?? 0;
     const pose = enRoutePose(fix, ground);
     const cls = classify(fix.typeCode, null);
