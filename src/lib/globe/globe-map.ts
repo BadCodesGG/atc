@@ -12,11 +12,11 @@ import { PLAYBACK_DELAY, type TrackedAircraft, Tracker } from "../tracker";
 import { routeArcs } from "./arcs";
 import { toGeo, toLocal, type Origin } from "../geo";
 import type { JourneyFeatures, JourneyFix } from "../journey-follow";
-import { type EnRouteCamera, type Insets, MAX_PITCH } from "./en-route";
+import { type EnRouteCamera, type Insets } from "./en-route";
 import { EnRouteController } from "./en-route-controller";
 import { AIRCRAFT_GLYPH, GLYPH_BOX } from "./aircraft-glyph";
 import { withMapHash } from "../share-link";
-import { finiteCamera, groundView, type Lens, type MapCamera, mapHashCamera, mapToOrbit, orbitToMap, paddingFor, worldFloor } from "./camera";
+import { finiteCamera, groundView, type Lens, type MapCamera, mapHashCamera, mapToOrbit, MAX_PITCH, orbitToMap, paddingFor, worldFloor } from "./camera";
 import { shiftClearOfCard } from "./clear-of-card";
 import { airportFeatures, type ProcedurePiece, procedureFeatures } from "./features";
 import { frameShift, freeBand, type Rect } from "./journey-frame";
@@ -182,6 +182,8 @@ export class GlobeMap {
   private readonly timers: number[] = [];
   private regionRequest = 0;
   private frame = 0;
+  /** The pending address write's timer (writeAddress), 0 when none is pending. */
+  private addressTimer = 0;
   private lastFrame = 0;
   private flowStep = -1;
   private skyDrawn = false;
@@ -886,9 +888,9 @@ export class GlobeMap {
     }, ADDRESS_MS);
   }
 
-  private addressTimer = 0;
-
+  /** A hand-edited or linked `#map=`: the map goes there, except under an En-route 3D camera, which places the map itself every frame. */
   private readonly onHashChange = () => {
+    if (this.enRouteBlend > 0) return;
     const cam = mapHashCamera(window.location.hash);
     if (cam) this.map.jumpTo({ center: [cam.lng, cam.lat], zoom: cam.zoom, bearing: cam.bearing, pitch: cam.pitch });
   };

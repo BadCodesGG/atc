@@ -4,8 +4,8 @@ import { type Origin, toGeo, toLocal } from "../geo";
 import type { JourneyFix } from "../journey-follow";
 import type { OrbitView } from "../scene/orbit";
 import type { ThemeKey } from "../scene/theme";
-import { groundView, type Lens, mapToOrbit, orbitToMap } from "./camera";
-import { bandPadding, blendPadding, EN_ROUTE_MAX_PITCH, type EnRouteCamera, EnRoutePeek, type EnRoutePlacement, enRoutePose, EnRouteRig, enRouteShot, eyeOf, fitDistance, type Insets, is3D, MAX_PITCH, peekPlacement, sightPlacement } from "./en-route";
+import { groundView, type Lens, type MapCamera, mapToOrbit, MAX_PITCH, orbitToMap } from "./camera";
+import { bandPadding, blendPadding, EN_ROUTE_MAX_PITCH, type EnRouteCamera, EnRoutePeek, type EnRoutePlacement, enRoutePose, EnRouteRig, enRouteShot, eyeOf, fitDistance, type Insets, is3D, peekPlacement, sightPlacement } from "./en-route";
 import { blendPlacement, FALLBACK_NOTICE, type FallbackCause, FrameWatch, RETURN_TO_MAP_S, shareBlend, ShareEase } from "./en-route-journey";
 import type { EnRouteLayer } from "./en-route-layer";
 import type { Rect } from "./journey-frame";
@@ -119,7 +119,7 @@ export class EnRouteController {
    * In the 3D view, the map camera of the journey's own flat shot this frame (where the flat map would stand);
    * null otherwise. The map's own centre then lies down the 3D camera's line of sight, far from the flight.
    */
-  get journeyCamera(): { lng: number; lat: number; zoom: number; bearing: number; pitch: number } | null {
+  get journeyCamera(): MapCamera | null {
     const s = this.flatShot;
     return s && { lng: s.center[0], lat: s.center[1], zoom: s.zoom, bearing: s.bearing, pitch: s.pitch };
   }

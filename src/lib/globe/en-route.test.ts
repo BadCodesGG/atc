@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { FEET, KNOTS, toLocal } from "../geo";
-import { aircraftMatrix, type AircraftPose, bandPadding, blendPadding, CHASE, COCKPIT, EASE_S, EN_ROUTE_MAX_PITCH, EN_ROUTE_OFFERED, enRouteKey, EnRoutePeek, enRouteShortcut, enRoutePose, enRouteShot, EnRouteRig, fitDistance, is3D, MAX_PITCH, mapNearPlane, NO_PEEK, PEEK_DEG_PER_PX, peekPlacement, SIDE, SIGHT_MIN_M, sightPlacement, TOP } from "./en-route";
+import { MAX_PITCH } from "./camera";
+import { aircraftMatrix, type AircraftPose, bandPadding, blendPadding, CHASE, COCKPIT, EASE_S, EN_ROUTE_MAX_PITCH, EN_ROUTE_OFFERED, enRouteKey, EnRoutePeek, enRouteShortcut, enRoutePose, enRouteShot, EnRouteRig, fitDistance, is3D, mapNearPlane, NO_PEEK, PEEK_DEG_PER_PX, peekPlacement, SIDE, SIGHT_MIN_M, sightPlacement, TOP } from "./en-route";
 
 const cruise: AircraftPose = { latitude: 35, longitude: -100, altitudeM: 10_000, trackDeg: 90, pitchDeg: 0 };
 

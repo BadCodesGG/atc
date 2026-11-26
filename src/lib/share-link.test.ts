@@ -59,6 +59,11 @@ describe("withMapHash", () => {
     expect(withMapHash("#x=1&map=3/1/2&y=2", cam)).toBe("#x=1&map=9.96/33.70105/-85.44859/-87/39&y=2");
     expect(withMapHash("#x=1", cam)).toBe("#x=1&map=9.96/33.70105/-85.44859/-87/39");
   });
+
+  it("leaves the hash as it was for a camera that is not all finite numbers (a hidden tab once wrote NaN)", () => {
+    expect(withMapHash("#x=1&map=3/1/2", { ...cam, lat: Number.NaN })).toBe("#x=1&map=3/1/2");
+    expect(withMapHash("", { ...cam, zoom: Number.POSITIVE_INFINITY })).toBe("");
+  });
 });
 
 describe("shareLink", () => {

@@ -64,9 +64,11 @@ export function mapHashOf(cam: MapHash): MapHash {
 
 /**
  * An address hash with the map's camera in it (rounded by mapHashOf): the `map=` part replaced, or added
- * after the others, and every other part kept. The map writes its address with it (globe-map.ts).
+ * after the others, and every other part kept; the hash unchanged for a camera that is not all finite numbers.
+ * The map writes its address with it (globe-map.ts).
  */
 export function withMapHash(hash: string, cam: MapHash): string {
+  if (!Object.values(cam).every(Number.isFinite)) return hash;
   const map = formatMapHash(mapHashOf(cam)).slice(1);
   const parts = hash.replace(/^#/, "").split("&").filter(Boolean);
   const at = parts.findIndex((p) => p.startsWith("map="));

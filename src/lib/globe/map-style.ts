@@ -379,7 +379,7 @@ export interface HazeShell {
  * have), or just inside the map's far plane (`farM`) where the ground drawn ends first, along the theme's
  * `curve` (its palette's haze). The haze thickens in equal steps, the last shell opaque.
  */
-export function hazeShells(aboveM: number, farM = Infinity, curve: HazeCurve = AIR_HAZE): HazeShell[] {
+export function hazeShells(aboveM: number, farM: number, curve: HazeCurve): HazeShell[] {
   if (!(aboveM > 0)) return [];
   const end = Math.min(Math.sqrt(2 * EARTH_RADIUS_M * aboveM + aboveM * aboveM), farM * 0.98);
   const start = curve.start * end;

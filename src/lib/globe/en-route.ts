@@ -33,12 +33,6 @@ export function enRouteKey(e: Pick<KeyboardEvent, "key" | "code" | "ctrlKey" | "
 /** Whether a camera tilts the map into 3D, with terrain and the aircraft's model. */
 export const is3D = (camera: EnRouteCamera): camera is Exclude<EnRouteCamera, "map"> => camera !== "map";
 
-/**
- * The map's tilt limit on Map and under the Diorama, this app's own `maxPitch` map option (globe-map.ts): the
- * Diorama's cameras tilt no further, and the map follows them there.
- */
-export const MAX_PITCH = 78;
-
 /** The steepest climb or descent attitude drawn: past it the read is wrong, not the aircraft. */
 const MAX_ATTITUDE_DEG = 20;
 
@@ -209,7 +203,8 @@ export const SIGHT_MIN_M = 2_000;
 export function sightPlacement(shot: EnRouteShot, { groundM, nearestM, fovDeg }: { groundM: number; nearestM: number; fovDeg: number }): EnRouteShot {
   const above = shot.eye.altitudeM - groundM;
   if (!(above > 0)) return shot;
-  const nearPlane = (nearestM / 2) * (25 / Math.tan((fovDeg * RAD) / 2));
+  // The centre's distance at which the near plane reaches half the way to the nearest thing drawn (it grows with the distance).
+  const nearPlane = nearestM / 2 / mapNearPlane(1, fovDeg);
   const farthest = Math.max(shot.distanceM, Math.min(Math.max(above, SIGHT_MIN_M), nearPlane));
   const down = Math.cos(shot.pitchDeg * RAD);
   // Below the horizon the look meets the ground this far from the eye; at or above it, never.

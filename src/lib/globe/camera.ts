@@ -1,6 +1,11 @@
 import { type Origin, toGeo, toLocal, wrap360 } from "../geo";
 import type { OrbitView } from "../scene/orbit";
-import { MAX_PITCH } from "./en-route";
+
+/**
+ * The map's tilt limit on Map and under the Diorama, this app's own `maxPitch` map option (globe-map.ts): the
+ * Diorama's cameras tilt no further, and the map follows them there.
+ */
+export const MAX_PITCH = 78;
 
 /**
  * The map's camera and the diorama's are one camera described two ways: MapLibre's centre, zoom,

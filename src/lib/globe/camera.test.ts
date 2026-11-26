@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { finiteCamera, groundView, liftView, type MapCamera, mapHashCamera, mapToOrbit, orbitToMap, paddingFor, seenOnGround, withoutBadMapHash, worldFloor } from "./camera";
-import { MAX_PITCH } from "./en-route";
+import { finiteCamera, groundView, liftView, type MapCamera, mapHashCamera, mapToOrbit, MAX_PITCH, orbitToMap, paddingFor, seenOnGround, withoutBadMapHash, worldFloor } from "./camera";
 
 const equator = { latitude: 0, longitude: 0 };
 const atl = { latitude: 33.6367, longitude: -84.4281 };
