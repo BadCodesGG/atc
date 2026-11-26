@@ -20,6 +20,7 @@ import { remoteFlightChecks } from "./smoke-remote-flight.mjs";
 import { runwayVisibleChecks } from "./smoke-runway-visible.mjs";
 import { titleRowChecks, titleRowPointerChecks } from "./smoke-title-row.mjs";
 import { wideColumnChecks } from "./smoke-wide-column.mjs";
+import { trackerMotionChecks } from "./smoke-tracker-motion.mjs";
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
 const PORT = Number(process.env.SMOKE_PORT ?? 3119);
@@ -1127,6 +1128,9 @@ try {
 
   // A small airport's runway, drawn clearly darker than its taxiways and the ground by day (scripts/smoke-runway-visible.mjs).
   await runwayVisibleChecks({ browser, base: BASE, check });
+
+  // The Tracker's motion rules in the page's own frames: no aircraft steps back along its track or jumps as reads arrive (scripts/smoke-tracker-motion.mjs).
+  await trackerMotionChecks({ browser, base: BASE, check });
 } catch (error) {
   check("smoke run completed", false, String(error));
 } finally {
