@@ -153,12 +153,18 @@ export function skyFeatures(tracked: readonly TrackedAircraft[], origin: Origin,
   return { aircraft: { type: "FeatureCollection", features: aircraft }, trails: { type: "FeatureCollection", features: trails } };
 }
 
-/** How many of the drawn aircraft are inside `bounds`, degrees, and how many of those the filters leave showing: the header's "N aircraft in view". */
-export function countInView(aircraft: SkyFeatures["aircraft"], bounds: Bounds): { shown: number; total: number } {
+/**
+ * How many of the drawn aircraft are inside `bounds`, degrees, and how many of those the filters leave showing: the
+ * header's "N aircraft in view". The aircraft in `always` count wherever they are: the subject of the view (the
+ * followed flight in an En-route 3D camera, which Cockpit's eye sits inside and the map's bounds need not hold).
+ */
+export function countInView(aircraft: SkyFeatures["aircraft"], bounds: Bounds, always: SkyFeatures["aircraft"]["features"] = []): { shown: number; total: number } {
   let shown = 0;
   let total = 0;
-  for (const { geometry, properties } of aircraft.features) {
-    if (!inBounds(geometry.coordinates, bounds)) continue;
+  const subjects = new Set(always);
+  for (const feature of new Set([...aircraft.features, ...always])) {
+    const { geometry, properties } = feature;
+    if (!subjects.has(feature) && !inBounds(geometry.coordinates, bounds)) continue;
     total++;
     if (!properties.muted) shown++;
   }
