@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { OrbitView } from "../scene/orbit";
 import { airportByCode } from "../airports";
-import { type Band, globeCapable, Guide, guide, landingAirport, overAirport, reveal, revealMask } from "./handover";
+import { type Band, globeCapable, Guide, guide, landingAirport, overAirport, reveal, revealMask, switchesToLanding } from "./handover";
 
 const band: Band = { near: 20_000, far: 50_000 };
 const home: OrbitView = { azimuthDeg: 30, elevationDeg: 40, target: [600, -200], height: 0, distance: 11_000 };
@@ -116,6 +116,39 @@ describe("landingAirport", () => {
   it("is none from high up, or over open country", () => {
     expect(landingAirport({ lat: 32.9, lng: -97.05 }, 400_000, airports)).toBeNull();
     expect(landingAirport({ lat: 35, lng: -90 }, 30_000, airports)).toBeNull();
+  });
+});
+
+describe("switchesToLanding", () => {
+  const atl = airportByCode("atl")!;
+  const btp = airportByCode("btp")!;
+  const dfw = airportByCode("dfw")!;
+
+  it("ignores the airport just left while the map flies to the one picked", () => {
+    // Picked BTP at ATL: the page is BTP's already, the camera still low over ATL.
+    expect(switchesToLanding(atl, { here: btp.code, flyingTo: btp.code, journey: null })).toBe(false);
+    // Nor a third airport the flight passes low over on the way.
+    expect(switchesToLanding(dfw, { here: btp.code, flyingTo: btp.code, journey: null })).toBe(false);
+  });
+
+  it("switches on coming down on another airport once no flight is under way", () => {
+    expect(switchesToLanding(dfw, { here: btp.code, flyingTo: null, journey: null })).toBe(true);
+    expect(switchesToLanding(atl, { here: btp.code, flyingTo: null, journey: null })).toBe(true);
+  });
+
+  it("switches to the airport flown to, if the page is not on it", () => {
+    expect(switchesToLanding(btp, { here: atl.code, flyingTo: btp.code, journey: null })).toBe(true);
+  });
+
+  it("never switches to the airport already on show, nor with none below", () => {
+    expect(switchesToLanding(btp, { here: btp.code, flyingTo: btp.code, journey: null })).toBe(false);
+    expect(switchesToLanding(null, { here: btp.code, flyingTo: null, journey: null })).toBe(false);
+  });
+
+  it("brings a followed flight's map down only on its destination", () => {
+    expect(switchesToLanding(dfw, { here: atl.code, flyingTo: null, journey: { destination: dfw.code } })).toBe(true);
+    expect(switchesToLanding(btp, { here: atl.code, flyingTo: null, journey: { destination: dfw.code } })).toBe(false);
+    expect(switchesToLanding(btp, { here: atl.code, flyingTo: null, journey: { destination: null } })).toBe(false);
   });
 });
 

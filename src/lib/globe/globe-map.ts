@@ -224,6 +224,13 @@ export class GlobeMap {
   private frameBand: (() => { card: DOMRect | null; controls: DOMRect[] } | null) | null = null;
   /** The padding that puts the map's centre where the diorama draws the point it looks at (setAnchor): the map's own, which a 3D camera eases from. */
   private anchorPadding: Insets = { top: 0, bottom: 0, left: 0, right: 0 };
+  /**
+   * The airport a pick is flying the map to (flyToward, then the landing flyTo), until the flight ends or
+   * the reader takes the map: the page lands on no other airport meanwhile (switchesToLanding).
+   */
+  private flying: Airport["code"] | null = null;
+  /** The frame after a moveend that judges whether the map has come to rest (the constructor's moveend listener). */
+  private settle = 0;
   /** The followed aircraft as drawn and the end of its approach where it has one, [longitude, latitude], to keep in that band; empty with no aircraft drawn. */
   private framing: [number, number][] = [];
   /** The aircraft drawn last frame, which a click is matched against. */
@@ -258,7 +265,8 @@ export class GlobeMap {
       center: START.center,
       zoom: START.zoom,
       // The diorama tilts from 12 to 88 degrees above the ground: 78 to 2 degrees of pitch. This app's own
-      // limit (MAX_PITCH), not MapLibre's, and the En-route cameras' too.
+      // limit (MAX_PITCH), not MapLibre's; an En-route 3D camera raises it past level while it is on
+      // (EN_ROUTE_MAX_PITCH, en-route-controller.ts) and puts it back on Map.
       maxPitch: MAX_PITCH,
       // The address carries the map's camera, so a reload or a shared link opens on the same view.
       hash: "map",
@@ -279,6 +287,14 @@ export class GlobeMap {
     this.map.on("moveend", () => {
       this.viewNumber++;
       if (!this.driver) void this.loadRegion();
+      // Judged a frame later: a movement interrupted by the next one (flyToward by the landing flyTo) fires its
+      // moveend inside the call that starts the next, before that one is under way.
+      cancelAnimationFrame(this.settle);
+      this.settle = requestAnimationFrame(() => {
+        if (this.map.isMoving()) return;
+        this.flying = null;
+        this.applyAnchor();
+      });
     });
     // Its lost WebGL context and its drags it watches itself.
     this.enRoute = new EnRouteController(
@@ -301,6 +317,7 @@ export class GlobeMap {
     this.map.on("movestart", (e) => {
       if ((e as { originalEvent?: unknown }).originalEvent) {
         this.userMoved = true;
+        this.flying = null;
         this.onUserMove?.();
       }
     });
@@ -482,13 +499,28 @@ export class GlobeMap {
   setAnchor(anchor: { x: number; y: number }): void {
     const want = paddingFor(anchor, this.map.getContainer().clientWidth, this.map.getContainer().clientHeight);
     this.anchorPadding = want;
+    this.applyAnchor();
+  }
+
+  /**
+   * Gives the map the anchor's padding, unless the map is moving: setPadding is a jumpTo, which would stop
+   * a flight under way (a pick's flyToward, the landing flyTo) or the inertia of a drag. The movement's own
+   * end (moveend) applies it instead, and the page's flights carry it in their options.
+   */
+  private applyAnchor(): void {
     // A 3D camera sets the padding itself each frame (EnRouteController.steer), from this one.
-    if (this.enRoute.in3D) return;
+    if (this.enRoute.in3D || this.map.isMoving()) return;
+    const want = this.anchorPadding;
     const have = this.map.getPadding();
     if (Math.abs(want.left - (have.left ?? 0)) + Math.abs(want.right - (have.right ?? 0)) + Math.abs(want.top - (have.top ?? 0)) + Math.abs(want.bottom - (have.bottom ?? 0)) < 0.5) return;
     this.following = true;
     this.map.setPadding(want);
     this.following = false;
+  }
+
+  /** The airport a pick is flying the map to, while that flight is under way; null otherwise. */
+  get flyingTo(): Airport["code"] | null {
+    return this.flying;
   }
 
   /** Draws zooms into the band over the airport toward `home`; null stops it. */
@@ -549,6 +581,11 @@ export class GlobeMap {
    */
   get journeyView(): OrbitView {
     return this.enRoute.journeyShot ?? this.view;
+  }
+
+  /** The map camera of that shot: in the 3D view the journey's own flat Map camera (the map's own centre is down the 3D camera's line of sight); otherwise the map's. */
+  get journeyCamera(): MapCamera {
+    return this.enRoute.journeyCamera ?? this.camera;
   }
 
   /** Told when the 3D view gives way to Map by itself (a WebGL failure, a frame rate that stays low), with the notice to show; null stops it. */
@@ -688,15 +725,19 @@ export class GlobeMap {
   /** Flies the map to the diorama's view `view`, as Reset view does from the map. */
   flyTo(view: OrbitView): void {
     const cam = orbitToMap(view, this.airport, this.lens);
-    this.map.flyTo({ center: [cam.lng, cam.lat], zoom: cam.zoom, bearing: cam.bearing, pitch: cam.pitch, duration: 2500 });
+    // The anchor's padding rides with the flight: set apart, it would stop it (applyAnchor).
+    this.map.flyTo({ center: [cam.lng, cam.lat], zoom: cam.zoom, bearing: cam.bearing, pitch: cam.pitch, padding: this.anchorPadding, duration: 2500 });
   }
 
   /**
    * Sets off toward another airport, at a height that shows the country on the way, while its diorama
-   * loads; the page then brings the map down onto the diorama's framed view (flyTo) once it can.
+   * loads; the page then brings the map down onto the diorama's framed view (flyTo) once it can. Until
+   * that flight ends, or the reader takes the map, the map lands on no other airport (flyingTo).
    */
   flyToward(airport: Airport): void {
-    this.map.flyTo({ center: [airport.longitude, airport.latitude], zoom: 9, bearing: 0, pitch: 45, duration: 2500 });
+    // Set first: with reduced motion the flight is a jump, ended (moveend) within the call.
+    this.flying = airport.code;
+    this.map.flyTo({ center: [airport.longitude, airport.latitude], zoom: 9, bearing: 0, pitch: 45, padding: this.anchorPadding, duration: 2500 });
   }
 
   /** Routes the page has learned for the flights at a built airport: drawn as the network at country scale. */
@@ -820,6 +861,7 @@ export class GlobeMap {
     document.removeEventListener("visibilitychange", this.onShown);
     document.removeEventListener("keydown", this.onKey);
     cancelAnimationFrame(this.frame);
+    cancelAnimationFrame(this.settle);
     for (const t of this.timers) window.clearInterval(t);
     this.map.remove();
   }
@@ -862,9 +904,10 @@ export class GlobeMap {
       if (showSky) {
         const b = this.map.getBounds();
         const bounds = { west: b.getWest(), east: b.getEast(), south: b.getSouth(), north: b.getNorth() };
-        // The followed flight is drawn apart from the traffic, and counts as in view as well.
+        // The followed flight is drawn apart from the traffic, and counts as in view as well: always, while a 3D
+        // camera has it (the subject of the view, which Cockpit's eye sits inside and the map's bounds need not hold).
         const followed = this.journeyData.features.filter((f) => f.properties?.part === "aircraft") as SkyFeatures["aircraft"]["features"];
-        const counted = countInView({ type: "FeatureCollection", features: [...aircraft.features, ...followed] }, bounds);
+        const counted = this.enRoute.in3D ? countInView(aircraft, bounds, followed) : countInView({ type: "FeatureCollection", features: [...aircraft.features, ...followed] }, bounds);
         this.inView = this.traffic.size || followed.length ? counted : null;
         this.viewSubjects = subjectsInView(tracked, aircraft, bounds, (c) => this.routeOf(c));
         this.viewMilitary = militaryInView(tracked, aircraft, bounds);
