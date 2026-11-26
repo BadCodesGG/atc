@@ -18,6 +18,7 @@ import { mapSelectChecks } from "./smoke-map-select.mjs";
 import { procedureChecks } from "./smoke-procedures.mjs";
 import { remoteFlightChecks } from "./smoke-remote-flight.mjs";
 import { titleRowChecks, titleRowPointerChecks } from "./smoke-title-row.mjs";
+import { wideColumnChecks } from "./smoke-wide-column.mjs";
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
 const PORT = Number(process.env.SMOKE_PORT ?? 3119);
@@ -1106,6 +1107,9 @@ try {
   // The longest airport names in that short window's title row, which the counts must not cover (scripts/smoke-title-row.mjs).
   await titleRowChecks({ browser, base: BASE, check });
   await titleRowPointerChecks({ browser, base: BASE, check });
+
+  // A tall flight card in the wide column: the column scrolls as one to each tab's last row (scripts/smoke-wide-column.mjs).
+  await wideColumnChecks({ browser, base: BASE, check });
 
   // The published approach and climb-out paths, cited on the card (scripts/smoke-procedures.mjs).
   await procedureChecks({ browser, base: BASE, check });
