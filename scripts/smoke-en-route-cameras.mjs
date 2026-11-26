@@ -17,10 +17,8 @@
  */
 
 import { launchChrome } from "./lib/chrome.mjs";
-import { CALLSIGN, GLOBE, HEX, STATE, TILE } from "./smoke-en-route-chase.mjs";
-import { waitForTruthy } from "./smoke-journey-procedures.mjs";
-
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+import { CALLSIGN, flatTerrain, HEX, STATE } from "./lib/en-route.mjs";
+import { GLOBE, sleep, waitForTruthy } from "./lib/page.mjs";
 
 const TRACK = 270;
 /** What each camera's map camera should be for the westbound flight: bearing, pitch, each to within `tol` degrees. */
@@ -60,7 +58,7 @@ export async function enRouteCameraChecks({ browser, base, check }) {
   const problems = [];
   page.on("pageerror", (e) => problems.push(String(e)));
   page.on("console", (m) => m.type() === "error" && problems.push(m.text()));
-  await page.route("**/elevation-tiles-prod/terrarium/**", (r) => r.fulfill({ status: 200, contentType: "image/png", body: TILE, headers: { "access-control-allow-origin": "*" } }));
+  await flatTerrain(page);
   const t0 = Date.now() / 1000;
   let reads = 0;
   await page.route(`**/api/hex/${HEX}`, (r) => {

@@ -11,31 +11,15 @@
  */
 
 import { launchChrome } from "./lib/chrome.mjs";
-import { waitForTruthy } from "./smoke-journey-procedures.mjs";
+import { fiber, GLOBE, sleep, waitForTruthy } from "./lib/page.mjs";
 
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-
-const FIBER = (test, from = "main", ref = false) => `(() => {
-  const el = document.querySelector(${JSON.stringify(from)});
-  const key = el && Object.keys(el).find((k) => k.startsWith("__reactFiber$"));
-  if (!key) return null;
-  for (let f = el[key]; f; f = f.return) {
-    for (let h = f.memoizedState; h; h = h.next) {
-      const c = h.memoizedState && h.memoizedState.current;
-      if (c && ${test}) return ${ref ? "h.memoizedState" : "c"};
-    }
-  }
-  return null;
-})()`;
-/** The map's instance. */
-const GLOBE = FIBER(`c.map && typeof c.map.project === "function" && c.drawn`);
 /** The journey, or null with none. */
-const JOURNEY = FIBER(`typeof c === "object" && typeof c.stage === "string" && typeof c.hex === "string" && c.origin`);
+const JOURNEY = fiber(`typeof c.stage === "string" && typeof c.hex === "string" && c.origin`);
 /** The diorama's follow (the aircraft its camera follows), or null; it lives in the Viewer, below `main`, so it is found from the model's own element. */
 const FOLLOW_TEST = `typeof c === "object" && typeof c.id === "string" && typeof c.distance === "number" && "angle" in c`;
-const FOLLOW = FIBER(FOLLOW_TEST, "[role='application']");
+const FOLLOW = fiber(FOLLOW_TEST, { from: "[role='application']" });
 /** The same, as the ref that holds it, so a check can clear it. */
-const FOLLOW_REF = FIBER(FOLLOW_TEST, "[role='application']", true);
+const FOLLOW_REF = fiber(FOLLOW_TEST, { from: "[role='application']", ref: true });
 /** What the page shows of the flight: the diorama's selected card, the map's followed card, and the journey panel. */
 const SHOWN = `(() => {
   const text = (s) => { const e = document.querySelector(s); return e ? e.innerText.replace(/\\s+/g, " ") : null; };

@@ -124,7 +124,7 @@ export async function mapSelectChecks({ browser, base, check }) {
     await page.mouse.click(again.x, again.y);
     await card.waitFor({ timeout: 15_000 }).catch(() => {});
     const speed = await card.locator("dl").innerText().catch(() => "");
-    await page.evaluate(`(() => { const g = ${GLOBE}; g.sky.tracks.delete("${HEX}"); })()`);
+    await page.evaluate(`(() => { const g = ${GLOBE}; g.ownTracker.tracks.delete("${HEX}"); })()`);
     await sleep(1500);
     const lost = (await card.locator("[data-note]").innerText().catch(() => "")) || "";
     check("map select: a flight that leaves the feed is said to be lost, with when it was last seen", /^Not in the feed now\. Last seen \d\d:\d\d\.$/.test(lost), lost);

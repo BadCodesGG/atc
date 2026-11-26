@@ -13,97 +13,20 @@
  * scripts/smoke-journey-live.mjs does.
  */
 
-import { deflateSync } from "node:zlib";
 import { launchChrome } from "./lib/chrome.mjs";
-import { waitForTruthy } from "./smoke-journey-procedures.mjs";
-
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-
-/** The map's instance (GlobeMap), found through React's fiber from `main`. */
-export const GLOBE = `(() => {
-  const el = document.querySelector("main");
-  const key = el && Object.keys(el).find((k) => k.startsWith("__reactFiber$"));
-  if (!key) return null;
-  for (let f = el[key]; f; f = f.return) {
-    for (let h = f.memoizedState; h; h = h.next) {
-      const c = h.memoizedState && h.memoizedState.current;
-      if (c && c.map && typeof c.map.project === "function" && c.drawn) return c;
-    }
-  }
-  return null;
-})()`;
-
-/** What the map has of the En-route view now. */
-export const STATE = `(() => {
-  const g = ${GLOBE};
-  if (!g) return null;
-  const m = g.map;
-  const layer = m.getLayer("en-route-aircraft");
-  const credit = document.querySelector(".maplibregl-ctrl-attrib-inner");
-  return {
-    camera: g.enRouteCamera,
-    source: m.getSource("terrain")?.type ?? null,
-    terrain: m.getTerrain(),
-    layer: layer ? layer.type : null,
-    drawn: layer ? layer.implementation.drawnFrames : 0,
-    pitch: m.getPitch(),
-    credit: credit ? credit.textContent : "",
-    pressed: document.querySelector("[role='group'][aria-label='En-route camera'] button[aria-pressed='true']")?.textContent?.trim() ?? null,
-  };
-})()`;
-
-// A Terrarium tile all at one height: height = R * 256 + G + B / 256 - 32768.
-const crcTable = Array.from({ length: 256 }, (_, n) => {
-  let c = n;
-  for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
-  return c >>> 0;
-});
-const crc32 = (buf) => {
-  let c = 0xffffffff;
-  for (const b of buf) c = crcTable[(c ^ b) & 255] ^ (c >>> 8);
-  return (c ^ 0xffffffff) >>> 0;
-};
-const chunk = (type, data) => {
-  const out = Buffer.alloc(12 + data.length);
-  out.writeUInt32BE(data.length, 0);
-  out.write(type, 4, "ascii");
-  data.copy(out, 8);
-  out.writeUInt32BE(crc32(out.subarray(4, 8 + data.length)), 8 + data.length);
-  return out;
-};
-function flatTile(heightM, size = 256) {
-  const v = heightM + 32768;
-  const [r, g, b] = [Math.floor(v / 256), Math.floor(v) % 256, Math.round((v % 1) * 256)];
-  const raw = Buffer.alloc(size * (1 + size * 3));
-  for (let y = 0; y < size; y++) {
-    const row = y * (1 + size * 3);
-    for (let x = 0; x < size; x++) raw.set([r, g, b], row + 1 + x * 3);
-  }
-  const header = Buffer.alloc(13);
-  header.writeUInt32BE(size, 0);
-  header.writeUInt32BE(size, 4);
-  header.set([8, 2, 0, 0, 0], 8);
-  return Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk("IHDR", header), chunk("IDAT", deflateSync(raw)), chunk("IEND", Buffer.alloc(0))]);
-}
-export const TILE = flatTile(300);
-
-/**
- * JBU1897 (hex a37fb0) is in the fixture's sky 51 NM west of Atlanta. Picked on the map and followed, its
- * own reads have it cruising west at 11,000 ft, climbing gently, with no route: the journey stays on the map.
- */
-export const HEX = "a37fb0";
-export const CALLSIGN = "JBU1897";
+import { CALLSIGN, flatTerrain, HEX, STATE } from "./lib/en-route.mjs";
+import { GLOBE, sleep, waitForTruthy } from "./lib/page.mjs";
 
 export async function enRouteChaseChecks({ browser, base, check, shots = null }) {
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
   const problems = [];
+  const blocked = [];
   page.on("pageerror", (e) => problems.push(String(e)));
-  page.on("console", (m) => m.type() === "error" && problems.push(m.text()));
-  const terrainAsked = [];
-  await page.route("**/elevation-tiles-prod/terrarium/**", (r) => {
-    terrainAsked.push(r.request().url());
-    return r.fulfill({ status: 200, contentType: "image/png", body: TILE, headers: { "access-control-allow-origin": "*" } });
+  page.on("console", (m) => {
+    if (m.type() === "error") problems.push(m.text());
+    if (/Content Security Policy/i.test(m.text())) blocked.push(m.text());
   });
+  const terrainAsked = await flatTerrain(page);
   const t0 = Date.now() / 1000;
   await page.route(`**/api/hex/${HEX}`, (r) => {
     const now = Date.now() / 1000;
@@ -140,6 +63,12 @@ export async function enRouteChaseChecks({ browser, base, check, shots = null })
   check("en-route: Chase turns on the raster-dem terrain source and the terrain, and adds the aircraft's custom layer, which draws", chased && inChase.camera === "chase" && inChase.pressed === "Chase", JSON.stringify({ ...inChase, credit: undefined }));
   check("en-route: Chase tilts the map behind the aircraft, within the map's 78 degrees", inChase.pitch > 60 && inChase.pitch <= 78, `pitch ${inChase.pitch}`);
   check("en-route: Chase loads the terrain tiles", terrainAsked.length > 0, `${terrainAsked.length} asked`);
+  // The Content-Security-Policy lets the tiles in through connect-src alone (src/lib/csp.ts): MapLibre fetches
+  // them, so a tile the policy blocked would never reach the route, and an <img> load would need img-src.
+  const kinds = [...new Set(terrainAsked.map((a) => a.type))];
+  check("en-route: the terrain tiles are fetched (connect-src), never loaded as images", kinds.length === 1 && kinds[0] === "fetch", kinds.join(", "));
+  check("en-route: the tiles come from the Terrarium path the policy names", terrainAsked.every((a) => a.url.startsWith("https://s3.amazonaws.com/elevation-tiles-prod/terrarium/")), terrainAsked[0]?.url ?? "none");
+  check("en-route: no Content-Security-Policy violation", blocked.length === 0, blocked.slice(0, 2).join(" | "));
   check("en-route: the terrain's credit shows in Chase", /Terrain Tiles/.test(inChase.credit), inChase.credit);
 
   // The model where the camera looks: the screen round the map's centre point, with the layer and without.

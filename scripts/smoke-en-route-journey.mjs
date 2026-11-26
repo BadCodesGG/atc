@@ -20,27 +20,13 @@
  */
 
 import { launchChrome } from "./lib/chrome.mjs";
-import { CALLSIGN, GLOBE, HEX, STATE, TILE } from "./smoke-en-route-chase.mjs";
-import { waitForTruthy } from "./smoke-journey-procedures.mjs";
+import { CALLSIGN, flatTerrain, HEX, STATE } from "./lib/en-route.mjs";
+import { fiber, GLOBE, sleep, waitForTruthy } from "./lib/page.mjs";
 
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-
-const FIBER = (test, from = "main") => `(() => {
-  const el = document.querySelector(${JSON.stringify(from)});
-  const key = el && Object.keys(el).find((k) => k.startsWith("__reactFiber$"));
-  if (!key) return null;
-  for (let f = el[key]; f; f = f.return) {
-    for (let h = f.memoizedState; h; h = h.next) {
-      const c = h.memoizedState && h.memoizedState.current;
-      if (c && ${test}) return c;
-    }
-  }
-  return null;
-})()`;
 /** The journey, or null with none. */
-const JOURNEY = FIBER(`typeof c === "object" && typeof c.stage === "string" && typeof c.hex === "string" && c.origin`);
+const JOURNEY = fiber(`typeof c.stage === "string" && typeof c.hex === "string" && c.origin`);
 /** The Diorama's camera rig (Orbit, Tower, Drone, Approach), found from the model's own element. */
-const RIG = FIBER(`typeof c === "object" && typeof c.mode === "string" && typeof c.lookBy === "function"`, "[role='application']");
+const RIG = fiber(`typeof c.mode === "string" && typeof c.lookBy === "function"`, { from: "[role='application']" });
 
 /** What the page shows of the journey and the En-route view now. */
 const SAMPLE = `(() => {
@@ -62,21 +48,11 @@ const SAMPLE = `(() => {
     pitch: g ? g.map.getPitch() : null,
     bearing: g ? g.map.getBearing() : null,
     zoom: g ? g.map.getZoom() : null,
-    share: g ? g.share : null,
+    share: g ? g.enRoute.share : null,
     mode: rig ? rig.mode : null,
     card: card ? card.innerText.replace(/\\s+/g, " ").slice(0, 140) : "",
   };
 })()`;
-
-/** Answers the terrain tiles with a flat tile, and counts them. */
-async function flatTerrain(page) {
-  const asked = [];
-  await page.route("**/elevation-tiles-prod/terrarium/**", (r) => {
-    asked.push(r.request().url());
-    return r.fulfill({ status: 200, contentType: "image/png", body: TILE, headers: { "access-control-allow-origin": "*" } });
-  });
-  return asked;
-}
 
 /** How long the page may show nothing new before the gate-to-gate run gives up on it, and the most it may take in all. */
 const STALL_MS = 120_000;

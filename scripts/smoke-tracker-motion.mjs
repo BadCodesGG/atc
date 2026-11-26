@@ -12,7 +12,7 @@
  */
 
 import { launchChrome } from "./lib/chrome.mjs";
-import { waitForTruthy } from "./smoke-journey-procedures.mjs";
+import { waitForTruthy } from "./lib/page.mjs";
 
 /**
  * The same figures as src/lib/tracker.ts (KNOTS, STOPPED_KT, CORRECTION_SNAP, STEP_FLOOR, MAX_FRAME_GAP),

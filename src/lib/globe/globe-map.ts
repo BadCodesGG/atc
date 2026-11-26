@@ -165,6 +165,8 @@ export class GlobeMap {
    * holding the recorded regions as one moment, flown on.
    */
   private traffic: MapFeed;
+  /** The map's own tracker, behind `traffic` with the fixture (and live until setSky): the recorded regions as one moment. */
+  private readonly ownTracker: Tracker;
   /** The page's shared sky, once the page has given it (live only). */
   private sharedSky: SharedSky | null = null;
   /** The moment the traffic is drawn at, on the feed's clock: the shared sky's frame time; for the fixture, the recorded moment running on from when the page opened. */
@@ -242,6 +244,7 @@ export class GlobeMap {
     this.globe = globeCapable(rendererName());
     // The fixture's recorded regions, and live an empty map until the page gives it its shared sky's feed.
     const own = new Tracker({ deadReckonMax: options.fixture ? Infinity : REGION_RECKON });
+    this.ownTracker = own;
     this.traffic = {
       add: (snapshot) => own.add(snapshot),
       at: (time) => own.at(time),
