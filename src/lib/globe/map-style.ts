@@ -321,7 +321,7 @@ export function flatSky(key: ThemeKey): SkySpecification {
  */
 export function enRouteSky(key: ThemeKey): SkySpecification {
   const air = THEMES[key].eyeLevel;
-  return { "sky-color": air.zenith, "horizon-color": air.horizon, "fog-color": air.ground ?? air.horizon, "sky-horizon-blend": 0.7, "horizon-fog-blend": 0.5, "fog-ground-blend": 0.4, "atmosphere-blend": 0 };
+  return { "sky-color": air.zenith, "horizon-color": air.horizon, "fog-color": air.ground ?? air.horizon, "sky-horizon-blend": 0.2, "horizon-fog-blend": 0.3, "fog-ground-blend": 0.25, "atmosphere-blend": 0 };
 }
 
 /** The En-route view's hillshade layer id. */
