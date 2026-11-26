@@ -204,6 +204,8 @@ interface FlightCardProps {
   procedure?: string | null;
   /** The card's flight followed gate to gate: the route line becomes the journey's progress. */
   journey?: JourneyViewData | null;
+  /** The En-route view's camera switch, while the journey's flight is still in the origin's Diorama or fading out of it: a 3D camera picked here takes over once the flight leaves it. */
+  enRoute?: { camera: EnRouteCamera; cameras: readonly EnRouteCamera[]; onChange: (camera: EnRouteCamera) => void } | null;
   /** Lower-case code of the airport on screen. */
   here: string;
   /** The FAA's delay programs: undefined while loading, null when the feed failed. */
@@ -234,7 +236,7 @@ const CHECK = (
   </svg>
 );
 
-export function FlightCard({ card, procedure = null, here, status, following, onFollow, journey = null, phase, note = null, unavailable = false, compact = false }: FlightCardProps) {
+export function FlightCard({ card, procedure = null, here, status, following, onFollow, journey = null, enRoute = null, phase, note = null, unavailable = false, compact = false }: FlightCardProps) {
   // Which flight the compact card was opened for: picking another one starts it folded again.
   const [openFor, setOpenFor] = useState<string | null>(null);
   // The diorama's card and the map's can both be on the page: each names its own details.
@@ -301,6 +303,7 @@ export function FlightCard({ card, procedure = null, here, status, following, on
           </button>
         </div>
       </div>
+      {enRoute && <EnRouteSwitch camera={enRoute.camera} cameras={enRoute.cameras} onChange={enRoute.onChange} />}
       {compact && (
         <button
           type="button"
@@ -428,8 +431,9 @@ const EN_ROUTE_LABELS: Record<EnRouteCamera, string> = { map: "Map", chase: "Cha
 
 /**
  * The En-route view's camera switch on the Journey card: the flat map, or a 3D camera riding along with the
- * flight. Offered while the map follows the flight (`cameras`), on every viewport; the keys 1 to 5 pick
- * them too (enRouteKey), as each button's shortcut says.
+ * flight. Offered from the origin's Diorama (on the flight card there) until the destination's has the
+ * flight (`cameras`), on every viewport; the keys 1 to 5 pick them too (enRouteKey), as each button's
+ * shortcut says.
  */
 export function EnRouteSwitch({ camera, cameras, onChange }: { camera: EnRouteCamera; cameras: readonly EnRouteCamera[]; onChange: (camera: EnRouteCamera) => void }) {
   return (
@@ -462,6 +466,7 @@ export function JourneyCard({
   camera,
   cameras,
   onCamera,
+  notice = null,
 }: {
   journey: JourneyViewData;
   onStop: () => void;
@@ -469,6 +474,8 @@ export function JourneyCard({
   camera: EnRouteCamera;
   cameras: readonly EnRouteCamera[] | null;
   onCamera: (camera: EnRouteCamera) => void;
+  /** Says the 3D view gave way to Map by itself (WebGL failed, or it could not keep up); null with nothing to say. */
+  notice?: string | null;
 }) {
   const facts: [string, string][] = [
     ["Speed", journey.speed],
@@ -499,6 +506,10 @@ export function JourneyCard({
         </div>
       </div>
       {cameras && <EnRouteSwitch camera={camera} cameras={cameras} onChange={onCamera} />}
+      {/* Always there, empty and hidden while there is nothing to say: a live region announces only what changes inside it once it exists. */}
+      <p data-en-route-notice role="status" className={notice ? "text-xs text-ink-2" : "sr-only"}>
+        {notice}
+      </p>
       <JourneyPanel journey={journey} />
       <dl className="flex justify-between gap-x-6 max-xl:short:hidden">
         {facts.map(([label, value]) => (

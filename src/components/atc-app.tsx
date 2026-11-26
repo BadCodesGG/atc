@@ -12,6 +12,7 @@ import { AIRCRAFT_GLYPH, BEACON_RADIUS_PX, GLYPH_BOX, GLYPH_PX } from "@/lib/glo
 import { groundView, liftView, mapHashCamera, orbitToMap, withoutBadMapHash } from "@/lib/globe/camera";
 import { journeyIconSize, PALETTES } from "@/lib/globe/map-style";
 import { EN_ROUTE_OFFERED, type EnRouteCamera, enRouteKey } from "@/lib/globe/en-route";
+import { arrivalCamera, enRouteOffered, enRouteShare, mapCamera, shareReach } from "@/lib/globe/en-route-journey";
 import { fogReach } from "@/lib/journey";
 import { type Band, landingAirport, overAirport, reveal, revealMask } from "@/lib/globe/handover";
 import { type Filters, filterOptions, type FilterOptions, filtersActive, Ghosts, GHOST_MS, matches, NO_OPTIONS, rememberSeen, snapshotSubject, type Subject, subjectOfEntry, withFilters } from "@/lib/filters";
@@ -103,6 +104,8 @@ const KEY_PAN = 0.15;
  */
 const HANDOVER_FAR = 3.2;
 const HANDOVER_MAX_M = 55_000;
+/** How long the Journey card says the 3D view gave way to Map, ms. */
+const NOTICE_MS = 8000;
 /** How often the map under the diorama is moved to keep up with it, ms: it is hidden, so only its tiles need to be ready. */
 const MAP_FOLLOW_MS = 250;
 /** How far down the frame, CSS pixels, the colour under the header's fade is read: the middle of its solid part. */
@@ -182,9 +185,11 @@ interface World {
   mapCardRef: RefObject<HTMLDivElement | null>;
   /** The journey's card on the map. */
   journeyCardRef: RefObject<HTMLDivElement | null>;
-  /** The En-route view's camera while a journey is on the map (Map when Following starts), and the pick of another. */
+  /** The En-route view's camera chosen on the journey (Map when Following starts), and the pick of another. */
   enRoute: EnRouteCamera;
   chooseEnRoute: (camera: EnRouteCamera) => void;
+  /** The short notice that the 3D view gave way to Map by itself; null with none. */
+  enRouteNotice: string | null;
 }
 
 let webgl2: boolean | null = null;
@@ -372,24 +377,37 @@ export function AtcApp({ initialTheme, initialAirport, initialFilters }: { initi
   const journeyGeneration = useRef(0);
   /** Brings the journey card up to date now rather than at the timer's next tick. */
   const journeyRefresh = useRef<() => void>(() => {});
+  /** The En-route camera chosen on the Journey card, and the ref the map's handlers read it from. */
   const [enRoute, setEnRoute] = useState<EnRouteCamera>("map");
+  const enRouteRef = useRef<EnRouteCamera>("map");
+  /** The notice the Journey card shows when the 3D view gave way to Map by itself; null with none. */
+  const [enRouteNotice, setEnRouteNotice] = useState<string | null>(null);
+  const noticeTimer = useRef(0);
+  /** The camera the card shows chosen, and the notice under it (null clears it), both at once. */
+  const setChosen = (camera: EnRouteCamera, notice: string | null = null) => {
+    enRouteRef.current = camera;
+    setEnRoute(camera);
+    setEnRouteNotice(notice);
+    window.clearTimeout(noticeTimer.current);
+    if (notice) noticeTimer.current = window.setTimeout(() => setEnRouteNotice(null), NOTICE_MS);
+  };
+  /** The 3D view gave way to Map by itself: the card shows Map chosen, and says why for a while. Read by the map through a ref, as it is made once. */
+  const fallbackRef = useRef((notice: string) => setChosen("map", notice));
+  useEffect(() => {
+    fallbackRef.current = (notice: string) => setChosen("map", notice);
+  });
   /**
-   * Picks the En-route view's camera. Leaving a 3D camera, the journey's own shot eases in from the camera
-   * the map had, as it does when the map takes the camera from a diorama.
+   * Picks the En-route view's camera. The map takes it while it follows the flight; picked in the origin's
+   * Diorama, it waits there and takes over once the map has the flight (mapCamera, journeyToMap).
    */
   const chooseEnRoute = (camera: EnRouteCamera) => {
-    const globe = globeRef.current;
-    if (!globe) return;
-    const left = globe.setEnRouteCamera(camera);
-    const j = journeyRef.current;
-    // Only back on the flat map: from one 3D camera to another the journey's own shot runs on untouched.
-    if (left && camera === "map" && j?.stage === "map") j.toMap(left, airportByCode(globe.airportCode) ?? j.origin, performance.now());
-    setEnRoute(camera);
+    setChosen(camera);
+    globeRef.current?.setEnRouteCamera(mapCamera(journeyRef.current?.stage ?? "map", camera));
   };
   // The cameras' keys (1 to 5, enRouteKey) while the Journey card offers them, outside a field being typed in.
   const enRouteKeys = useRef({ offered: false, choose: chooseEnRoute });
   useEffect(() => {
-    enRouteKeys.current = { offered: journey?.stage === "map", choose: chooseEnRoute };
+    enRouteKeys.current = { offered: !!journey && enRouteOffered(journey.stage), choose: chooseEnRoute };
   });
   useEffect(() => {
     const onKey = (e: globalThis.KeyboardEvent) => {
@@ -402,10 +420,10 @@ export function AtcApp({ initialTheme, initialAirport, initialFilters }: { initi
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   }, []);
-  /** Back to Map with the journey over or handed to a diorama: no camera of the journey's to ease in. */
+  /** Back to Map at once with the journey over or handed to a diorama: no camera of the journey's to ease into. */
   const flattenEnRoute = () => {
-    globeRef.current?.setEnRouteCamera("map");
-    setEnRoute("map");
+    globeRef.current?.setEnRouteCamera("map", true);
+    setChosen("map");
   };
   const stopJourney = () => {
     journeyGeneration.current++;
@@ -451,18 +469,19 @@ export function AtcApp({ initialTheme, initialAirport, initialFilters }: { initi
     leadRef.current = { by: "map", armed: false, land: false };
     globe.handBack(view);
     j.toMap(view, at, now);
+    // A 3D camera picked in the origin's Diorama takes over from here, as the flight leaves it (mapCamera),
+    // starting flat: the flight is in the origin's Handover band.
+    globe.startEnRoute();
+    globe.setEnRouteCamera(mapCamera(j.stage, enRouteRef.current));
     globe.setDriver((frame) => {
       const steer = j.mapView(frame);
       if (!steer) return;
-      if (globe.enRouteCamera === "map") {
+      // The 3D view frames the flight itself, from the same fix, eased into the journey's own shot as far as
+      // the Handover asks; the journey's lines lie on the flight's true ground track then.
+      if (globe.steerEnRoute(steer.fix, steer.view, steer.frame, frame)) globe.setJourney(j.hex, j.features(null, steer.frame));
+      else {
         globe.followView(steer.view, steer.frame);
         globe.setJourney(j.hex, j.features(steer.view, steer.frame));
-      } else {
-        // A 3D camera frames the flight itself, from the same fix; the journey's lines lie on its true ground track.
-        // The Handover reads the journey's own shot as it would settle, not one still easing out of a 3D
-        // camera just left: that one is close in, and would read as the flight coming into an airport's band.
-        globe.steerEnRoute(steer.fix, steer.ideal, steer.frame, frame);
-        globe.setJourney(j.hex, j.features(null, steer.frame));
       }
       // The card cites what the map was just given, in the same task: not a timer's tick later.
       if (j.citeChanged()) flushSync(journeyRefresh.current);
@@ -482,6 +501,7 @@ export function AtcApp({ initialTheme, initialAirport, initialFilters }: { initi
       // A start still waiting for the feed source must not build its journey once the page is gone.
       journeyGeneration.current++;
       window.clearInterval(journeyTimer.current);
+      window.clearTimeout(noticeTimer.current);
     },
     [],
   );
@@ -506,8 +526,11 @@ export function AtcApp({ initialTheme, initialAirport, initialFilters }: { initi
       const hash = withoutBadMapHash(window.location.hash);
       if (hash !== window.location.hash) window.history.replaceState(window.history.state, "", `${window.location.pathname}${window.location.search}${hash}`);
       const named = mapHashCamera(hash) !== null;
-      globe = new GlobeMap(container, { theme: themeRef.current, airport: airportRef.current, fixture });
+      // `?fps=hold` keeps a 3D camera on software GL, which the smokes draw with at a few frames a second.
+      globe = new GlobeMap(container, { theme: themeRef.current, airport: airportRef.current, fixture, holdFrameRate: params.get("fps") === "hold" });
       globeRef.current = globe;
+      // The 3D view gave way to Map by itself: the card says so for a while, and shows Map picked.
+      globe.setEnRouteFallback((notice) => fallbackRef.current(notice));
       setGlobeReady(true);
       // Live, the map reads its regions into the page's one tracker and draws from it.
       if (!fixture) {
@@ -613,7 +636,7 @@ export function AtcApp({ initialTheme, initialAirport, initialFilters }: { initi
     setSwitched(true);
   };
 
-  const world: World = { globeRef, leadRef, mapRef, setLead, onMap, source, sky, journeyRef, journey, journeyHexRef, startJourney, stopJourney, journeyToMap, journeyLanded, showMap: setOnMap, radar, alerts, mapFlight, globeReady, mapCardRef, journeyCardRef, enRoute, chooseEnRoute };
+  const world: World = { globeRef, leadRef, mapRef, setLead, onMap, source, sky, journeyRef, journey, journeyHexRef, startJourney, stopJourney, journeyToMap, journeyLanded, showMap: setOnMap, radar, alerts, mapFlight, globeReady, mapCardRef, journeyCardRef, enRoute, chooseEnRoute, enRouteNotice };
   return (
     <main data-theme={theme} data-on-map={onMap || undefined} className="relative h-dvh w-full overflow-clip bg-paper font-sans text-ink">
       {/* The world map, under the diorama; shown once the page knows which of the two leads. MapLibre's
@@ -1092,9 +1115,9 @@ function Viewer({ airport, theme, onTheme, onAirport, filters, onFilters, focusP
     refreshRef.current = true;
   };
   // /journey
-  const actionsRef = useRef({ toMap, mapLeading, outToMap, onAirport, landed, journeyOut, journeyLanded: world.journeyLanded, stopJourney: world.stopJourney, clearFollow, showMap: world.showMap, setLead, chooseEnRoute: world.chooseEnRoute });
+  const actionsRef = useRef({ toMap, mapLeading, outToMap, onAirport, landed, journeyOut, journeyLanded: world.journeyLanded, stopJourney: world.stopJourney, clearFollow, showMap: world.showMap, setLead, chooseCamera });
   useEffect(() => {
-    actionsRef.current = { toMap, mapLeading, outToMap, onAirport, landed, journeyOut, journeyLanded: world.journeyLanded, stopJourney: world.stopJourney, clearFollow, showMap: world.showMap, setLead, chooseEnRoute: world.chooseEnRoute };
+    actionsRef.current = { toMap, mapLeading, outToMap, onAirport, landed, journeyOut, journeyLanded: world.journeyLanded, stopJourney: world.stopJourney, clearFollow, showMap: world.showMap, setLead, chooseCamera };
   });
   // /globe
 
@@ -1532,7 +1555,14 @@ function Viewer({ airport, theme, onTheme, onAirport, filters, onFilters, focusP
         // journey
         const j = journeyRef.current;
         const journeying = j?.stage === "map";
-        if (journeying) globe.drive(now, true);
+        if (journeying) {
+          // A 3D camera gives way to the Handover at the end of the journey this Diorama is, as the journey's
+          // own shot comes near its band (enRouteShare); between the two ends there is no band to give way to.
+          const v = globe.journeyView;
+          const atEnd = (airport.code === j.origin.code || airport.code === j.destination?.code) && overAirport(v, scene.homeView, shareReach(band));
+          globe.setEnRouteShare(enRouteShare(v.distance, atEnd ? band : null));
+          globe.drive(now, true);
+        }
         // /journey
         if (lead.by === "map") {
           if (lead.land) {
@@ -1558,13 +1588,10 @@ function Viewer({ airport, theme, onTheme, onAirport, filters, onFilters, focusP
           if (shown < 0.98) lead.armed = true;
           globe.setGuide({ home: scene.homeView, band });
           // journey
-          if (journeying && globe.enRouteCamera !== "map") {
-            // A 3D camera keeps the diorama out of the way, and gives the camera back to Map as the flight comes into an
-            // airport's band, so the usual Handover runs from the flat map.
-            if (shown > 0) actionsRef.current.chooseEnRoute("map");
-            shown = 0;
-          }
           if (journeying) {
+            // The 3D view keeps the diorama out of the way as far as it has the camera: it has eased into the
+            // journey's own shot, the flat camera the diorama is drawn on, by the time the band begins.
+            shown *= 1 - globe.enRouteBlend;
             const entry = entries.find((e) => e.aircraft.id === j.hex);
             if (entry) {
               const shot = j.shot(journeyFix(entry, airport));
@@ -1584,7 +1611,10 @@ function Viewer({ airport, theme, onTheme, onAirport, filters, onFilters, focusP
               goalRef.current = null;
               followRef.current = { id: j.hex, distance: aimed.distance, angle: { azimuthDeg: aimed.azimuthDeg, elevationDeg: aimed.elevationDeg } };
               pickedRef.current = j.hex;
+              // Ridden in a 3D camera, the flight is taken up in the destination's Approach camera when it has one for it, else in Orbit.
+              const rode = globe.enRouteCamera !== "map";
               actionsRef.current.journeyLanded();
+              if (rode) actionsRef.current.chooseCamera(arrivalCamera(cameraModes(map, { runway: entry.situation.runway, state: entry.situation.state })));
               actionsRef.current.setLead("scene");
               refreshRef.current = true;
               stage.style.opacity = "1";
@@ -2176,7 +2206,7 @@ function Viewer({ airport, theme, onTheme, onAirport, filters, onFilters, focusP
   const stacked = useMedia(STACKED, true);
   // A phone's flight card opens as a summary, so the model keeps the screen; a tablet has the room for all of it.
   const compactCard = useMedia(PHONE);
-  const flightCard = <FlightCard key="card" compact={compactCard} card={chrome.card} procedure={chrome.procedure} here={airport.code} status={nas} following={chrome.following} onFollow={follow} journey={chrome.card && journey?.hex === chrome.card.id ? journeyPanel : null} />;
+  const flightCard = <FlightCard key="card" compact={compactCard} card={chrome.card} procedure={chrome.procedure} here={airport.code} status={nas} following={chrome.following} onFollow={follow} journey={chrome.card && journey?.hex === chrome.card.id ? journeyPanel : null} enRoute={chrome.card && journey?.hex === chrome.card.id && enRouteOffered(journey.stage) ? { camera: world.enRoute, cameras: EN_ROUTE_OFFERED, onChange: world.chooseEnRoute } : null} />;
   const trafficTabs = <ColumnPanel key="tabs" movements={chrome.movements} ops={ops} filtered={filtersActive(filters)} readout={readout} onSelect={selectFlight} />;
   const dioramaColumn = (
     <div key="diorama-column" className={dioramaOnly}>
@@ -2204,7 +2234,7 @@ function Viewer({ airport, theme, onTheme, onAirport, filters, onFilters, focusP
     ),
     onMap && journeyPanel && (
       <div key="journey-card" ref={journeyCardRef} className="pointer-events-none absolute inset-x-4 top-[132px] flex flex-col xl:left-auto xl:right-8 xl:top-[104px] xl:w-[300px]">
-        <JourneyCard journey={journeyPanel} onStop={world.stopJourney} camera={world.enRoute} cameras={journey?.stage === "map" ? EN_ROUTE_OFFERED : null} onCamera={world.chooseEnRoute} />
+        <JourneyCard journey={journeyPanel} onStop={world.stopJourney} camera={world.enRoute} cameras={journey && enRouteOffered(journey.stage) ? EN_ROUTE_OFFERED : null} onCamera={world.chooseEnRoute} notice={world.enRouteNotice} />
       </div>
     ),
   ];

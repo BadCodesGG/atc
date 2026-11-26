@@ -431,10 +431,9 @@ export class Journey {
    * The map's camera for this frame, while the map leads: the journey's shot of the flight, on the ground
    * (the map looks at nothing else), turned and tilted toward the shot's at an even pace, with what it
    * took over from the diorama dying away. Returns the view, in metres from `frame` (the aircraft's ground
-   * point this frame), the same shot with nothing of the takeover left (`ideal`: what an En-route 3D camera
-   * hands the Handover, as no flat camera is shown to ease), and the fix, or null with no fix.
+   * point this frame), and the fix, or null with no fix.
    */
-  mapView(now: number): { view: OrbitView; ideal: OrbitView; fix: JourneyFix; frame: Origin } | null {
+  mapView(now: number): { view: OrbitView; fix: JourneyFix; frame: Origin } | null {
     const fix = this.fix();
     if (!fix || !this.cam) return null;
     const cam = this.cam;
@@ -449,7 +448,7 @@ export class Journey {
     if (!looking) return null;
     const ideal = this.groundShot(fix, shot, looking);
     const view: OrbitView = { ...ideal, target: [ideal.target[0] + cam.offset[0], ideal.target[1] + cam.offset[1]], distance: ideal.distance * cam.scale };
-    return { view, ideal, fix, frame: { latitude: fix.latitude, longitude: fix.longitude } };
+    return { view, fix, frame: { latitude: fix.latitude, longitude: fix.longitude } };
   }
 
   /**

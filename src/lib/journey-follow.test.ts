@@ -510,18 +510,26 @@ describe("the SID of a flight followed from its origin", () => {
 });
 
 describe("the map's camera taking over from another", () => {
-  it("eases out of the camera it took over from, while its ideal is the journey's own shot already", () => {
-    const j = follow({});
-    const now = performance.now();
-    j.sight(fix, now);
+  it("eases out of the camera it took over from onto the journey's own shot, whichever camera that was", () => {
     const close: OrbitView = { azimuthDeg: 63, elevationDeg: 15, target: [0, 0], height: 9000, distance: 300 };
-    j.toMap(close, { ...ATL, latitude: fix.latitude, longitude: fix.longitude }, now);
-    const steer = j.mapView(now + 16)!;
-    expect(steer.view.distance).toBeLessThan(steer.ideal.distance / 2);
-    // Taken over from a camera twice as far: the view differs, the ideal does not.
-    j.toMap({ ...close, distance: 600 }, { ...ATL, latitude: fix.latitude, longitude: fix.longitude }, now + 16);
-    const again = j.mapView(now + 32)!;
-    expect(again.view.distance).not.toBeCloseTo(steer.view.distance, 0);
-    expect(again.ideal.distance).toBeCloseTo(steer.ideal.distance, 6);
+    const settled = (from: OrbitView) => {
+      const j = follow({});
+      const now = performance.now();
+      j.sight(fix, now);
+      j.toMap(from, { ...ATL, latitude: fix.latitude, longitude: fix.longitude }, now);
+      const first = j.mapView(now + 16)!.view.distance;
+      let last = first;
+      for (let t = 32; t <= 8000; t += 16) {
+        j.sight(fix, now + t);
+        last = j.mapView(now + t)!.view.distance;
+      }
+      return { first, last };
+    };
+    const a = settled(close);
+    const b = settled({ ...close, distance: 600 });
+    // At first each is near the camera it took over from; once settled, both are the journey's own shot.
+    expect(a.first).toBeLessThan(a.last / 2);
+    expect(b.first).not.toBeCloseTo(a.first, 0);
+    expect(b.last).toBeCloseTo(a.last, 0);
   });
 });
