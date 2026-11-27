@@ -322,7 +322,7 @@ describe("the en-route view's terrain", () => {
     const lit = (key: ThemeKey, zoom: number) => evaluate((hillshadeLayer(key) as { paint: Record<string, unknown> }).paint["hillshade-highlight-color"], zoom);
     const css = (hex: string) => evaluate(hex, 0);
     // The en-route map's zoom is about 15.2 to 15.6 at 11,000 ft and 13.3 to 13.7 at FL400 (sightPlacement).
-    for (const zoom of [RELIEF_LOW_ZOOM, 15.2, 15.6, 20]) expect(lit("dark", zoom), String(zoom)).toBe(css("#2a4468"));
+    for (const zoom of [RELIEF_LOW_ZOOM, 15.2, 15.6, 20]) expect(lit("dark", zoom), String(zoom)).toBe(css(PALETTES.dark.reliefLight));
     for (const zoom of [RELIEF_CRUISE_ZOOM, 12, 10]) expect(lit("dark", zoom), String(zoom)).toBe(css(PALETTES.dark.reliefCruiseLight));
     const luminance = (hex: string) => {
       const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255);
@@ -336,7 +336,7 @@ describe("the en-route view's terrain", () => {
     for (const key of ["light", "satellite"] as const) {
       expect(PALETTES[key].reliefLight, key).toBe("#ffffff");
       expect(PALETTES[key].reliefCruiseLight, key).toBe(PALETTES[key].reliefLight);
-      for (const zoom of [10, 13, 13.6, 15.4, 18]) expect(lit(key, zoom), `${key} ${zoom}`).toBe(css("#ffffff"));
+      for (const zoom of [10, 13, 13.6, 15.4, 18]) expect(lit(key, zoom), `${key} ${zoom}`).toBe(css(PALETTES[key].reliefLight));
     }
   });
 

@@ -484,13 +484,13 @@ export function reliefStrength(key: ThemeKey, zoom: number): number {
  */
 export function hillshadeLayer(key: ThemeKey): LayerSpecification {
   const p = PALETTES[key];
-  const strength: ExpressionSpecification = ["interpolate", ["linear"], ["zoom"], RELIEF_CRUISE_ZOOM, reliefStrength(key, RELIEF_CRUISE_ZOOM), RELIEF_LOW_ZOOM, reliefStrength(key, RELIEF_LOW_ZOOM)];
-  const light: ExpressionSpecification = ["interpolate", ["linear"], ["zoom"], RELIEF_CRUISE_ZOOM, p.reliefCruiseLight, RELIEF_LOW_ZOOM, p.reliefLight];
+  const ramp = (cruise: number | string, low: number | string): ExpressionSpecification => ["interpolate", ["linear"], ["zoom"], RELIEF_CRUISE_ZOOM, cruise, RELIEF_LOW_ZOOM, low];
+  const strength = ramp(reliefStrength(key, RELIEF_CRUISE_ZOOM), reliefStrength(key, RELIEF_LOW_ZOOM));
   return {
     id: HILLSHADE,
     type: "hillshade",
     source: TERRAIN_SOURCE,
-    paint: { "hillshade-shadow-color": p.reliefShadow, "hillshade-accent-color": p.reliefShadow, "hillshade-highlight-color": light, "hillshade-exaggeration": strength },
+    paint: { "hillshade-shadow-color": p.reliefShadow, "hillshade-accent-color": p.reliefShadow, "hillshade-highlight-color": ramp(p.reliefCruiseLight, p.reliefLight), "hillshade-exaggeration": strength },
   };
 }
 
