@@ -46,9 +46,10 @@ it, with no second canvas.
   against the distance: eased in from the flat shot at FL390 the camera's distance (eased in log) came within a
   few kilometres while its centre was still most of the 11.9 km below the aircraft, which on hardware GL left
   the aircraft off the top of the screen and then behind the eye from about 1.0 to 4.3 s after the click
-  (1440x900; 3.4 s at 375x812). With the shrink nothing at 1440x900; at 375x812 under 0.4 s while the share
-  is under 1 (`blendPlacement`, which mixes the centre by the share and the distance in log): Chase 0.18 s
-  and at most 172 px above the top, Side 0.39 s just past the right edge, Top 0.08 s by 5 px. The settled
+  (1440x900; 3.4 s at 375x812). With the shrink nothing at 1440x900; at 375x812, over two runs each, Chase
+  none or 0.17 s up to 177 px above the top, Side 0.33 to 0.39 s up to about 230 px past the right edge, Top
+  none or 0.08 s by 20 px, all while the share is under 1, likely from `blendPlacement` (it mixes the
+  centre by the share and the distance in log, the same mismatch), which was left as it is. The settled
   framing is unchanged.
 - **Loaded only for a 3D camera.** The layer's module (and the model builder with it) is imported on the
   first 3D pick; the terrain source and the terrain are added then and removed on Map, so the flat map
