@@ -401,10 +401,16 @@ export class EnRouteRig {
     const dt = Math.max(0, Math.min(MAX_STEP_S, (now - s.at) / 1000));
     s.at = now;
     const keep = Math.exp(-dt / EASE_S);
-    s.east *= keep;
-    s.north *= keep;
-    s.up *= keep;
+    const before = s.distanceM;
     s.distanceM = target.distanceM * (s.distanceM / target.distanceM) ** keep;
+    // The offset shrinks at least as fast as the distance closes, so it never grows against the distance and the
+    // aircraft stays in front of the eye and in the frame. The distance closes in proportion, the offset only by
+    // keep: from the flat shot the camera came within a few kilometres of the aircraft with its centre still most
+    // of the cruise height below it, and the aircraft went off the top of the screen and behind the eye for seconds.
+    const offset = keep * Math.min(1, s.distanceM / before);
+    s.east *= offset;
+    s.north *= offset;
+    s.up *= offset;
     s.bearingDeg = wrap360(s.bearingDeg + turn(s.bearingDeg, target.bearingDeg) * (1 - keep));
     s.pitchDeg += (target.pitchDeg - s.pitchDeg) * (1 - keep);
     const [latitude, longitude] = toGeo(target.center, s.east, s.north);

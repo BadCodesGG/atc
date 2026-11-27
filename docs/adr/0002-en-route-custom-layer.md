@@ -42,6 +42,14 @@ it, with no second canvas.
   frame (`Journey.fix`, the shared tracker at `SharedSky.time()`, docs/adr/0001-one-shared-tracker.md) and
   hands the same pose to the camera (`enRouteShot`, eased by `EnRouteRig`) and to the layer, which only
   draws. The camera and the model therefore never disagree, and the aircraft holds its place in the frame.
+  The rig shrinks its offset from the shot at least as fast as its distance closes, so the offset never grows
+  against the distance: eased in from the flat shot at FL390 the camera's distance (eased in log) came within a
+  few kilometres while its centre was still most of the 11.9 km below the aircraft, which on hardware GL left
+  the aircraft off the top of the screen and then behind the eye from about 1.0 to 4.3 s after the click
+  (1440x900; 3.4 s at 375x812). With the shrink nothing at 1440x900; at 375x812 under 0.4 s while the share
+  is under 1 (`blendPlacement`, which mixes the centre by the share and the distance in log): Chase 0.18 s
+  and at most 172 px above the top, Side 0.39 s just past the right edge, Top 0.08 s by 5 px. The settled
+  framing is unchanged.
 - **Loaded only for a 3D camera.** The layer's module (and the model builder with it) is imported on the
   first 3D pick; the terrain source and the terrain are added then and removed on Map, so the flat map
   loads neither. A theme switch carries the terrain in the new style and adds the layer back after it.
@@ -63,6 +71,15 @@ it, with no second canvas.
   2.1 to 1.6 and its Side from 2.9 to 1.5 (Light's from 4.2, 1.9 and 2.6 to 4.0, 2.9 and 1.7). With the
   ramp and the haze's floor below, FL400 reads 5.4, 2.3 and 2.5 in Dark and 5.7, 5.2 and 2.4 in Light, and
   11,000 ft is unchanged. That coarser terrain tiles carry the fade is the likely mechanism, not measured.
+  Dark's Cockpit and Side were still near black from cruise heights (its strength already 1, the most there is),
+  so Dark also lights its slopes brighter on the same zooms (the layer's `hillshade-highlight-color`: the
+  shores' navy `reliefLight`, #2a4468, from zoom 15 up, as before, to a moonlit blue `reliefCruiseLight`,
+  #6a94d0, by zoom 13; Light and Satellite light theirs white at every zoom, so the lever has nothing to give
+  Light's Side). Measured over the same crop on hardware GL at FL400, the same ground shot with each colour
+  on one page, Dark's Chase, Cockpit and Side read 7.5, 4.9 and 3.0 against 3.7, 2.4 and 1.8 (Top 13.3
+  against 9.2; at FL510, where the blue is whole, Chase 8.4, Top 16.2), the ground's mean luminance rising
+  from about 23 to 25 to 31 of 255: still night. Side stays under 4: it looks across at the far ground, low
+  and in the haze. A brighter blue (#87b8ff) gave Side only 3.6 while Top at FL510 began to read as day.
 - **On a phone or tablet the aircraft is framed in the free band** below the Journey card (ticket #23's
   review: the card covered it). Below xl the map's padding in a 3D camera is the band's
   (`bandPadding`, from `freeBand`, the band the flat shot keeps the aircraft in), eased in from the map's
@@ -220,10 +237,11 @@ The Diorama stays as it is: a separate overlay canvas on the same camera, crossf
   before the band the map is flat while a 3D camera is chosen.
 - Tests: `src/lib/globe/en-route.test.ts` (each camera's placement, the peek and its ease back, the keys,
   the pose, the model's matrix, the rig, the band's padding and the fit in it, the aircraft on the framing
-  point from 1,000 to 51,000 ft through MapLibre's own camera), `src/lib/globe/en-route-journey.test.ts` (the share at both ends,
+  point from 1,000 to 51,000 ft through MapLibre's own camera, and in front of the eye and in the frame all
+  through the rig's ease from the flat shot), `src/lib/globe/en-route-journey.test.ts` (the share at both ends,
   its ease, the blend, the camera held in the origin's Diorama, Approach else Orbit, the fallback rule and
   its notice), `src/lib/globe/map-style.test.ts` (terrain, hillshade and sky only when asked, the flat
-  sky unchanged, the relief's strength by zoom, the haze's start in eye heights); smoke: `scripts/smoke-en-route-chase.mjs`, `scripts/smoke-en-route-cameras.mjs` and
+  sky unchanged, the relief's strength and Dark's light by zoom, the haze's start in eye heights); smoke: `scripts/smoke-en-route-chase.mjs`, `scripts/smoke-en-route-cameras.mjs` and
   `scripts/smoke-en-route-journey.mjs` (gate to gate in Chase, phone and tablet, the aircraft in the band
   below the card, the switch on one row, hillshade and sky in 3D only, the same band and the wide Chase
   framing at FL390 on track 020, the fallback).

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { FEET, KNOTS, toLocal } from "../geo";
 import { MAX_PITCH, orbitToMap } from "./camera";
-import { aircraftMatrix, type AircraftPose, bandPadding, blendPadding, CHASE, COCKPIT, EASE_S, EN_ROUTE_MAX_PITCH, EN_ROUTE_OFFERED, enRouteKey, EnRoutePeek, enRouteShortcut, enRoutePose, type EnRouteShot, enRouteShot, EnRouteRig, fitDistance, is3D, mapCamera, mapEye, mapMetres, mapNearPlane, NO_PEEK, PEEK_DEG_PER_PX, peekPlacement, SIDE, SIGHT_MIN_M, sightPlacement, TOP } from "./en-route";
+import { aircraftMatrix, type AircraftPose, bandPadding, blendPadding, CHASE, COCKPIT, EASE_S, EN_ROUTE_MAX_PITCH, EN_ROUTE_OFFERED, enRouteKey, EnRoutePeek, enRouteShortcut, enRoutePose, type EnRouteShot, enRouteShot, EnRouteRig, eyeOf, fitDistance, is3D, mapCamera, mapEye, mapMetres, mapNearPlane, NO_PEEK, PEEK_DEG_PER_PX, peekPlacement, SIDE, SIGHT_MIN_M, sightPlacement, TOP } from "./en-route";
 
 const cruise: AircraftPose = { latitude: 35, longitude: -100, altitudeM: 10_000, trackDeg: 90, pitchDeg: 0 };
 
@@ -306,6 +306,8 @@ function mapPixel(cam: ReturnType<typeof mapCamera>, screen: { width: number; he
   const dot = (a: typeof v, w: typeof v) => a.x * w.x + a.y * w.y + a.z * w.z;
   const ahead = dot(v, look);
   return {
+    /** How far in front of the eye along its look, in world units: none or less is behind it. */
+    ahead,
     x: (padding.left + screen.width - padding.right) / 2 + (focal * dot(v, right)) / ahead,
     y: (padding.top + screen.height - padding.bottom) / 2 - (focal * sign * dot(v, up)) / ahead,
   };
@@ -350,6 +352,40 @@ describe("the aircraft's place in the frame, from 1,000 to 51,000 ft (the contro
                 expect(Math.abs(at.y - want.y), label).toBeLessThan(0.5);
               }
             }
+          }
+        }
+      }
+    });
+  }
+
+  for (const camera of ["chase", "side", "top"] as const) {
+    it(`${camera}: eased in from the flat shot, the aircraft stays in front of the eye and inside the frame all the way`, () => {
+      for (const screen of screens) {
+        const lens = { height: screen.height, fovDeg };
+        const padding = screen.band ? bandPadding(screen, screen.band) : own;
+        for (const feet of [1_000, 11_000, 25_000, 39_000, 51_000]) {
+          const groundM = 300;
+          const altitudeM = feet * FEET;
+          const pose: AircraftPose = { latitude: 35, longitude: -100, altitudeM, trackDeg: 20, pitchDeg: 0 };
+          const ideal = enRouteShot(pose, camera, lengthM);
+          const shot = screen.band ? { ...ideal, distanceM: fitDistance(ideal.distanceM, camera, lengthM, lens, screen.band) } : ideal;
+          // Where Map stands when the 3D camera is picked: the flight's ground point from a zoom of about 8.5, tilted 40.
+          const flatM = screen.height / 2 / Math.tan((fovDeg * Math.PI) / 360) / ((512 * 2 ** 8.5) / (2 * Math.PI * 6_371_008.8 * Math.cos((35 * Math.PI) / 180)));
+          const rig = new EnRouteRig();
+          rig.start({ center: { latitude: 35, longitude: -100 }, elevationM: groundM, distanceM: flatM, bearingDeg: 0, pitchDeg: 40 }, shot, 0);
+          for (let t = 16; t <= 8_000; t += 16) {
+            const p = rig.step(shot, t);
+            const eye = eyeOf(p);
+            const [east, north] = toLocal(eye, pose.latitude, pose.longitude);
+            const nearestM = Math.min(Math.hypot(east, north, altitudeM - eye.altitudeM), eye.altitudeM - groundM);
+            const cam = mapCamera(sightPlacement({ ...p, eye }, { groundM, nearestM, fovDeg }), lens);
+            const at = mapPixel(cam, { ...screen, fovDeg }, padding, pose);
+            const label = `${screen.name} ${feet} ft at ${t} ms`;
+            expect(at.ahead, label).toBeGreaterThan(0);
+            expect(at.x, label).toBeGreaterThanOrEqual(0);
+            expect(at.x, label).toBeLessThanOrEqual(screen.width);
+            expect(at.y, label).toBeGreaterThanOrEqual(0);
+            expect(at.y, label).toBeLessThanOrEqual(screen.height);
           }
         }
       }
