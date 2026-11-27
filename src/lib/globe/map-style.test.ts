@@ -1,4 +1,4 @@
-import { type LayerSpecification, validateStyleMin } from "@maplibre/maplibre-gl-style-spec";
+import { expression, type LayerSpecification, latest, validateStyleMin } from "@maplibre/maplibre-gl-style-spec";
 import { describe, expect, it } from "vitest";
 import { THEMES, type ThemeKey } from "../scene/theme";
 import { arcOpacities, buildingHeight, enRouteHaze, enRouteSky, flatSky, HAZE_SHELLS, hazeShells, hazeStrength, HILLSHADE, HILLSHADE_UNDER, hillshadeLayer, horizonM, IMAGERY_NEAR_ZOOM, imageryTileZoom, journeyIconSize, mapBackground, mapStyle, PALETTES, radarLayer, radarSource, RELIEF_CRUISE_ZOOM, RELIEF_LOW_ZOOM, reliefStrength, ripple, SELECTED_SCALE, SELECTION_DIM, TERRAIN, TERRAIN_SOURCE, terrainSource } from "./map-style";
@@ -307,8 +307,36 @@ describe("the en-route view's terrain", () => {
     for (const key of KEYS) {
       const p = (hillshadeLayer(key) as { paint: Record<string, unknown> }).paint;
       expect(p["hillshade-shadow-color"]).toBe(PALETTES[key].reliefShadow);
-      expect(p["hillshade-highlight-color"]).toBe(PALETTES[key].reliefLight);
+      expect(p["hillshade-highlight-color"]).toEqual(["interpolate", ["linear"], ["zoom"], RELIEF_CRUISE_ZOOM, PALETTES[key].reliefCruiseLight, RELIEF_LOW_ZOOM, PALETTES[key].reliefLight]);
       expect(p["hillshade-exaggeration"]).toEqual(["interpolate", ["linear"], ["zoom"], RELIEF_CRUISE_ZOOM, reliefStrength(key, RELIEF_CRUISE_ZOOM), RELIEF_LOW_ZOOM, reliefStrength(key, RELIEF_LOW_ZOOM)]);
+    }
+  });
+
+  it("lights Dark's slopes brighter from cruise heights, as before from 11,000 ft down; Light and Satellite as they were", () => {
+    // MapLibre's own evaluation of the layer's highlight colour at a zoom, against a plain colour's.
+    const evaluate = (value: unknown, zoom: number) => {
+      const e = expression.createPropertyExpression(value, "hillshade-highlight-color", latest.paint_hillshade["hillshade-highlight-color"] as never);
+      if (e.result !== "success") throw new Error(e.value.map((v) => v.message).join("; "));
+      return JSON.stringify(e.value.evaluate({ zoom }));
+    };
+    const lit = (key: ThemeKey, zoom: number) => evaluate((hillshadeLayer(key) as { paint: Record<string, unknown> }).paint["hillshade-highlight-color"], zoom);
+    const css = (hex: string) => evaluate(hex, 0);
+    // The en-route map's zoom is about 15.2 to 15.6 at 11,000 ft and 13.3 to 13.7 at FL400 (sightPlacement).
+    for (const zoom of [RELIEF_LOW_ZOOM, 15.2, 15.6, 20]) expect(lit("dark", zoom), String(zoom)).toBe(css("#2a4468"));
+    for (const zoom of [RELIEF_CRUISE_ZOOM, 12, 10]) expect(lit("dark", zoom), String(zoom)).toBe(css(PALETTES.dark.reliefCruiseLight));
+    const luminance = (hex: string) => {
+      const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255);
+      return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    };
+    expect(PALETTES.dark.reliefLight).toBe("#2a4468");
+    expect(luminance(PALETTES.dark.reliefCruiseLight)).toBeGreaterThan(1.8 * luminance(PALETTES.dark.reliefLight));
+    // Still night: the lit slopes stay a mid blue, nowhere near the day themes' white.
+    expect(luminance(PALETTES.dark.reliefCruiseLight)).toBeLessThan(0.6);
+    expect(lit("dark", 13.6)).not.toBe(lit("dark", 14.5));
+    for (const key of ["light", "satellite"] as const) {
+      expect(PALETTES[key].reliefLight, key).toBe("#ffffff");
+      expect(PALETTES[key].reliefCruiseLight, key).toBe(PALETTES[key].reliefLight);
+      for (const zoom of [10, 13, 13.6, 15.4, 18]) expect(lit(key, zoom), `${key} ${zoom}`).toBe(css("#ffffff"));
     }
   });
 

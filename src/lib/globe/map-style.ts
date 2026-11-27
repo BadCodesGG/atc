@@ -53,8 +53,10 @@ export interface MapPalette {
   modelBody: string;
   /** The En-route view's relief (its hillshade over the terrain): the slopes facing away from the light. */
   reliefShadow: string;
-  /** The slopes facing the light. */
+  /** The slopes facing the light, from 11,000 ft and lower (the map's zoom RELIEF_LOW_ZOOM and up). */
   reliefLight: string;
+  /** The slopes facing the light from cruise heights (zoom RELIEF_CRUISE_ZOOM and down), blended from reliefLight between: Dark's lifts its relief out of the night there. */
+  reliefCruiseLight: string;
   /** How strongly it shades (MapLibre's hillshade exaggeration, 0 to 1) from 11,000 ft and lower (the map's zoom RELIEF_LOW_ZOOM and up). */
   reliefStrength: number;
   /** How strongly it shades from cruise heights (zoom RELIEF_CRUISE_ZOOM and down), where the relief faded at reliefStrength. */
@@ -97,6 +99,7 @@ export const PALETTES: Record<ThemeKey, MapPalette> = {
     // Subtle: the labels' warm grey in the shade, the paper lit.
     reliefShadow: "#7a7468",
     reliefLight: "#ffffff",
+    reliefCruiseLight: "#ffffff",
     reliefStrength: 0.35,
     reliefCruiseStrength: 0.65,
     hazeFloorHeights: 4.8,
@@ -124,9 +127,10 @@ export const PALETTES: Record<ThemeKey, MapPalette> = {
     chipText: "#f2f6fb",
     chipCount: "#6ff0a6",
     modelBody: "#c9ced8",
-    // Visible by night: black shade, the slopes lit in the shores' navy.
+    // Visible by night: black shade, the slopes lit in the shores' navy, and from cruise heights a moonlit blue.
     reliefShadow: "#000000",
     reliefLight: "#2a4468",
+    reliefCruiseLight: "#6a94d0",
     reliefStrength: 0.7,
     reliefCruiseStrength: 1,
     hazeFloorHeights: 4.8,
@@ -156,6 +160,7 @@ export const PALETTES: Record<ThemeKey, MapPalette> = {
     // The imagery shows its own relief: only a touch more.
     reliefShadow: "#000000",
     reliefLight: "#ffffff",
+    reliefCruiseLight: "#ffffff",
     reliefStrength: 0.15,
     reliefCruiseStrength: 0.15,
     hazeFloorHeights: 0,
@@ -472,15 +477,20 @@ export function reliefStrength(key: ThemeKey, zoom: number): number {
   return p.reliefStrength + (p.reliefCruiseStrength - p.reliefStrength) * t;
 }
 
-/** The relief of the En-route view's terrain, shaded from the same Terrarium source in the theme's colours: subtle by day, plainer by night, harder from cruise heights (reliefStrength). Under everything else drawn. */
+/**
+ * The relief of the En-route view's terrain, shaded from the same Terrarium source in the theme's colours:
+ * subtle by day, plainer by night, harder from cruise heights (reliefStrength) and, by night, lit brighter there
+ * (reliefCruiseLight), both on the same zooms. Under everything else drawn.
+ */
 export function hillshadeLayer(key: ThemeKey): LayerSpecification {
   const p = PALETTES[key];
   const strength: ExpressionSpecification = ["interpolate", ["linear"], ["zoom"], RELIEF_CRUISE_ZOOM, reliefStrength(key, RELIEF_CRUISE_ZOOM), RELIEF_LOW_ZOOM, reliefStrength(key, RELIEF_LOW_ZOOM)];
+  const light: ExpressionSpecification = ["interpolate", ["linear"], ["zoom"], RELIEF_CRUISE_ZOOM, p.reliefCruiseLight, RELIEF_LOW_ZOOM, p.reliefLight];
   return {
     id: HILLSHADE,
     type: "hillshade",
     source: TERRAIN_SOURCE,
-    paint: { "hillshade-shadow-color": p.reliefShadow, "hillshade-accent-color": p.reliefShadow, "hillshade-highlight-color": p.reliefLight, "hillshade-exaggeration": strength },
+    paint: { "hillshade-shadow-color": p.reliefShadow, "hillshade-accent-color": p.reliefShadow, "hillshade-highlight-color": light, "hillshade-exaggeration": strength },
   };
 }
 
