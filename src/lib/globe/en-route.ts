@@ -1,5 +1,5 @@
-import { FEET, KNOTS, toGeo, toLocal, turn, wrap360 } from "../geo";
-import type { Lens } from "./camera";
+import { EARTH_RADIUS_M, FEET, KNOTS, toGeo, toLocal, turn, wrap360 } from "../geo";
+import { cameraToCentrePx, CIRCUMFERENCE, type Lens, TILE } from "./camera";
 import type { Rect } from "./journey-frame";
 
 /**
@@ -183,12 +183,72 @@ export function enRouteShot(pose: AircraftPose, camera: Exclude<EnRouteCamera, "
 /** MapLibre's near clipping plane for a map centre `distanceM` from the eye through a lens `fovDeg` tall: its height / 50 pixels, against the centre's height / 2 / tan(fov / 2). */
 export const mapNearPlane = (distanceM: number, fovDeg: number): number => (distanceM * Math.tan((fovDeg * RAD) / 2)) / 25;
 
+/**
+ * A point, or a step, in MapLibre's Web Mercator world: 0 to 1 across, x east and y south, its height in the same
+ * units. MapLibre's heights are metres over the circumference at the latitude on its own radius (EARTH_RADIUS_M, as
+ * MercatorCoordinate.fromLngLat places the aircraft's model), so the world's metre changes with the latitude, up and
+ * across alike.
+ */
+export interface MapWorldPoint {
+  x: number;
+  y: number;
+  z: number;
+}
+
+/** The world's units in a metre at `latitude` (MapLibre's mercatorZfromAltitude of one metre). */
+const worldPerMetre = (latitude: number) => 1 / (2 * Math.PI * EARTH_RADIUS_M * Math.cos(latitude * RAD));
+
+/**
+ * A distance in orbitToMap's metres (the Diorama's and the flat map's, on the zoom's equatorial radius) in MapLibre's
+ * own, the ones mapCamera takes: so a placement from the flat shot or the map's own camera keeps its zoom.
+ */
+export const mapMetres = (orbitM: number): number => (orbitM * 2 * Math.PI * EARTH_RADIUS_M) / CIRCUMFERENCE;
+const worldOf = (latitude: number, longitude: number, altitudeM: number): MapWorldPoint => ({
+  x: (180 + longitude) / 360,
+  y: (180 - (180 / Math.PI) * Math.log(Math.tan(Math.PI / 4 + (latitude * RAD) / 2))) / 360,
+  z: altitudeM * worldPerMetre(latitude),
+});
+const latitudeOf = (y: number) => (360 / Math.PI) * Math.atan(Math.exp(((180 - y * 360) * Math.PI) / 180)) - 90;
+/** From the eye toward the map's centre in MapLibre's world (its cameraDirectionFromPitchBearing, pointed at the centre). */
+const lookOf = (bearingDeg: number, pitchDeg: number): MapWorldPoint => ({
+  x: Math.sin(pitchDeg * RAD) * Math.sin(bearingDeg * RAD),
+  y: -Math.sin(pitchDeg * RAD) * Math.cos(bearingDeg * RAD),
+  z: -Math.cos(pitchDeg * RAD),
+});
+
+/**
+ * Where MapLibre puts the eye for a placement (mapCamera's): back from the centre, at its height, against the look
+ * by the distance in the world's units at the centre's latitude. This, not eyeOf's eye on the sphere, is the one the
+ * map draws from.
+ */
+export function mapEye(p: EnRoutePlacement): MapWorldPoint {
+  const c = worldOf(p.center.latitude, p.center.longitude, p.elevationM);
+  const look = lookOf(p.bearingDeg, p.pitchDeg);
+  const d = p.distanceM * worldPerMetre(p.center.latitude);
+  return { x: c.x - look.x * d, y: c.y - look.y * d, z: c.z - look.z * d };
+}
+
+/** What jumpTo is handed for a 3D camera: MapCamera's view with the centre's elevation, in jumpTo's own shape. */
+export interface MapJump {
+  center: [number, number];
+  zoom: number;
+  bearing: number;
+  pitch: number;
+  elevation: number;
+}
+
+/** The camera the map is handed for a placement, its distance in MapLibre's own metres. */
+export function mapCamera(p: EnRoutePlacement, lens: Lens): MapJump {
+  const zoom = Math.log2(cameraToCentrePx(lens) / (TILE * p.distanceM * worldPerMetre(p.center.latitude)));
+  return { center: [p.center.longitude, p.center.latitude], zoom, bearing: wrap360(p.bearingDeg + 180) - 180, pitch: p.pitchDeg, elevation: p.elevationM };
+}
+
 /** The least distance sightPlacement takes the map's centre out to, metres, where the look does not meet the ground first: nearer, the terrain's skirts are too short to close the gaps between its tiles. */
 export const SIGHT_MIN_M = 2_000;
 
 /**
- * The same camera with the map's centre moved out along its line of sight (the eye and the look kept, so the
- * picture is the same): as far as the eye is over the ground (`groundM`), at least SIGHT_MIN_M, or to the ground
+ * The same camera with the map's centre moved out along its line of sight (MapLibre's eye, mapEye, and
+ * the look kept, so the picture is the same, the aircraft on the framing point at any height): as far as the eye is over the ground (`groundM`), at least SIGHT_MIN_M, or to the ground
  * if the look meets it first; never so far that MapLibre's near plane (mapNearPlane) passes half the distance to
  * the nearest thing drawn (`nearestM`: the aircraft's model, or the ground under the eye), and never nearer than
  * the camera's own centre.
@@ -201,7 +261,10 @@ export const SIGHT_MIN_M = 2_000;
  * 200 km), the map drew 55 to 85 frames a second; at the eye's height, 110 to 160.
  */
 export function sightPlacement(shot: EnRouteShot, { groundM, nearestM, fovDeg }: { groundM: number; nearestM: number; fovDeg: number }): EnRouteShot {
-  const above = shot.eye.altitudeM - groundM;
+  // The eye MapLibre draws from, and its height in its metres there.
+  const eye = mapEye(shot);
+  const eyeLatitude = latitudeOf(eye.y);
+  const above = eye.z / worldPerMetre(eyeLatitude) - groundM;
   if (!(above > 0)) return shot;
   // The centre's distance at which the near plane reaches half the way to the nearest thing drawn (it grows with the distance).
   const nearPlane = nearestM / 2 / mapNearPlane(1, fovDeg);
@@ -211,7 +274,17 @@ export function sightPlacement(shot: EnRouteShot, { groundM, nearestM, fovDeg }:
   const toGround = down > 1e-9 ? above / down : Infinity;
   const distanceM = Math.max(shot.distanceM, Math.min(toGround, farthest));
   if (distanceM === shot.distanceM) return shot;
-  return { ...fromEye(shot.eye, distanceM, shot.bearingDeg, shot.pitchDeg), eye: shot.eye };
+  // Out along the look in MapLibre's own world, which is where it puts the eye back from the centre: on the sphere
+  // (toGeo's great circle) the centre drifts metres off the map's straight line kilometres out, and with it the eye,
+  // so the aircraft a few hundred metres ahead of it slid across the frame by a share that grew with the height.
+  const look = lookOf(shot.bearingDeg, shot.pitchDeg);
+  const d = distanceM * worldPerMetre(eyeLatitude);
+  const x = eye.x + look.x * d;
+  const y = eye.y + look.y * d;
+  const latitude = latitudeOf(y);
+  const perMetre = worldPerMetre(latitude);
+  const placement = { center: { latitude, longitude: x * 360 - 180 }, elevationM: (eye.z + look.z * d) / perMetre, distanceM: d / perMetre, bearingDeg: shot.bearingDeg, pitchDeg: shot.pitchDeg };
+  return { ...placement, eye: shot.eye };
 }
 
 /**
@@ -328,10 +401,16 @@ export class EnRouteRig {
     const dt = Math.max(0, Math.min(MAX_STEP_S, (now - s.at) / 1000));
     s.at = now;
     const keep = Math.exp(-dt / EASE_S);
-    s.east *= keep;
-    s.north *= keep;
-    s.up *= keep;
+    const distanceBefore = s.distanceM;
     s.distanceM = target.distanceM * (s.distanceM / target.distanceM) ** keep;
+    // The offset shrinks at least as fast as the distance closes, so it never grows against the distance and the
+    // aircraft stays in front of the eye and in the frame. The distance closes in proportion, the offset only by
+    // keep: from the flat shot the camera came within a few kilometres of the aircraft with its centre still most
+    // of the cruise height below it, and the aircraft went off the top of the screen and behind the eye for seconds.
+    const shrink = keep * Math.min(1, s.distanceM / distanceBefore);
+    s.east *= shrink;
+    s.north *= shrink;
+    s.up *= shrink;
     s.bearingDeg = wrap360(s.bearingDeg + turn(s.bearingDeg, target.bearingDeg) * (1 - keep));
     s.pitchDeg += (target.pitchDeg - s.pitchDeg) * (1 - keep);
     const [latitude, longitude] = toGeo(target.center, s.east, s.north);

@@ -78,6 +78,12 @@ const RECORD_FRAMES = `(() => {
 const STALL_MS = 120_000;
 const CAP_MS = 30 * 60_000;
 
+/** How the drawn aircraft is judged still (settledAt): moved under SETTLE_PX between two reads at least SETTLE_MS and SETTLE_FRAMES drawn frames apart, waited for up to SETTLE_CAP_MS. */
+const SETTLE_PX = 0.5;
+const SETTLE_MS = 1_500;
+const SETTLE_FRAMES = 2;
+const SETTLE_CAP_MS = 150_000;
+
 /** Criteria 1 and 2: Chase picked in Atlanta's Diorama, ridden gate to gate into Charlotte's. */
 async function gateToGate({ browser, base, check }) {
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
@@ -185,17 +191,23 @@ async function gateToGate({ browser, base, check }) {
   }
 }
 
-/** A flight followed on the map (JBU1897, westbound, no route), at `viewport`; returns the page and the switch. */
-async function followOnMap(browser, base, viewport, { query = "fixture=1&fps=hold", before = async () => {} } = {}) {
+/**
+ * A flight followed on the map (JBU1897, no route), at `viewport`; returns the page and the switch. It flies at
+ * `altitudeFt` on `trackDeg` (westbound at 11,000 ft, as the fixture has it, unless asked), 420 kt over the ground.
+ */
+async function followOnMap(browser, base, viewport, { query = "fixture=1&fps=hold", before = async () => {}, altitudeFt = 11000, trackDeg = 270 } = {}) {
   const page = await browser.newPage({ viewport });
   const problems = [];
   page.on("pageerror", (e) => problems.push(String(e)));
   page.on("console", (m) => m.type() === "error" && problems.push(m.text()));
   const asked = await flatTerrain(page);
   const t0 = Date.now() / 1000;
+  // 0.0021 degrees of longitude a second at 33.7 degrees north: 420 kt.
+  const track = (trackDeg * Math.PI) / 180;
+  const [north, east] = [0.0021 * Math.cos((33.7 * Math.PI) / 180) * Math.cos(track), 0.0021 * Math.sin(track)];
   await page.route(`**/api/hex/${HEX}`, (r) => {
     const now = Date.now() / 1000;
-    const aircraft = { id: HEX, callsign: CALLSIGN, typeCode: "A320", military: false, latitude: 33.7, longitude: -85.4 - (now - t0) * 0.0021, altitudeFt: 11000, onGround: false, groundSpeedKt: 420, trackDeg: 270, verticalRateFpm: 800 };
+    const aircraft = { id: HEX, callsign: CALLSIGN, typeCode: "A320", military: false, latitude: 33.7 + (now - t0) * north, longitude: -85.4 + (now - t0) * east, altitudeFt, onGround: false, groundSpeedKt: 420, trackDeg, verticalRateFpm: altitudeFt > 30000 ? 0 : 800 };
     return r.fulfill({ json: { hex: HEX, time: now, aircraft } });
   });
   await page.route(`**/api/flight/${CALLSIGN}`, (r) => r.fulfill({ json: { callsign: CALLSIGN, route: null } }));
@@ -282,6 +294,79 @@ async function footTop(page, height) {
 }
 
 /**
+ * Where the aircraft is drawn once the rig holds still, and whether it did (`settled`) within SETTLE_CAP_MS. The
+ * rig's ease takes at most 0.25 s of it a frame (EnRouteRig), so under software GL, a frame every 0.6 to 0.8 s,
+ * it runs at a third of real time: from a cruise start its 11 km height offset shrinks to 0.70 of itself a drawn
+ * frame and takes about 30 of them (some 20 s, more on a loaded machine) to come within a pixel. Judged by
+ * stillness alone, never by where the framing point is, so a framing that is off still fails its check: under
+ * SETTLE_PX across SETTLE_FRAMES frames bounds what is left of the ease to about 1 px, at a frame a second or 60
+ * a second alike. A read with no new frame drawn since the last is no evidence; a count that went back (the
+ * layer made again) starts the judgement afresh.
+ */
+async function settledAt(page) {
+  const read = `(() => { const at = ${DRAWN_AT}; const s = ${STATE}; return at && s ? { ...at, frames: s.drawn } : null; })()`;
+  let last = null;
+  const until = Date.now() + SETTLE_CAP_MS;
+  while (Date.now() < until) {
+    await sleep(SETTLE_MS);
+    const now = await page.evaluate(read);
+    if (!now) continue;
+    if (last && now.frames >= last.frames && now.frames - last.frames < SETTLE_FRAMES) continue;
+    if (last && now.frames >= last.frames && Math.hypot(now.x - last.x, now.y - last.y) < SETTLE_PX) return { at: { x: now.x, y: now.y }, settled: true };
+    last = now;
+  }
+  const at = await page.evaluate(DRAWN_AT);
+  return { at, settled: false };
+}
+
+/** The aircraft once settled against the free band below the Journey card: whether its origin and its whole model are in it. */
+async function framedInBand(page, viewport) {
+  const { at, settled } = await settledAt(page);
+  const card = await page.locator("section[aria-label^='Followed flight']").locator("visible=true").first().boundingBox();
+  const band = { top: card.y + card.height, bottom: await footTop(page, viewport.height) };
+  const model = await modelBox(page, await page.screenshot());
+  const inBand = !!at && at.y > band.top && at.y < band.bottom && at.x > 0 && at.x < viewport.width;
+  const clear = !!model && model.top > band.top && model.bottom < band.bottom;
+  return { at, settled, band, model, inBand, clear };
+}
+
+/** The map's framing point: the middle of its padded view, where every 3D camera but Cockpit draws the aircraft. */
+const FRAMING_POINT = `(() => { const g = ${GLOBE}; const p = g.map.getPadding(); const c = g.map.getContainer(); return { x: (p.left + c.clientWidth - p.right) / 2, y: (p.top + c.clientHeight - p.bottom) / 2 }; })()`;
+
+/**
+ * At a cruise altitude (39,000 ft) and on a track with a northward part (020), where sightPlacement's centre is
+ * kilometres out along the look: the small-screen band checks again, and the wide screen's Chase framing. The
+ * aircraft's place in the frame once moved with the height (the centre went out on the sphere, the map's eye came
+ * back along its Mercator line), off the card's band on a phone and down the frame on a wide screen.
+ */
+async function cruise({ browser, base, check }) {
+  const screens = [["phone", { width: 375, height: 812 }, ["Chase", "Side", "Top"]], ["small phone", { width: 320, height: 700 }, ["Chase", "Side", "Top"]], ["tablet", { width: 768, height: 1024 }, ["Chase", "Side", "Top"]], ["wide", { width: 1440, height: 900 }, ["Chase"]]];
+  for (const [name, viewport, cameras] of screens) {
+    const { page, group, problems } = await followOnMap(browser, base, viewport, { altitudeFt: 39000, trackDeg: 20 });
+    try {
+      for (const camera of cameras) {
+        await group.getByRole("button", { name: camera, exact: true }).click();
+        const on = await waitForTruthy(page, `(() => { const s = ${STATE}; return s && s.camera === "${camera.toLowerCase()}" && s.pressed === "${camera}" && s.terrain && s.layer === "custom" && s.drawn > 5 && (s.camera !== "chase" || s.pitch > 60); })()`, 60_000).then(() => true, () => false);
+        // Within a few pixels of the framing point (the old maths put it 116 px off on a wide screen at FL390).
+        // Read once the camera holds still (settledAt): an unsettled read fails as one, not as a framing miss.
+        const framed = name === "wide" ? await settledAt(page) : await framedInBand(page, viewport);
+        const point = await page.evaluate(FRAMING_POINT);
+        const off = framed.at ? Math.round(Math.hypot(framed.at.x - point.x, framed.at.y - point.y)) : Infinity;
+        if (name === "wide") {
+          check(`en-route cruise ${name} (${viewport.width}x${viewport.height}, FL390, track 020): Chase draws the aircraft on the map's framing point, as at 11,000 ft`, on && framed.settled && off <= 4, JSON.stringify({ at: framed.at, settled: framed.settled, point, off }));
+        } else {
+          const { at, settled, band, model, inBand, clear } = framed;
+          check(`en-route cruise ${name} (${viewport.width}x${viewport.height}, FL390, track 020): in ${camera} the aircraft stands on the band's framing point below the Journey card, the whole model clear of the card and the foot`, on && settled && inBand && clear && off <= 4, JSON.stringify({ at, settled, point, off, band, model }));
+        }
+      }
+      check(`en-route cruise ${name}: console clean`, problems.length === 0, problems.slice(0, 3).join(" | "));
+    } finally {
+      await page.close();
+    }
+  }
+}
+
+/**
  * Criterion 4: the switch at phone (375 and 320 wide) and tablet sizes, one row, into Chase, Side and Top with
  * the aircraft in the free band below the card, the hillshade and sky on in 3D only, and the map never blank on
  * the way back.
@@ -314,22 +399,8 @@ async function smallScreens({ browser, base, check }) {
           const tilted = on && (await waitForTruthy(page, `(() => { const s = ${STATE}; return s && s.camera === "chase" && s.pitch > 60; })()`, 30_000).then(() => true, () => false));
           check(`en-route ${name}: Chase comes on (terrain, the aircraft's model, the map tilted behind it)`, tilted, JSON.stringify({ ...(await page.evaluate(STATE)), credit: undefined }));
         }
-        // The rig eases onto the aircraft; software GL draws a frame every second or so: wait until it holds still.
-        let at = null;
-        let last = null;
-        const until = Date.now() + 60_000;
-        while (Date.now() < until) {
-          await sleep(1_500);
-          at = await page.evaluate(DRAWN_AT);
-          if (at && last && Math.hypot(at.x - last.x, at.y - last.y) < 3) break;
-          last = at;
-        }
-        const card = await page.locator("section[aria-label^='Followed flight']").boundingBox();
-        const band = { top: card.y + card.height, bottom: await footTop(page, viewport.height) };
-        const model = await modelBox(page, await page.screenshot());
-        const inBand = !!at && at.y > band.top && at.y < band.bottom && at.x > 0 && at.x < viewport.width;
-        const clear = !!model && model.top > band.top && model.bottom < band.bottom;
-        check(`en-route ${name}: in ${camera} the aircraft stands in the free band below the Journey card, the whole model clear of the card and the foot`, on && inBand && clear, JSON.stringify({ at, band, model }));
+        const { at, settled, band, model, inBand, clear } = await framedInBand(page, viewport);
+        check(`en-route ${name}: in ${camera} the aircraft stands in the free band below the Journey card, the whole model clear of the card and the foot`, on && settled && inBand && clear, JSON.stringify({ at, settled, band, model }));
         if (camera === "Top") {
           const air = await page.evaluate(AIR);
           check(`en-route ${name}: a 3D camera shades the relief (a hillshade layer) and has a sky apart from its horizon, unlike the flat map's`, air.hillshade && air.sky !== air.horizon && !flatAir.hillshade && flatAir.sky === flatAir.horizon, JSON.stringify({ air, flatAir }));
@@ -412,6 +483,7 @@ async function fallbacks({ browser, base, check }) {
 export async function enRouteJourneyChecks({ browser, base, check }) {
   const only = process.env.SMOKE_ONLY;
   if (!only || only === "screens") await smallScreens({ browser, base, check });
+  if (!only || only === "cruise") await cruise({ browser, base, check });
   if (!only || only === "fallback") await fallbacks({ browser, base, check });
   if (!only || only === "journey") await gateToGate({ browser, base, check });
 }

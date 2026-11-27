@@ -5,7 +5,7 @@ import type { JourneyFix } from "../journey-follow";
 import type { OrbitView } from "../scene/orbit";
 import type { ThemeKey } from "../scene/theme";
 import { groundView, type Lens, type MapCamera, mapToOrbit, MAX_PITCH, orbitToMap } from "./camera";
-import { bandPadding, blendPadding, EN_ROUTE_MAX_PITCH, type EnRouteCamera, EnRoutePeek, type EnRoutePlacement, enRoutePose, EnRouteRig, enRouteShot, eyeOf, fitDistance, type Insets, is3D, peekPlacement, sightPlacement } from "./en-route";
+import { bandPadding, blendPadding, EN_ROUTE_MAX_PITCH, type EnRouteCamera, EnRoutePeek, type EnRoutePlacement, enRoutePose, EnRouteRig, enRouteShot, eyeOf, fitDistance, type Insets, is3D, mapCamera, mapMetres, peekPlacement, sightPlacement } from "./en-route";
 import { blendPlacement, FALLBACK_NOTICE, type FallbackCause, FrameWatch, RETURN_TO_MAP_S, shareBlend, ShareEase } from "./en-route-journey";
 import type { EnRouteLayer } from "./en-route-layer";
 import type { Rect } from "./journey-frame";
@@ -218,13 +218,14 @@ export class EnRouteController {
       this.rigStarted = true;
       const c = map.getCenter();
       const from = mapToOrbit({ lng: c.lng, lat: c.lat, zoom: map.getZoom(), bearing: map.getBearing(), pitch: map.getPitch() }, { latitude: c.lat, longitude: c.lng }, lens);
-      this.rig.start(this.lastPlaced ?? { center: { latitude: c.lat, longitude: c.lng }, elevationM: map.getCenterElevation(), distanceM: from.distance, bearingDeg: map.getBearing(), pitchDeg: map.getPitch() }, shot, now);
+      this.rig.start(this.lastPlaced ?? { center: { latitude: c.lat, longitude: c.lng }, elevationM: map.getCenterElevation(), distanceM: mapMetres(from.distance), bearingDeg: map.getBearing(), pitchDeg: map.getPitch() }, shot, now);
     }
     // The rig eases the framing; a drag's peek goes on top, so the camera answers the pointer at once.
     const framed = peekPlacement(this.rig.step(shot, now), camera, this.peek.at(now));
     // The journey's own shot, where the flat map would stand: the 3D camera eases into it by the share.
-    const flat: EnRoutePlacement = { center: { latitude: slat, longitude: slon }, elevationM: mapShot.height, distanceM: mapShot.distance, bearingDeg: mapShot.azimuthDeg, pitchDeg: 90 - mapShot.elevationDeg };
-    const flatCam = orbitToMap({ azimuthDeg: flat.bearingDeg, elevationDeg: mapShot.elevationDeg, target: [0, 0], height: 0, distance: flat.distanceM }, flat.center, lens);
+    // The flat shot in MapLibre's metres (mapMetres), as the 3D camera's are, so at none of the share mapCamera gives the flat shot's zoom.
+    const flat: EnRoutePlacement = { center: { latitude: slat, longitude: slon }, elevationM: mapShot.height, distanceM: mapMetres(mapShot.distance), bearingDeg: mapShot.azimuthDeg, pitchDeg: 90 - mapShot.elevationDeg };
+    const flatCam = orbitToMap({ azimuthDeg: flat.bearingDeg, elevationDeg: mapShot.elevationDeg, target: [0, 0], height: 0, distance: mapShot.distance }, flat.center, lens);
     this.flatShot = { center: [flatCam.lng, flatCam.lat], zoom: flatCam.zoom, bearing: flatCam.bearing, pitch: flatCam.pitch };
     const eased = blendPlacement(flat, framed, shareBlend(share));
     this.lastPlaced = eased;
@@ -237,16 +238,16 @@ export class EnRouteController {
     const toModel = Math.hypot(east, north, pose.altitudeM - eye.altitudeM);
     const nearestM = camera === "cockpit" ? overGround : Math.min(toModel, overGround);
     const placed = sightPlacement({ ...eased, eye }, { groundM: ground, nearestM, fovDeg: lens.fovDeg });
-    const orbit: OrbitView = { azimuthDeg: placed.bearingDeg, elevationDeg: 90 - placed.pitchDeg, target: [0, 0], height: 0, distance: placed.distanceM };
-    const cam = orbitToMap(orbit, placed.center, lens);
     // The band's padding eases in with the 3D camera, so at none of it the map has its own and the flat shot never steps.
     const own = this.host.padding();
     const padding = band ? blendPadding(own, bandPadding({ width: container.clientWidth, height: container.clientHeight }, band), shareBlend(share)) : own;
-    this.host.place({ center: [cam.lng, cam.lat], zoom: cam.zoom, bearing: cam.bearing, pitch: cam.pitch, elevation: placed.elevationM, padding });
+    // In MapLibre's own metres (mapCamera), the ones sightPlacement moved the centre in and the model is drawn to.
+    this.host.place({ ...mapCamera(placed, lens), padding });
     // From the Cockpit the aircraft is the one the eye sits in: its model is not drawn, so a peek back never fills the view with it.
     this.layer?.setAircraft(camera === "cockpit" ? null : pose, aircraftClass.model, aircraftClass.lengthM);
     // The far ground's haze round the eye, in the theme's horizon colour (a look near level sees the ground to it).
-    this.layer?.setHaze({ eye, aboveM: overGround, colour: enRouteHaze(this.host.theme()), strength: hazeStrength(placed.pitchDeg) });
+    const theme = this.host.theme();
+    this.layer?.setHaze({ eye, aboveM: overGround, colour: enRouteHaze(theme), strength: hazeStrength(placed.pitchDeg), floorHeights: PALETTES[theme].hazeFloorHeights });
     // Satellite's large-scale imagery reaches as far as the haze is full (imageryTileZoom reads this each tile).
     this.imageryReach.metres = horizonM(overGround);
     this.imageryReach.metresPerUnit = MERCATOR_UNIT_M * Math.cos((eye.latitude * Math.PI) / 180);

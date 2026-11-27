@@ -30,14 +30,14 @@ export interface Lens {
 }
 
 /** MapLibre's tiles are 512 px, and its world is Web Mercator on the WGS84 equatorial radius. */
-const TILE = 512;
-const CIRCUMFERENCE = 2 * Math.PI * 6_378_137;
+export const TILE = 512;
+export const CIRCUMFERENCE = 2 * Math.PI * 6_378_137;
 const RAD = Math.PI / 180;
 
 const wrap180 = (deg: number) => wrap360(deg + 180) - 180;
 
 /** How far the camera stands from the point it looks at, in screen pixels. Both renderers place it here. */
-function cameraToCentrePx({ height, fovDeg }: Lens): number {
+export function cameraToCentrePx({ height, fovDeg }: Lens): number {
   return height / 2 / Math.tan((fovDeg * RAD) / 2);
 }
 

@@ -53,10 +53,23 @@ export interface MapPalette {
   modelBody: string;
   /** The En-route view's relief (its hillshade over the terrain): the slopes facing away from the light. */
   reliefShadow: string;
-  /** The slopes facing the light. */
+  /** The slopes facing the light, from 11,000 ft and lower (the map's zoom RELIEF_LOW_ZOOM and up). */
   reliefLight: string;
-  /** How strongly it shades (MapLibre's hillshade exaggeration, 0 to 1). */
+  /** The slopes facing the light from cruise heights (zoom RELIEF_CRUISE_ZOOM and down), blended from reliefLight between: Dark's lifts its relief out of the night there. */
+  reliefCruiseLight: string;
+  /** How strongly it shades (MapLibre's hillshade exaggeration, 0 to 1) from 11,000 ft and lower (the map's zoom RELIEF_LOW_ZOOM and up). */
   reliefStrength: number;
+  /** How strongly it shades from cruise heights (zoom RELIEF_CRUISE_ZOOM and down), where the relief faded at reliefStrength. */
+  reliefCruiseStrength: number;
+  /**
+   * The far ground's haze starts no nearer than this many of the eye's heights over the ground (hazeShells), so
+   * from cruise heights it sits as far below level as from 11,000 ft. There HAZE_START's share is 4.8 heights out
+   * from an eye 3.5 km over the ground and more from lower, so a floor of 4.8 leaves it as it was up to 11,600 ft
+   * over the ground. The horizon only grows as the root of the height: at FL400 the share alone started the haze
+   * 2.6 heights out, over every piece of ground a level look sees, and Dark's Cockpit was a near-black frame. None
+   * for Satellite, whose imagery shows its own ground and whose haze stays as it was (see imageryTileZoom).
+   */
+  hazeFloorHeights: number;
 }
 
 export const PALETTES: Record<ThemeKey, MapPalette> = {
@@ -86,7 +99,10 @@ export const PALETTES: Record<ThemeKey, MapPalette> = {
     // Subtle: the labels' warm grey in the shade, the paper lit.
     reliefShadow: "#7a7468",
     reliefLight: "#ffffff",
+    reliefCruiseLight: "#ffffff",
     reliefStrength: 0.35,
+    reliefCruiseStrength: 0.65,
+    hazeFloorHeights: 4.8,
   },
   // Night ops: the land the diorama's black, a deep navy sea, faint shores and borders, the cities lit.
   dark: {
@@ -111,10 +127,13 @@ export const PALETTES: Record<ThemeKey, MapPalette> = {
     chipText: "#f2f6fb",
     chipCount: "#6ff0a6",
     modelBody: "#c9ced8",
-    // Visible by night: black shade, the slopes lit in the shores' navy.
+    // Visible by night: black shade, the slopes lit in the shores' navy, and from cruise heights a moonlit blue.
     reliefShadow: "#000000",
     reliefLight: "#2a4468",
+    reliefCruiseLight: "#6a94d0",
     reliefStrength: 0.7,
+    reliefCruiseStrength: 1,
+    hazeFloorHeights: 4.8,
   },
   satellite: {
     water: "#2c4a63",
@@ -141,7 +160,10 @@ export const PALETTES: Record<ThemeKey, MapPalette> = {
     // The imagery shows its own relief: only a touch more.
     reliefShadow: "#000000",
     reliefLight: "#ffffff",
+    reliefCruiseLight: "#ffffff",
     reliefStrength: 0.15,
+    reliefCruiseStrength: 0.15,
+    hazeFloorHeights: 0,
   },
 };
 
@@ -361,14 +383,15 @@ export interface HazeShell {
 /**
  * The far ground's haze in a 3D camera, as spheres round the eye that the ground nearer than each hides
  * (the En-route layer draws them against the map's depth): for an eye `aboveM` over the ground, from a little
- * way out to full haze at the horizon (the distance to it over a round Earth, which the flat map does not
- * have), or just inside the map's far plane (`farM`) where the ground drawn ends first. The haze thickens
- * in equal steps, the last shell opaque.
+ * way out (HAZE_START of the way, and no nearer than `floorHeights` of the eye's heights: the theme's
+ * hazeFloorHeights) to full haze at the horizon (the distance to it over a round Earth, which the flat map
+ * does not have), or just inside the map's far plane (`farM`) where the ground drawn ends first. The haze
+ * thickens in equal steps, the last shell opaque.
  */
-export function hazeShells(aboveM: number, farM = Infinity): HazeShell[] {
+export function hazeShells(aboveM: number, floorHeights: number, farM = Infinity): HazeShell[] {
   if (!(aboveM > 0)) return [];
   const end = Math.min(horizonM(aboveM), farM * 0.98);
-  const start = HAZE_START * end;
+  const start = Math.min(end, Math.max(HAZE_START * end, floorHeights * aboveM));
   return Array.from({ length: HAZE_SHELLS }, (_, i) => {
     const share = (i + 1) / HAZE_SHELLS;
     return { distanceM: start + (end - start) * share ** (1 / HAZE_RISE), opacity: share };
@@ -438,14 +461,36 @@ export function mapBackground(key: ThemeKey, terrain = false): string {
 export const HILLSHADE = "hillshade";
 export const HILLSHADE_UNDER = "water";
 
-/** The relief of the En-route view's terrain, shaded from the same Terrarium source in the theme's colours: subtle by day, plainer by night. Under everything else drawn. */
+/**
+ * The map's zooms the relief's strength runs between. In a 3D camera the map's zoom is the eye's height over the
+ * ground (sightPlacement takes the centre that far out): about 15.2 to 15.6 at 11,000 ft and 13.3 to 13.7 at FL400,
+ * by the screen's height. From higher up (a lower zoom, so coarser terrain tiles) the relief faded, Dark's most
+ * (ADR 0002 has the measures): so it shades harder as the zoom falls, and as it was from 11,000 ft down.
+ */
+export const RELIEF_CRUISE_ZOOM = 13;
+export const RELIEF_LOW_ZOOM = 15;
+
+/** How strongly the relief shades at the map's `zoom`: the theme's reliefStrength from RELIEF_LOW_ZOOM up, its reliefCruiseStrength from RELIEF_CRUISE_ZOOM down, in a line between (the hillshade layer's own expression). */
+export function reliefStrength(key: ThemeKey, zoom: number): number {
+  const p = PALETTES[key];
+  const t = Math.min(1, Math.max(0, (RELIEF_LOW_ZOOM - zoom) / (RELIEF_LOW_ZOOM - RELIEF_CRUISE_ZOOM)));
+  return p.reliefStrength + (p.reliefCruiseStrength - p.reliefStrength) * t;
+}
+
+/**
+ * The relief of the En-route view's terrain, shaded from the same Terrarium source in the theme's colours:
+ * subtle by day, plainer by night, harder from cruise heights (reliefStrength) and, by night, lit brighter there
+ * (reliefCruiseLight), both on the same zooms. Under everything else drawn.
+ */
 export function hillshadeLayer(key: ThemeKey): LayerSpecification {
   const p = PALETTES[key];
+  const ramp = (cruise: number | string, low: number | string): ExpressionSpecification => ["interpolate", ["linear"], ["zoom"], RELIEF_CRUISE_ZOOM, cruise, RELIEF_LOW_ZOOM, low];
+  const strength = ramp(reliefStrength(key, RELIEF_CRUISE_ZOOM), reliefStrength(key, RELIEF_LOW_ZOOM));
   return {
     id: HILLSHADE,
     type: "hillshade",
     source: TERRAIN_SOURCE,
-    paint: { "hillshade-shadow-color": p.reliefShadow, "hillshade-accent-color": p.reliefShadow, "hillshade-highlight-color": p.reliefLight, "hillshade-exaggeration": p.reliefStrength },
+    paint: { "hillshade-shadow-color": p.reliefShadow, "hillshade-accent-color": p.reliefShadow, "hillshade-highlight-color": ramp(p.reliefCruiseLight, p.reliefLight), "hillshade-exaggeration": strength },
   };
 }
 
